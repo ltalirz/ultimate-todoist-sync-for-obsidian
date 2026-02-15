@@ -17,8 +17,24 @@
 - Added conflict detection and resolution for rebuild cache (`src/conflictModal.ts`)
   - Interactive modal for resolving content and status conflicts
   - Options: keep Obsidian, keep Todoist, or skip
-- Added comprehensive `checkDatabase` function
-  - Detects 9 types of issues: missing files, missing metadata, orphaned tasks, duplicate tasks, invalid task IDs, content mismatches, status mismatches, empty metadata, and tasks in files but not in cache
+- Added comprehensive `checkDatabase` function with 3-way data comparison
+  - **Three data sources**: Vault files, local Cache, and Todoist API
+  - **16 types of issue detection**:
+    - `task_deleted_in_todoist`: Task exists in Vault and Cache but deleted in Todoist
+    - `missing_in_cache`: Task exists in Vault and Todoist but not in local cache
+    - `new_task_not_synced`: Task in Vault not synced to Todoist and not in cache
+    - `file_reference_missing`: Task in Cache and Todoist but Vault file reference missing
+    - `orphaned_in_cache`: Task in Cache but not in Vault and deleted in Todoist
+    - `task_not_in_vault`: Task in Todoist but not in any Vault file
+    - `content_mismatch`: Content differs between Vault and Todoist
+    - `cache_content_outdated`: Cache content is outdated compared to Todoist
+    - `status_mismatch`: Completion status differs between Vault and Todoist
+    - `cache_status_outdated`: Cache status is outdated compared to Todoist
+    - `duedate_mismatch`: Due date differs between Cache and Todoist
+    - `duplicate_task`: Same task ID appears in multiple files
+    - `priority_mismatch`: Priority differs between Cache and Todoist
+    - `label_mismatch`: Labels differ between Vault and Todoist
+    - `project_mismatch`: Project differs between Cache and Todoist
   - Generates detailed markdown report with task information (ID, content, file, line, due date, priority, status)
   - Report saved to `.todoist-reports/` folder
 
