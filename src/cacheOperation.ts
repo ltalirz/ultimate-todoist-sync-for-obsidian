@@ -12,6 +12,16 @@ export interface DatabaseCheckIssue {
     filePath?: string;
     taskId?: string;
     details: string;
+    taskContent?: string;
+    obsidianContent?: string;
+    todoistContent?: string;
+    obsidianStatus?: boolean;
+    todoistStatus?: boolean;
+    dueDate?: string;
+    priority?: number;
+    projectId?: string;
+    projectName?: string;
+    lineNumber?: number;
 }
 
 export interface DatabaseCheckResult {
@@ -827,11 +837,16 @@ export class CacheOperation   {
                 for (const taskId of metadata.todoistTasks) {
                     if (taskIdsInFiles.has(taskId)) {
                         const existing = taskIdsInFiles.get(taskId)!;
+                        const cachedTask = tasks.find(t => t.id === taskId);
                         issues.push({
                             type: 'duplicate_task',
                             filePath,
                             taskId,
-                            details: `Task ${taskId} appears in multiple files: "${existing.filePath}" and "${filePath}"`
+                            details: `Task "${cachedTask?.content || taskId}" appears in multiple files: "${existing.filePath}" and "${filePath}"`,
+                            taskContent: cachedTask?.content,
+                            projectId: cachedTask?.projectId,
+                            dueDate: cachedTask?.due?.date,
+                            priority: cachedTask?.priority
                         });
                         summary.duplicateTasks++;
                     }
@@ -840,11 +855,16 @@ export class CacheOperation   {
 
                     const lineWithTask = lines.findIndex(line => line.includes(`%%[todoist_id:: ${taskId}]%%`) || line.includes(`%%[todoist_id::${taskId}]%%`));
                     if (lineWithTask === -1) {
+                        const cachedTask = tasks.find(t => t.id === taskId);
                         issues.push({
                             type: 'missing_metadata',
                             filePath,
                             taskId,
-                            details: `Task ${taskId} in metadata but not found in file "${filePath}"`
+                            details: `Task "${cachedTask?.content || taskId}" in metadata but not found in file "${filePath}"`,
+                            taskContent: cachedTask?.content,
+                            projectId: cachedTask?.projectId,
+                            dueDate: cachedTask?.due?.date,
+                            priority: cachedTask?.priority
                         });
                         summary.missingMetadata++;
                     } else {
@@ -870,11 +890,16 @@ export class CacheOperation   {
                             if (match && match[1]) {
                                 const taskId = match[1];
                                 if (!taskIdsInCache.has(taskId)) {
+                                    const taskContent = this.extractTaskContent(line);
+                                    const isCompleted = /\[x\]/i.test(line);
                                     issues.push({
                                         type: 'missing_in_cache',
                                         filePath: file.path,
                                         taskId,
-                                        details: `Task ${taskId} exists in file "${file.path}" but not in cache`
+                                        lineNumber: i,
+                                        details: `Task "${taskContent}" in file "${file.path}" (line ${i + 1}) is not in cache`,
+                                        taskContent,
+                                        obsidianStatus: isCompleted
                                     });
                                     summary.missingInCache++;
                                 }
@@ -891,10 +916,17 @@ export class CacheOperation   {
                 taskIdsInCache.add(taskId);
 
                 if (!taskIdsInFiles.has(taskId)) {
+                    const projectName = this.getProjectNameByIdFromCache(task.projectId);
                     issues.push({
                         type: 'orphaned_task',
                         taskId,
-                        details: `Task ${taskId} exists in cache but not in any file metadata`
+                        details: `Task "${task.content}" exists in cache but not in any file metadata`,
+                        taskContent: task.content,
+                        filePath: task.path,
+                        dueDate: task.due?.date,
+                        priority: task.priority,
+                        projectId: task.projectId,
+                        projectName: projectName || undefined
                     });
                     summary.orphanedTasks++;
                 }
@@ -911,11 +943,17 @@ export class CacheOperation   {
 
                 const file = this.app.vault.getAbstractFileByPath(task.path);
                 if (!file) {
+                    const projectName = this.getProjectNameByIdFromCache(task.projectId);
                     issues.push({
                         type: 'missing_file',
                         filePath: task.path,
                         taskId,
-                        details: `Task ${taskId} references missing file "${task.path}"`
+                        details: `Task "${task.content}" references missing file "${task.path}"`,
+                        taskContent: task.content,
+                        dueDate: task.due?.date,
+                        priority: task.priority,
+                        projectId: task.projectId,
+                        projectName: projectName || undefined
                     });
                     summary.missingFiles++;
                     continue;
@@ -927,7 +965,11 @@ export class CacheOperation   {
                         issues.push({
                             type: 'invalid_task_id',
                             taskId,
-                            details: `Task ${taskId} not found in Todoist`
+                            details: `Task "${task.content}" (ID: ${taskId}) not found in Todoist`,
+                            taskContent: task.content,
+                            filePath: task.path,
+                            dueDate: task.due?.date,
+                            priority: task.priority
                         });
                         summary.invalidTaskIds++;
                         continue;
@@ -947,7 +989,12 @@ export class CacheOperation   {
                                 type: 'content_mismatch',
                                 filePath: task.path,
                                 taskId,
-                                details: `Task ${taskId} content differs between Obsidian and Todoist`
+                                lineNumber: fileTaskInfo.lineNumber,
+                                details: `Task content mismatch for "${todoistContent.substring(0, 50)}${todoistContent.length > 50 ? '...' : ''}"`,
+                                obsidianContent: obsidianContent.substring(0, 100),
+                                todoistContent: todoistContent.substring(0, 100),
+                                dueDate: todoistTask.due?.date,
+                                priority: todoistTask.priority
                             });
                             summary.contentMismatches++;
                         }
@@ -960,7 +1007,13 @@ export class CacheOperation   {
                                 type: 'status_mismatch',
                                 filePath: task.path,
                                 taskId,
-                                details: `Task ${taskId} completion status differs between Obsidian (${obsidianCompleted}) and Todoist (${todoistCompleted})`
+                                lineNumber: fileTaskInfo.lineNumber,
+                                details: `Task completion status differs: Obsidian is ${obsidianCompleted ? 'completed' : 'incomplete'}, Todoist is ${todoistCompleted ? 'completed' : 'incomplete'}`,
+                                obsidianStatus: obsidianCompleted,
+                                todoistStatus: todoistCompleted,
+                                taskContent: todoistTask.content,
+                                dueDate: todoistTask.due?.date,
+                                priority: todoistTask.priority
                             });
                             summary.statusMismatches++;
                         }
@@ -1074,13 +1127,54 @@ Generated: ${new Date().toLocaleString()}
                 'missing_in_cache': 'Missing in Cache'
             };
 
+            const priorityLabels: Record<number, string> = {
+                1: 'Low',
+                2: 'Medium',
+                3: 'High',
+                4: 'Urgent'
+            };
+
             for (const [type, issues] of groupedByType) {
                 markdown += `### ${typeLabels[type] || type}\n\n`;
-                for (const issue of issues) {
-                    markdown += `- **${issue.type}**`;
-                    if (issue.taskId) markdown += ` (Task: \`${issue.taskId}\`)`;
-                    if (issue.filePath) markdown += `\n  - File: \`${issue.filePath}\``;
-                    markdown += `\n  - Details: ${issue.details}\n\n`;
+                markdown += `| # | Task ID | Content | File | Line | Due Date | Priority | Status | Details |\n`;
+                markdown += `|---|---------|---------|------|------|----------|----------|--------|--------|\n`;
+                
+                for (let i = 0; i < issues.length; i++) {
+                    const issue = issues[i];
+                    const taskContent = issue.taskContent?.substring(0, 40) || issue.obsidianContent?.substring(0, 40) || '-';
+                    const filePath = issue.filePath || '-';
+                    const lineNum = issue.lineNumber !== undefined ? String(issue.lineNumber + 1) : '-';
+                    const dueDate = issue.dueDate || '-';
+                    const priority = issue.priority ? priorityLabels[issue.priority] || String(issue.priority) : '-';
+                    
+                    let status = '-';
+                    if (issue.obsidianStatus !== undefined || issue.todoistStatus !== undefined) {
+                        const obs = issue.obsidianStatus ? '✅' : '⬜';
+                        const todo = issue.todoistStatus ? '✅' : '⬜';
+                        status = `Obs:${obs} Todo:${todo}`;
+                    }
+
+                    const details = issue.details.substring(0, 60);
+                    
+                    markdown += `| ${i + 1} | \`${issue.taskId || '-'}\` | ${taskContent} | ${filePath.split('/').pop() || '-'} | ${lineNum} | ${dueDate} | ${priority} | ${status} | ${details} |\n`;
+                }
+                markdown += '\n';
+
+                if (type === 'content_mismatch' || type === 'status_mismatch') {
+                    markdown += `#### Detailed Comparison\n\n`;
+                    for (let i = 0; i < issues.length; i++) {
+                        const issue = issues[i];
+                        if (issue.obsidianContent || issue.todoistContent) {
+                            markdown += `**Issue ${i + 1}:** \`${issue.taskId}\`\n`;
+                            if (issue.obsidianContent) {
+                                markdown += `- **Obsidian:** ${issue.obsidianContent}\n`;
+                            }
+                            if (issue.todoistContent) {
+                                markdown += `- **Todoist:** ${issue.todoistContent}\n`;
+                            }
+                            markdown += '\n';
+                        }
+                    }
                 }
             }
         }
