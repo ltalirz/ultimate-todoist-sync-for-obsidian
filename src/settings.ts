@@ -276,15 +276,20 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 						new Notice(`Database check passed! No issues found.`);
 					}else{
 						let message = `Found ${result.totalIssues} issues:\n`;
-						message += `- ${result.summary.missingFiles} missing files\n`;
-						message += `- ${result.summary.missingMetadata} missing metadata\n`;
-						message += `- ${result.summary.orphanedTasks} orphaned tasks\n`;
-						message += `- ${result.summary.duplicateTasks} duplicate tasks\n`;
-						message += `- ${result.summary.invalidTaskIds} invalid task IDs\n`;
-						message += `- ${result.summary.contentMismatches} content mismatches\n`;
-						message += `- ${result.summary.statusMismatches} status mismatches\n`;
-						message += `- ${result.summary.emptyMetadata} empty metadata\n`;
-						message += `- ${result.summary.missingInCache} tasks in files but not in cache\n\n`;
+						message += `- ${result.summary.taskDeletedInTodoist} deleted in Todoist\n`;
+						message += `- ${result.summary.missingInCache} missing in cache\n`;
+						message += `- ${result.summary.newTaskNotSynced} not synced\n`;
+						message += `- ${result.summary.fileReferenceMissing} file reference missing\n`;
+						message += `- ${result.summary.orphanedInCache} orphaned in cache\n`;
+						message += `- ${result.summary.taskNotInVault} not in vault\n`;
+						message += `- ${result.summary.contentMismatch} content mismatch\n`;
+						message += `- ${result.summary.cacheContentOutdated} cache content outdated\n`;
+						message += `- ${result.summary.statusMismatch} status mismatch\n`;
+						message += `- ${result.summary.cacheStatusOutdated} cache status outdated\n`;
+						message += `- ${result.summary.duedateMismatch} due date mismatch\n`;
+						message += `- ${result.summary.duplicateTask} duplicate tasks\n`;
+						message += `- ${result.summary.priorityMismatch} priority mismatch\n`;
+						message += `- ${result.summary.projectMismatch} project mismatch\n\n`;
 
 						if (result.reportPath) {
 							message += `Report saved to: ${result.reportPath}`;
