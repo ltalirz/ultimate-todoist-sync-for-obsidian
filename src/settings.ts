@@ -208,6 +208,35 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 				}
 
 			})
+		);
+
+		new Setting(containerEl)
+		.setName('Rebuild Cache')
+		.setDesc('Scan the vault and Todoist to rebuild the task cache. Use this if your cache is corrupted or lost.')
+		.addButton(button => button
+			.setButtonText('Rebuild')
+			.onClick(async () => {
+				if(!this.plugin.settings.apiInitialized){
+					new Notice(`Please set the todoist api first`)
+					return
+				}
+				
+				const rebuildNotice = new Notice('Starting cache rebuild...', 0);
+				
+				try{
+					const result = await this.plugin.cacheOperation.rebuildCache((message: string) => {
+						rebuildNotice.setMessage(message);
+					});
+					
+					if(result.success){
+						new Notice(`Cache rebuilt successfully! ${result.tasksProcessed} tasks processed.`);
+					}else{
+						new Notice(`Cache rebuild failed!`);
+					}
+				}catch(error){
+					new Notice(`Cache rebuild failed: ${error.message}`);
+				}
+			})
 		);				
 
 

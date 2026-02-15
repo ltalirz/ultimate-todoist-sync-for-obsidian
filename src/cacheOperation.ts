@@ -470,4 +470,138 @@ export class CacheOperation   {
 
     }
 
+    async rebuildCache(noticeCallback?: (message: string) => void): Promise<{ success: boolean; tasksProcessed: number }> {
+        try {
+            if (noticeCallback) {
+                noticeCallback('Starting cache rebuild...');
+            } else {
+                console.log('Starting cache rebuild...');
+            }
+
+            // Step 1: 清空现有缓存
+            this.plugin.settings.todoistTasksData = {
+                projects: [],
+                tasks: [],
+                events: []
+            };
+            this.plugin.settings.fileMetadata = {};
+
+            // Step 2: 从 Todoist 获取项目列表
+            if (noticeCallback) {
+                noticeCallback('Fetching projects from Todoist...');
+            } else {
+                console.log('Fetching projects from Todoist...');
+            }
+            const projects = await this.plugin.todoistRestAPI.GetAllProjects();
+            if (!projects) {
+                throw new Error('Failed to fetch projects from Todoist');
+            }
+            this.plugin.settings.todoistTasksData.projects = projects;
+
+            // Step 3: 扫描 Vault 中的所有 .md 文件
+            if (noticeCallback) {
+                noticeCallback('Scanning vault for tasks...');
+            } else {
+                console.log('Scanning vault for tasks...');
+            }
+            
+            const files = this.app.vault.getFiles()
+                .filter(f => f.extension === 'md');
+            
+            const fileTaskMap: Map<string, string[]> = new Map();
+            
+            for (const file of files) {
+                try {
+                    const content = await this.app.vault.cachedRead(file);
+                    const lines = content.split('\n');
+                    const taskIds: string[] = [];
+                    
+                    for (const line of lines) {
+                        // 检查是否包含 #todoist 标签
+                        if (line.includes('#todoist')) {
+                            // 提取 todoist_id: %%[todoist_id:: xxx]%%
+                            const match = line.match(/%%\[todoist_id::\s*(\w+)\]%%/);
+                            if (match && match[1]) {
+                                taskIds.push(match[1]);
+                            }
+                        }
+                    }
+                    
+                    if (taskIds.length > 0) {
+                        fileTaskMap.set(file.path, taskIds);
+                    }
+                } catch (error) {
+                    console.error(`Error reading file ${file.path}:`, error);
+                }
+            }
+
+            // Step 4: 处理每个文件的任务
+            if (noticeCallback) {
+                noticeCallback('Processing tasks...');
+            } else {
+                console.log('Processing tasks...');
+            }
+            
+            let processedCount = 0;
+            const totalTasks = Array.from(fileTaskMap.values())
+                .reduce((sum, ids) => sum + ids.length, 0);
+            
+            for (const [filePath, taskIds] of fileTaskMap.entries()) {
+                const validTaskIds: string[] = [];
+                
+                for (const taskId of taskIds) {
+                    try {
+                        // 从 Todoist 获取任务详情
+                        const task = await this.plugin.todoistRestAPI.getTaskById(taskId);
+                        
+                        // 添加 path 字段关联到文件
+                        (task as any).path = filePath;
+                        
+                        // 保存到缓存
+                        this.appendTaskToCache(task);
+                        
+                        validTaskIds.push(taskId);
+                        processedCount++;
+                        
+                        // 每处理 10 个任务更新一次 UI
+                        if (noticeCallback && processedCount % 10 === 0) {
+                            noticeCallback(`Processing ${processedCount}/${totalTasks}...`);
+                        }
+                    } catch (error) {
+                        // 任务在 Todoist 中不存在，跳过
+                        console.log(`Task ${taskId} not found in Todoist, skipping...`);
+                    }
+                }
+                
+                // 更新 fileMetadata
+                if (validTaskIds.length > 0) {
+                    this.plugin.settings.fileMetadata[filePath] = {
+                        todoistTasks: validTaskIds,
+                        todoistCount: validTaskIds.length
+                    };
+                }
+            }
+
+            // Step 5: 保存设置
+            await this.plugin.saveSettings();
+            
+            const message = `Cache rebuilt! ${processedCount} tasks processed.`;
+            if (noticeCallback) {
+                noticeCallback(message);
+            } else {
+                console.log(message);
+            }
+            
+            return { success: true, tasksProcessed: processedCount };
+            
+        } catch (error) {
+            console.error('Cache rebuild failed:', error);
+            const message = `Cache rebuild failed: ${error.message}`;
+            if (noticeCallback) {
+                noticeCallback(message);
+            }
+            return { success: false, tasksProcessed: 0 };
+        }
+    }
+
 }
