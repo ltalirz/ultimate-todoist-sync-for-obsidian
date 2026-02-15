@@ -32,7 +32,7 @@ export class TodoistSyncAPI   {
     //backup todoist
     async getAllResources() { 
     const accessToken = this.plugin.settings.todoistAPIToken
-    const url = 'https://api.todoist.com/sync/v9/sync';
+    const url = 'https://api.todoist.com/api/v1/sync';
     const options = {
       method: 'POST',
       headers: {
@@ -64,7 +64,7 @@ export class TodoistSyncAPI   {
     //backup todoist
     async getUserResource() { 
       const accessToken = this.plugin.settings.todoistAPIToken
-      const url = 'https://api.todoist.com/sync/v9/sync';
+      const url = 'https://api.todoist.com/api/v1/sync';
       const options = {
         method: 'POST',
         headers: {
@@ -99,7 +99,7 @@ export class TodoistSyncAPI   {
       async updateUserTimezone() { 
         const unixTimestampString: string = Math.floor(Date.now() / 1000).toString();
         const accessToken = this.plugin.settings.todoistAPIToken
-        const url = 'https://api.todoist.com/sync/v9/sync';
+        const url = 'https://api.todoist.com/api/v1/sync';
         const commands = [
           {
             'type': "user_update",
@@ -133,7 +133,7 @@ export class TodoistSyncAPI   {
         }
   
     //get activity logs
-    //result  {count:number,events:[]}
+    //result  {results:[],next_cursor:null}
     async getAllActivityEvents() {
     const accessToken = this.plugin.settings.todoistAPIToken
       const headers = new Headers({
@@ -141,10 +141,9 @@ export class TodoistSyncAPI   {
       });
     
       try {
-        const response = await fetch('https://api.todoist.com/sync/v9/activity/get', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({})
+        const response = await fetch('https://api.todoist.com/api/v1/activities', {
+          method: 'GET',
+          headers
         });
     
         if (!response.ok) {
@@ -153,7 +152,9 @@ export class TodoistSyncAPI   {
     
         const data = await response.json();
     
-        return data;
+        // API v1 返回格式: { results: [], next_cursor: null }
+        // 转换为旧格式: { events: [] }
+        return { events: data.results || [] };
       } catch (error) {
         throw error;
       }
@@ -188,24 +189,18 @@ export class TodoistSyncAPI   {
     };
 
     //get completed items activity
-    //result  {count:number,events:[]}
+    //result  {results:[],next_cursor:null}
     async getCompletedItemsActivity() {
         const accessToken = this.plugin.settings.todoistAPIToken
-        const url = 'https://api.todoist.com/sync/v9/activity/get';
-        const options = {
-            method: 'POST',
-            headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            body: new URLSearchParams({
-            'object_type': 'item',
-            'event_type': 'completed'
-            })
-        };
+        const url = 'https://api.todoist.com/api/v1/activities?event_type=completed';
         
         try {
-            const response = await fetch(url, options);
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                'Authorization': `Bearer ${accessToken}`
+                }
+            });
         
             if (!response.ok) {
             throw new Error(`Failed to fetch completed items: ${response.status} ${response.statusText}`);
@@ -213,7 +208,9 @@ export class TodoistSyncAPI   {
         
             const data = await response.json();
         
-            return data;
+            // API v1 返回格式: { results: [], next_cursor: null }
+            // 转换为旧格式: { events: [] }
+            return { events: data.results || [] };
         } catch (error) {
             console.error(error);
             throw new Error('Failed to fetch completed items due to network error');
@@ -223,35 +220,31 @@ export class TodoistSyncAPI   {
   
   
     //get uncompleted items activity
-    //result  {count:number,events:[]}
+    //result  {results:[],next_cursor:null}
     async getUncompletedItemsActivity() {
         const accessToken = this.plugin.settings.todoistAPIToken
-        const url = 'https://api.todoist.com/sync/v9/activity/get';
-        const options = {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: new URLSearchParams({
-            'object_type': 'item',
-            'event_type': 'uncompleted'
-        })
-        };
+        const url = 'https://api.todoist.com/api/v1/activities?event_type=uncompleted';
     
         try {
-        const response = await fetch(url, options);
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                'Authorization': `Bearer ${accessToken}`
+                }
+            });
     
-        if (!response.ok) {
-            throw new Error(`Failed to fetch uncompleted items: ${response.status} ${response.statusText}`);
-        }
+            if (!response.ok) {
+                throw new Error(`Failed to fetch uncompleted items: ${response.status} ${response.statusText}`);
+            }
     
-        const data = await response.json();
+            const data = await response.json();
     
-        return data;
+            // API v1 返回格式: { results: [], next_cursor: null }
+            // 转换为旧格式: { events: [] }
+            return { events: data.results || [] };
         } catch (error) {
-        console.error(error);
-        throw new Error('Failed to fetch uncompleted items due to network error');
+            console.error(error);
+            throw new Error('Failed to fetch uncompleted items due to network error');
         }
     }
   
@@ -262,51 +255,53 @@ export class TodoistSyncAPI   {
         const completedItemsActivity = await this.getCompletedItemsActivity()
         const completedItemsActivityEvents = completedItemsActivity.events
         //client中不包含obsidian 的activity
-        const filteredArray = completedItemsActivityEvents.filter(obj => !obj.extra_data.client.includes("obsidian")); 
+        const filteredArray = completedItemsActivityEvents.filter(obj => {
+            const client = obj.extra_data && obj.extra_data.client;
+            return !client || !client.includes("obsidian");
+        }); 
         return(filteredArray)     
     }
   
   
     //get non-obsidian uncompleted event
-    async  getNonObsidianUncompletedItemsActivity() {
+    async getNonObsidianUncompletedItemsActivity() {
         const uncompletedItemsActivity = await this.getUncompletedItemsActivity()
         const uncompletedItemsActivityEvents = uncompletedItemsActivity.events
         //client中不包含obsidian 的activity
-        const filteredArray = uncompletedItemsActivityEvents.filter(obj => !obj.extra_data.client.includes("obsidian")); 
+        const filteredArray = uncompletedItemsActivityEvents.filter(obj => {
+            const client = obj.extra_data && obj.extra_data.client;
+            return !client || !client.includes("obsidian");
+        }); 
         return(filteredArray) 
     }
   
   
     //get updated items activity
-    //result  {count:number,events:[]}
-    async  getUpdatedItemsActivity() {
+    //result  {results:[],next_cursor:null}
+    async getUpdatedItemsActivity() {
         const accessToken = this.plugin.settings.todoistAPIToken
-        const url = 'https://api.todoist.com/sync/v9/activity/get';
-        const options = {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: new URLSearchParams({
-            'object_type': 'item',
-            'event_type': 'updated'
-        })
-        };
+        const url = 'https://api.todoist.com/api/v1/activities?event_type=updated';
     
         try {
-        const response = await fetch(url, options);
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                'Authorization': `Bearer ${accessToken}`
+                }
+            });
     
-        if (!response.ok) {
-            throw new Error(`Failed to fetch updated items: ${response.status} ${response.statusText}`);
-        }
+            if (!response.ok) {
+                throw new Error(`Failed to fetch updated items: ${response.status} ${response.statusText}`);
+            }
     
-        const data = await response.json();
-        //console.log(data)
-        return data;
+            const data = await response.json();
+    
+            // API v1 返回格式: { results: [], next_cursor: null }
+            // 转换为旧格式: { events: [] }
+            return { events: data.results || [] };
         } catch (error) {
-        console.error(error);
-        throw new Error('Failed to fetch updated items due to network error');
+            console.error(error);
+            throw new Error('Failed to fetch updated items due to network error');
         }
     }
   
@@ -324,32 +319,29 @@ export class TodoistSyncAPI   {
     }
 
 
-        //get completed items activity
-    //result  {count:number,events:[]}
+    //get projects activity
+    //result  {results:[],next_cursor:null}
     async getProjectsActivity() {
       const accessToken = this.plugin.settings.todoistAPIToken
-      const url = 'https://api.todoist.com/sync/v9/activity/get';
-      const options = {
-          method: 'POST',
-          headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/x-www-form-urlencoded'
-          },
-          body: new URLSearchParams({
-          'object_type': 'project'
-          })
-      };
+      const url = 'https://api.todoist.com/api/v1/activities?object_type=project';
       
       try {
-          const response = await fetch(url, options);
+          const response = await fetch(url, {
+              method: 'GET',
+              headers: {
+              'Authorization': `Bearer ${accessToken}`
+              }
+          });
       
           if (!response.ok) {
-          throw new Error(`Failed to fetch  projects activities: ${response.status} ${response.statusText}`);
+            throw new Error(`Failed to fetch projects activities: ${response.status} ${response.statusText}`);
           }
       
           const data = await response.json();
       
-          return data;
+          // API v1 返回格式: { results: [], next_cursor: null }
+          // 转换为旧格式: { events: [] }
+          return { events: data.results || [] };
       } catch (error) {
           console.error(error);
           throw new Error('Failed to fetch projects activities due to network error');
