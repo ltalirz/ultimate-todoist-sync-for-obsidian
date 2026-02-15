@@ -47,9 +47,6 @@ export class SetDefalutProjectInTheFilepathModal extends Modal {
                 .addOptions(myProjectsOptions)
                 .onChange((value)=>{
                     console.log(`project id  is ${value}`)
-                    //this.plugin.settings.defaultProjectId = this.result
-                    //this.plugin.settings.defaultProjectName = this.plugin.cacheOperation.getProjectNameByIdFromCache(this.result)
-                    //this.plugin.saveSettings()
                     this.plugin.cacheOperation.setDefaultProjectIdForFilepath(this.filepath,value)
                     this.plugin.setStatusBarText()
                     this.close();

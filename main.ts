@@ -1,4 +1,4 @@
-import { MarkdownView, Notice, Plugin ,Editor, WorkspaceLeaf} from 'obsidian';
+import { MarkdownView, Notice, Plugin, Editor } from 'obsidian';
 
 
 //settings
@@ -78,8 +78,6 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				(console.log(`editor is not focused`))
 				return
 			}
-			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-			const editor = view?.app.workspace.activeEditor?.editor
 	
 			if (evt.key === 'ArrowUp' || evt.key === 'ArrowDown' || evt.key === 'ArrowLeft' || evt.key === 'ArrowRight' ||evt.key === 'PageUp' || evt.key === 'PageDown') {
 				//console.log(`${evt.key} arrow key is released`);
@@ -115,8 +113,6 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			//console.log('click', evt);
 			if (this.app.workspace.activeEditor?.editor?.hasFocus()) {
 				//console.log('Click event: editor is focused');
-				const view = this.app.workspace.getActiveViewOfType(MarkdownView)
-				const editor = this.app.workspace.activeEditor?.editor
 				this.lineNumberCheck()
 			}
 			else{
@@ -355,6 +351,8 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			this.cacheOperation = undefined
 			this.fileOperation = undefined
 			this.todoistSync = undefined
+			this.logOperation = undefined
+			this.backupOperation = undefined
 			new Notice(`Ultimate Todoist Sync plugin initialization failed, please check the todoist api`)
 			return;		
 		}
@@ -363,19 +361,9 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 
 			//创建备份文件夹备份todoist 数据
 			try{
-				//第一次启动插件，备份todoist 数据
-				this.taskParser = new TaskParser(this.app, this)
-
-				//initialize file operation
-				this.fileOperation = new FileOperation(this.app,this)
-		
-				//initialize todoisy sync api
-				this.todoistSyncAPI = new TodoistSyncAPI(this.app,this)
-		
-				//initialize todoist sync module
-				this.todoistSync = new TodoistSync(this.app,this)
-		
 				//每次启动前备份所有数据
+				// Note: Initialize module class first to enable backupOperation
+				this.initializeModuleClass();
 				this.todoistSync.backupTodoistAllResources()
 
 			}catch(error){
@@ -390,10 +378,10 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			this.saveSettings()
 			new Notice(`Ultimate Todoist Sync initialization successful. Todoist data has been backed up.`)
 
+		} else {
+			// Already initialized, just initialize the module class
+			this.initializeModuleClass();
 		}
-
-
-		this.initializeModuleClass()
 
 		
 		//get user plan resources
