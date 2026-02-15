@@ -12,6 +12,8 @@ import { TaskParser } from './src/taskParser';
 import { CacheOperation } from './src/cacheOperation';
 //file operation
 import { FileOperation } from './src/fileOperation';
+//log operation
+import { LogOperation } from './src/logOperation';
 
 //sync module
 import { TodoistSync } from './src/syncModule';
@@ -28,6 +30,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
     cacheOperation: CacheOperation | undefined;
     fileOperation: FileOperation | undefined;
     todoistSync: TodoistSync | undefined;
+    logOperation: LogOperation | undefined;
 	lastLines: Map<string,number>;
 	statusBar;
 	syncLock: Boolean;
@@ -213,6 +216,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				}
 			await this.cacheOperation.updateRenamedFilePath(oldpath,file.path)
 			this.saveSettings()
+			this.logOperation?.log('FILE_RENAMED', `File renamed from ${oldpath} to ${file.path}`, file.path);
 			
 			//update task description
 			if (!await this.checkAndHandleSyncLock()) return;
@@ -250,6 +254,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				
 				await this.todoistSync.fullTextNewTaskCheck(filepath)
 				this.syncLock = false;
+				this.logOperation?.log('FILE_MODIFIED', `File modified: ${filepath}`, filepath);
 			} catch(error) {
 				console.error(`An error occurred while modifying the file: ${error.message}`);
 				this.syncLock = false
@@ -329,6 +334,9 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		//initialize todoist restapi 
 		this.todoistRestAPI = new TodoistRestAPI(this.app, this)
 
+		//initialize log operation
+		this.logOperation = new LogOperation(this.app, this)
+
 		//initialize data read and write object
 		this.cacheOperation = new CacheOperation(this.app, this)
 		const isProjectsSaved = await this.cacheOperation.saveProjectsToCache()
@@ -389,6 +397,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		this.settings.apiInitialized = true
 		this.syncLock = false
 		new Notice(`Ultimate Todoist Sync loaded successfully.`)
+		this.logOperation?.log('PLUGIN_INITIALIZED', 'Plugin initialized successfully');
 		return true
 		
 

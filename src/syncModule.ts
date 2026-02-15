@@ -1,5 +1,6 @@
 import UltimateTodoistSyncForObsidian from "../main";
 import { App, Editor, MarkdownView, Notice} from 'obsidian';
+import { LogAction } from './logOperation';
 
 
 type FrontMatter = {
@@ -75,6 +76,8 @@ export class TodoistSync  {
               if (response) {
                 //console.log(`task ${taskId} 删除成功`);
                 new Notice(`task ${taskId} is deleted`)
+                //记录日志
+                this.plugin.logOperation?.log('OBSIDIAN_TASK_DELETED', `Deleted task: ${taskId}`, undefined, taskId);
                 return taskId; // 返回被删除的任务 ID
               }
             } catch (error) {
@@ -141,6 +144,9 @@ export class TodoistSync  {
                 newTask.path = filepath;
                 //console.log(newTask);
                 new Notice(`new task ${newTask.content} id is ${newTask.id}`)
+                //记录日志
+                this.plugin.logOperation?.log('OBSIDIAN_TASK_CREATED', `Created task in Obsidian: ${newTask.content}`, filepath, todoist_id);
+                this.plugin.logOperation?.log('TODOIST_TASK_CREATED', `Created task in Todoist: ${newTask.content}`, filepath, todoist_id);
                 //newTask写入缓存
                 this.plugin.cacheOperation.appendTaskToCache(newTask)
                 
@@ -148,6 +154,9 @@ export class TodoistSync  {
                 if(currentTask.isCompleted === true){
                   await this.plugin.todoistRestAPI.CloseTask(newTask.id)
                   this.plugin.cacheOperation.closeTaskToCacheByID(todoist_id)
+                  //记录日志
+                  this.plugin.logOperation?.log('OBSIDIAN_TASK_COMPLETED', `Completed task in Obsidian: ${newTask.content}`, filepath, todoist_id);
+                  this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Completed task in Todoist: ${newTask.content}`, filepath, todoist_id);
                 
                 }
                 this.plugin.saveSettings()
@@ -438,6 +447,8 @@ export class TodoistSync  {
                 const updatedTask = await this.plugin.todoistRestAPI.UpdateTask(lineTask.todoist_id.toString(),updatedContent)
                 updatedTask.path = filepath
                 this.plugin.cacheOperation.updateTaskToCacheByID(updatedTask);
+                //记录日志
+                this.plugin.logOperation?.log('TASK_UPDATED', `Updated task: ${updatedTask.content}`, filepath, lineTask_todoist_id);
             } 
 
             if (statusModified) {
@@ -556,6 +567,7 @@ export class TodoistSync  {
         await this.plugin.cacheOperation.closeTaskToCacheByID(taskId);
         this.plugin.saveSettings()
         new Notice(`Task ${taskId} is closed.`)
+        this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Closed task via checkbox: ${taskId}`, undefined, taskId);
     } catch (error) {
         console.error('Error closing task:', error);
         throw error; // 抛出错误使调用方能够捕获并处理它
@@ -570,6 +582,7 @@ export class TodoistSync  {
             await this.plugin.cacheOperation.reopenTaskToCacheByID(taskId)
             this.plugin.saveSettings()
             new Notice(`Task ${taskId} is reopend.`)
+            this.plugin.logOperation?.log('TODOIST_TASK_REOPENED', `Reopened task via checkbox: ${taskId}`, undefined, taskId);
         } catch (error) {
             console.error('Error opening task:', error);
             throw error; // 抛出错误使调用方能够捕获并处理它
@@ -769,6 +782,7 @@ export class TodoistSync  {
 
     async syncTodoistToObsidian(){
         try{
+            this.plugin.logOperation?.log('SYNC_START', 'Starting sync from Todoist to Obsidian');
             const all_activity_events = await this.plugin.todoistSyncAPI.getNonObsidianAllActivityEvents()
             
             // remove synchonized events
@@ -815,9 +829,11 @@ export class TodoistSync  {
                 await this.plugin.cacheOperation.appendEventsToCache(unsynchronized_project_events)
             }
     
+            this.plugin.logOperation?.log('SYNC_COMPLETED', 'Sync from Todoist to Obsidian completed');
 
         }catch (err){
             console.error('An error occurred while synchronizing:', err);
+            this.plugin.logOperation?.log('SYNC_ERROR', `Sync failed: ${err.message}`);
         }
 
     }
@@ -836,8 +852,10 @@ export class TodoistSync  {
         this.app.vault.create(name,JSON.stringify(resources))
         //console.log(`todoist 备份成功`)
         new Notice(`Todoist backup data is saved in the path ${name}`)
+        this.plugin.logOperation?.log('BACKUP_CREATED', `Todoist backup created: ${name}`);
         } catch (error) {
         console.error("An error occurred while creating Todoist backup:", error);
+        this.plugin.logOperation?.log('BACKUP_CREATED', `Backup failed: ${error.message}`);
         }
 
     }

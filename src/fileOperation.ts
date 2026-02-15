@@ -1,5 +1,6 @@
 import { App} from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../main";
+import { LogAction } from './logOperation';
 export class FileOperation   {
 	app:App;
     plugin: UltimateTodoistSyncForObsidian;
@@ -74,6 +75,7 @@ export class FileOperation   {
         if (modified) {
         const newContent = lines.join('\n')
         await this.app.vault.modify(file, newContent)
+        this.plugin.logOperation?.log('FILE_TASK_COMPLETED', `Completed task in file: ${taskId}`, filepath, taskId);
         }
     }
   
@@ -102,6 +104,7 @@ export class FileOperation   {
         if (modified) {
         const newContent = lines.join('\n')
         await this.app.vault.modify(file, newContent)
+        this.plugin.logOperation?.log('FILE_TASK_UNCOMPLETED', `Reopened task in file: ${taskId}`, filepath, taskId);
         }
     }
 
@@ -141,6 +144,7 @@ export class FileOperation   {
             const newContent = lines.join('\n')
             //console.log(newContent)
             await this.app.vault.modify(file, newContent)
+            this.plugin.logOperation?.log('FILE_TODOIST_TAG_ADDED', `Added todoist tag to file: ${filepath}`, filepath);
 
             //update filemetadate
             const metadata = await this.plugin.cacheOperation.getFileMetadata(filepath)
@@ -255,21 +259,22 @@ export class FileOperation   {
         let modified = false
     
         for (let i = 0; i < lines.length; i++) {
-            const line = lines[i]
-            if (line.includes(taskId) && this.plugin.taskParser.hasTodoistTag(line)) {
-                const oldTaskContent = this.plugin.taskParser.getTaskContentFromLineText(line)
-                const newTaskContent = evt.extra_data.content
+        const line = lines[i]
+        if (line.includes(taskId) && this.plugin.taskParser.hasTodoistTag(line)) {
+            const oldTaskContent = this.plugin.taskParser.getTaskContentFromLineText(line)
+            const newTaskContent = evt.extra_data.content
 
-                lines[i] = line.replace(oldTaskContent, newTaskContent)
-                modified = true
-                break
-            }
+            lines[i] = line.replace(oldTaskContent, newTaskContent)
+            modified = true
+            break
+        }
         }
     
         if (modified) {
         const newContent = lines.join('\n')
         //console.log(newContent)
         await this.app.vault.modify(file, newContent)
+        this.plugin.logOperation?.log('FILE_TASK_CONTENT_SYNCED', `Synced task content from Todoist: ${taskId}`, filepath, taskId);
         }
         
     }
@@ -322,6 +327,7 @@ export class FileOperation   {
         const newContent = lines.join('\n')
         //console.log(newContent)
         await this.app.vault.modify(file, newContent)
+        this.plugin.logOperation?.log('FILE_TASK_DUEDATE_SYNCED', `Synced task due date from Todoist: ${taskId}`, filepath, taskId);
         }
         
     }
@@ -346,20 +352,21 @@ export class FileOperation   {
         let modified = false
     
         for (let i = 0; i < lines.length; i++) {
-            const line = lines[i]
-            if (line.includes(taskId) && this.plugin.taskParser.hasTodoistTag(line)) {
-                const indent = '\t'.repeat(line.length - line.trimStart().length + 1);
-                const noteLine = `${indent}- ${datetime} ${note}`;
-                lines.splice(i + 1, 0, noteLine);
-                modified = true
-                break
-            }
+        const line = lines[i]
+        if (line.includes(taskId) && this.plugin.taskParser.hasTodoistTag(line)) {
+            const indent = '\t'.repeat(line.length - line.trimStart().length + 1);
+            const noteLine = `${indent}- ${datetime} ${note}`;
+            lines.splice(i + 1, 0, noteLine);
+            modified = true
+            break
+        }
         }
     
         if (modified) {
         const newContent = lines.join('\n')
         //console.log(newContent)
         await this.app.vault.modify(file, newContent)
+        this.plugin.logOperation?.log('FILE_TASK_NOTE_ADDED', `Synced task note from Todoist: ${taskId}`, filepath, taskId);
         }
         
     }

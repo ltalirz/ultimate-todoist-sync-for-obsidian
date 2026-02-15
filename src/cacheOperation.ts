@@ -1,5 +1,6 @@
 import { App} from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../main";
+import { LogAction } from './logOperation';
 
 interface Due {
     date?: string;
@@ -57,6 +58,7 @@ export class CacheOperation   {
     
         // 将更新后的metadatas对象保存回设置对象中
         this.plugin.settings.fileMetadata = metadatas
+        this.plugin.logOperation?.log('CACHE_FILE_METADATA_UPDATED', `Updated file metadata for: ${filepath}`, filepath);
         
     }
 
@@ -80,6 +82,7 @@ export class CacheOperation   {
     async deleteFilepathFromMetadata(filepath:string){
         Reflect.deleteProperty(this.plugin.settings.fileMetadata, filepath);
         this.plugin.saveSettings()
+        this.plugin.logOperation?.log('CACHE_FILE_METADATA_DELETED', `Deleted file metadata for: ${filepath}`, filepath);
         console.log(`${filepath} is deleted from file metadatas.`)
     }
 
@@ -236,20 +239,12 @@ export class CacheOperation   {
                 return
             }
             const savedTasks = this.plugin.settings.todoistTasksData.tasks
-            //const taskAlreadyExists = savedTasks.some((t) => t.id === task.id);
-            //if (!taskAlreadyExists) {
-             //，使用push方法将字符串插入到Cache对象时，它将被视为一个简单的键值对，其中键是数组的数字索引，而值是该字符串本身。但如果您使用push方法将另一个Cache对象（或数组）插入到Cache对象中，则该对象将成为原始Cache对象的一个嵌套子对象。在这种情况下，键是数字索引，值是嵌套的Cache对象本身。
-            //}
-            this.plugin.settings.todoistTasksData.tasks.push(task);  
+            this.plugin.settings.todoistTasksData.tasks.push(task);
+            this.plugin.logOperation?.log('CACHE_TASK_ADDED', `Added task to cache: ${task.content || task.id}`, task.path, task.id);
         } catch (error) {
             console.error(`Error appending task to Cache: ${error}`);
         }
     }
-      
-      
-      
-      
-    //读取指定id的任务
     loadTaskFromCacheyID(taskId) {
         try {
 
@@ -267,13 +262,11 @@ export class CacheOperation   {
     //覆盖update指定id的task
     updateTaskToCacheByID(task) {
         try {
-        
-        
             //删除就的task
             this.deleteTaskFromCache(task.id)
             //添加新的task
             this.appendTaskToCache(task)
-        
+            this.plugin.logOperation?.log('CACHE_TASK_UPDATED', `Updated task in cache: ${task.content || task.id}`, task.path, task.id);
         } catch (error) {
             console.error(`Error updating task to Cache: ${error}`);
             return [];
@@ -331,6 +324,7 @@ export class CacheOperation   {
             }
             }
             this.plugin.settings.todoistTasksData.tasks = savedTasks
+            this.plugin.logOperation?.log('CACHE_TASK_REOPENED', `Reopened task in cache: ${taskId}`, undefined, taskId);
         
         } catch (error) {
             console.error(`Error open task to Cache file: ${error}`);
@@ -354,6 +348,7 @@ export class CacheOperation   {
             }
             }
             this.plugin.settings.todoistTasksData.tasks = savedTasks
+            this.plugin.logOperation?.log('CACHE_TASK_COMPLETED', `Completed task in cache: ${taskId}`, undefined, taskId);
         
         } catch (error) {
             console.error(`Error close task to Cache file: ${error}`);
@@ -367,7 +362,8 @@ export class CacheOperation   {
         try {
         const savedTasks = this.plugin.settings.todoistTasksData.tasks
         const newSavedTasks = savedTasks.filter((t) => t.id !== taskId);
-        this.plugin.settings.todoistTasksData.tasks = newSavedTasks                                         
+        this.plugin.settings.todoistTasksData.tasks = newSavedTasks
+        this.plugin.logOperation?.log('CACHE_TASK_DELETED', `Deleted task from cache: ${taskId}`, undefined, taskId);
         } catch (error) {
         console.error(`Error deleting task from Cache file: ${error}`);
         }
@@ -383,6 +379,7 @@ export class CacheOperation   {
             const savedTasks = this.plugin.settings.todoistTasksData.tasks
             const newSavedTasks = savedTasks.filter((t) => !deletedTaskIds.includes(t.id))
             this.plugin.settings.todoistTasksData.tasks = newSavedTasks
+            this.plugin.logOperation?.log('CACHE_TASK_DELETED', `Deleted ${deletedTaskIds.length} tasks from cache`, undefined, deletedTaskIds.join(', '));
         } catch (error) {
             console.error(`Error deleting task from Cache : ${error}`);
         }
@@ -429,6 +426,7 @@ export class CacheOperation   {
         
             //save to json
             this.plugin.settings.todoistTasksData.projects = projects
+            this.plugin.logOperation?.log('PROJECT_UPDATED', `Updated ${projects.length} projects in cache`);
 
             return true
 
@@ -463,6 +461,8 @@ export class CacheOperation   {
             delete fileMetadatas[oldpath]
             this.plugin.settings.fileMetadata = fileMetadatas
 
+            this.plugin.logOperation?.log('CACHE_RENAMED', `Renamed file path from ${oldpath} to ${newpath}`, newpath);
+
         }catch(error){
             console.log(`Error updating renamed file path to cache: ${error}`)
         }
@@ -477,6 +477,7 @@ export class CacheOperation   {
             } else {
                 console.log('Starting cache rebuild...');
             }
+            this.plugin.logOperation?.log('CACHE_REBUILT', 'Starting cache rebuild...');
 
             // Step 1: 清空现有缓存
             this.plugin.settings.todoistTasksData = {
@@ -586,6 +587,7 @@ export class CacheOperation   {
             await this.plugin.saveSettings();
             
             const message = `Cache rebuilt! ${processedCount} tasks processed.`;
+            this.plugin.logOperation?.log('CACHE_REBUILT', `Cache rebuilt successfully! ${processedCount} tasks processed.`);
             if (noticeCallback) {
                 noticeCallback(message);
             } else {
@@ -596,6 +598,7 @@ export class CacheOperation   {
             
         } catch (error) {
             console.error('Cache rebuild failed:', error);
+            this.plugin.logOperation?.log('CACHE_REBUILT', `Cache rebuild failed: ${error.message}`);
             const message = `Cache rebuild failed: ${error.message}`;
             if (noticeCallback) {
                 noticeCallback(message);

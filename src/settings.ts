@@ -1,5 +1,6 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../main";
+import { LogAction } from './logOperation';
 
 interface MyProject {
 	id: string;
@@ -22,13 +23,24 @@ export interface UltimateTodoistSyncSettings {
 	statistics: any;
 	debugMode:boolean;
 	useAppURI:boolean;
+	// Log settings
+	enableLog:boolean;
+	logs:Array<{
+		timestamp:number;
+		action:LogAction;
+		details:string;
+		filePath?:string;
+		taskId?:string;
+	}>;
 }
 
 
 export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
 	initialized: false,
 	apiInitialized:false,
+	todoistAPIToken: '',
 	defaultProjectName:"Inbox",
+	defaultProjectId:"",
 	automaticSynchronizationInterval: 300, //default aync interval 300s
 	todoistTasksData:{"projects":[],"tasks":[],"events":[]},
 	fileMetadata:{},
@@ -36,9 +48,8 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
 	statistics:{},
 	debugMode:false,
 	useAppURI:true,
-	//mySetting: 'default',
-	//todoistTasksFilePath: 'todoistTasks.json'
-
+	enableLog:true,
+	logs:[],
 }
 
 
@@ -412,6 +423,41 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 						})
 						
 				)
+
+		new Setting(containerEl)
+			.setName('Enable Log')
+			.setDesc('Enable logging of file modifications.')
+			.addToggle(component => 
+				component
+						.setValue(this.plugin.settings.enableLog)
+						.onChange((value)=>{
+							this.plugin.settings.enableLog = value
+							this.plugin.saveSettings()						
+						})
+						
+				)
+
+		new Setting(containerEl)
+			.setName('View Logs')
+			.setDesc('View the operation logs.')
+			.addButton(button => button
+				.setButtonText('View Logs')
+				.onClick(() => {
+					const logsText = this.plugin.logOperation?.getLogsAsText() || 'No logs available.';
+					const logModal = new Notice(logsText, 10000);
+				})
+			);
+
+		new Setting(containerEl)
+			.setName('Clear Logs')
+			.setDesc('Clear all operation logs.')
+			.addButton(button => button
+				.setButtonText('Clear')
+				.onClick(() => {
+					this.plugin.logOperation?.clearLogs();
+					new Notice('Logs cleared.');
+				})
+			);
 
 		new Setting(containerEl)
 			.setName('Backup Todoist Data')
