@@ -160,13 +160,21 @@ export class TodoistToObsidianSync {
             const resources = await this.plugin.todoistSyncAPI.getAllResources();
 
             const now: Date = new Date();
-            const timeString = `${now.getFullYear()}${now.getMonth() + 1}${now.getDate()}${now.getHours()}${now.getMinutes()}${now.getSeconds()}`;
+            const timeString = `${now.getFullYear()}${now.getMonth() + 1}${now.getDate()}-${now.getHours()}${now.getMinutes()}${now.getSeconds()}`;
 
-            const name = "todoist-backup-" + timeString + ".json";
+            const backupFolder = '.todoist-backups';
+            const fileName = `backup-${timeString}.json`;
+            const fullPath = `${backupFolder}/${fileName}`;
 
-            await this.app.vault.create(name, JSON.stringify(resources));
-            new Notice(`Todoist backup data is saved in the path ${name}`);
-            this.plugin.logOperation?.log('BACKUP_CREATED', `Todoist backup created: ${name}`);
+            // Create backup folder if it doesn't exist
+            const folderExists = this.app.vault.getAbstractFileByPath(backupFolder);
+            if (!folderExists) {
+                await this.app.vault.createFolder(backupFolder);
+            }
+
+            await this.app.vault.create(fullPath, JSON.stringify(resources, null, 2));
+            new Notice(`Todoist backup saved to ${fullPath}`);
+            this.plugin.logOperation?.log('BACKUP_CREATED', `Todoist backup created: ${fullPath}`);
         } catch (error) {
             console.error("An error occurred while creating Todoist backup:", error);
             this.plugin.logOperation?.log('BACKUP_CREATED', `Backup failed: ${(error as Error).message}`);
