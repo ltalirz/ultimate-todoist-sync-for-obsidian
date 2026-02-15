@@ -15,6 +15,9 @@ import { FileOperation } from './src/fileOperation';
 //log operation
 import { LogOperation } from './src/logOperation';
 
+//backup operation
+import { BackupOperation } from './src/backupOperation';
+
 //sync module
 import { TodoistSync } from './src/syncModule';
 
@@ -31,6 +34,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
     fileOperation: FileOperation | undefined;
     todoistSync: TodoistSync | undefined;
     logOperation: LogOperation | undefined;
+    backupOperation: BackupOperation | undefined;
 	lastLines: Map<string,number>;
 	statusBar;
 	syncLock: Boolean;
@@ -422,6 +426,8 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		//initialize todoist sync module
 		this.todoistSync = new TodoistSync(this.app,this)
 
+		//initialize backup operation
+		this.backupOperation = new BackupOperation(this.app,this)
 
 	}
 

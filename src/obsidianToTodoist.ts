@@ -212,6 +212,7 @@ export class ObsidianToTodoistSync {
         if (hasNewTask) {
             try {
                 const newContent = lines.join('\n');
+                await this.plugin.backupOperation?.backupFile(filepath);
                 await this.app.vault.modify(file, newContent);
 
                 await this.plugin.cacheOperation.updateFileMetadata(filepath, newFrontMatter);

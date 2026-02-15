@@ -74,6 +74,7 @@ export class FileOperation   {
     
         if (modified) {
         const newContent = lines.join('\n')
+        await this.plugin.backupOperation?.backupFile(filepath);
         await this.app.vault.modify(file, newContent)
         this.plugin.logOperation?.log('FILE_TASK_COMPLETED', `Completed task in file: ${taskId}`, filepath, taskId);
         }
@@ -103,6 +104,7 @@ export class FileOperation   {
     
         if (modified) {
         const newContent = lines.join('\n')
+        await this.plugin.backupOperation?.backupFile(filepath);
         await this.app.vault.modify(file, newContent)
         this.plugin.logOperation?.log('FILE_TASK_UNCOMPLETED', `Reopened task in file: ${taskId}`, filepath, taskId);
         }
@@ -143,6 +145,7 @@ export class FileOperation   {
             console.log(`New task found in files ${filepath}`)
             const newContent = lines.join('\n')
             //console.log(newContent)
+            await this.plugin.backupOperation?.backupFile(filepath);
             await this.app.vault.modify(file, newContent)
             this.plugin.logOperation?.log('FILE_TODOIST_TAG_ADDED', `Added todoist tag to file: ${filepath}`, filepath);
 
@@ -190,6 +193,7 @@ export class FileOperation   {
         if (modified) {
             const newContent = lines.join('\n')
             //console.log(newContent)
+            await this.plugin.backupOperation?.backupFile(filepath);
             await this.app.vault.modify(file, newContent)
 
 
@@ -233,6 +237,7 @@ export class FileOperation   {
             console.log(`New task found in files ${filepath}`)
             const newContent = lines.join('\n')
             console.log(newContent)
+            await this.plugin.backupOperation?.backupFile(filepath);
             await this.app.vault.modify(file, newContent)
 
             //update filemetadate
@@ -273,6 +278,7 @@ export class FileOperation   {
         if (modified) {
         const newContent = lines.join('\n')
         //console.log(newContent)
+        await this.plugin.backupOperation?.backupFile(filepath);
         await this.app.vault.modify(file, newContent)
         this.plugin.logOperation?.log('FILE_TASK_CONTENT_SYNCED', `Synced task content from Todoist: ${taskId}`, filepath, taskId);
         }
@@ -326,6 +332,7 @@ export class FileOperation   {
         if (modified) {
         const newContent = lines.join('\n')
         //console.log(newContent)
+        await this.plugin.backupOperation?.backupFile(filepath);
         await this.app.vault.modify(file, newContent)
         this.plugin.logOperation?.log('FILE_TASK_DUEDATE_SYNCED', `Synced task due date from Todoist: ${taskId}`, filepath, taskId);
         }
@@ -365,6 +372,7 @@ export class FileOperation   {
         if (modified) {
         const newContent = lines.join('\n')
         //console.log(newContent)
+        await this.plugin.backupOperation?.backupFile(filepath);
         await this.app.vault.modify(file, newContent)
         this.plugin.logOperation?.log('FILE_TASK_NOTE_ADDED', `Synced task note from Todoist: ${taskId}`, filepath, taskId);
         }

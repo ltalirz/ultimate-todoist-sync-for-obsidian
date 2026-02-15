@@ -698,6 +698,7 @@ export class CacheOperation   {
                                 oldContent,
                                 conflict.todoistContent
                             );
+                            await this.plugin.backupOperation?.backupFile(conflict.filePath);
                             await this.app.vault.modify(file, lines.join('\n'));
                             this.plugin.logOperation?.log('FILE_TASK_CONTENT_SYNCED', `Synced task ${conflict.taskId} from Todoist to file`, conflict.filePath, conflict.taskId);
                         }
