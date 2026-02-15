@@ -283,7 +283,8 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 						message += `- ${result.summary.invalidTaskIds} invalid task IDs\n`;
 						message += `- ${result.summary.contentMismatches} content mismatches\n`;
 						message += `- ${result.summary.statusMismatches} status mismatches\n`;
-						message += `- ${result.summary.emptyMetadata} empty metadata`;
+						message += `- ${result.summary.emptyMetadata} empty metadata\n`;
+						message += `- ${result.summary.missingInCache} tasks in files but not in cache`;
 
 						new Notice(message, 8000);
 

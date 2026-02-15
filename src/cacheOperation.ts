@@ -8,7 +8,7 @@ interface Due {
 }
 
 export interface DatabaseCheckIssue {
-    type: 'missing_file' | 'missing_metadata' | 'orphaned_task' | 'duplicate_task' | 'invalid_task_id' | 'content_mismatch' | 'status_mismatch' | 'empty_metadata';
+    type: 'missing_file' | 'missing_metadata' | 'orphaned_task' | 'duplicate_task' | 'invalid_task_id' | 'content_mismatch' | 'status_mismatch' | 'empty_metadata' | 'missing_in_cache';
     filePath?: string;
     taskId?: string;
     details: string;
@@ -781,7 +781,8 @@ export class CacheOperation   {
             invalidTaskIds: 0,
             contentMismatches: 0,
             statusMismatches: 0,
-            emptyMetadata: 0
+            emptyMetadata: 0,
+            missingInCache: 0
         };
 
         if (noticeCallback) {
@@ -847,6 +848,39 @@ export class CacheOperation   {
                     } else {
                         taskIdsInFiles.set(taskId, { filePath, lineNumber: lineWithTask });
                     }
+                }
+            }
+
+            if (noticeCallback) {
+                noticeCallback('Scanning vault for missing tasks in cache...');
+            }
+
+            const allFiles = this.app.vault.getFiles().filter(f => f.extension === 'md');
+            for (const file of allFiles) {
+                try {
+                    const content = await this.app.vault.cachedRead(file);
+                    const lines = content.split('\n');
+
+                    for (let i = 0; i < lines.length; i++) {
+                        const line = lines[i];
+                        if (line.includes('#todoist')) {
+                            const match = line.match(/%%\[todoist_id::\s*(\w+)\]%%/);
+                            if (match && match[1]) {
+                                const taskId = match[1];
+                                if (!taskIdsInCache.has(taskId)) {
+                                    issues.push({
+                                        type: 'missing_in_cache',
+                                        filePath: file.path,
+                                        taskId,
+                                        details: `Task ${taskId} exists in file "${file.path}" but not in cache`
+                                    });
+                                    summary.missingInCache++;
+                                }
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error(`Error scanning file ${file.path}:`, error);
                 }
             }
 
