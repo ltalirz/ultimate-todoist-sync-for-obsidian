@@ -1,6 +1,7 @@
 import { App} from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../main";
 import { LogAction } from './logOperation';
+import { TaskConflict, ConflictResolutionModal } from './conflictModal';
 
 interface Due {
     date?: string;
@@ -509,51 +510,74 @@ export class CacheOperation   {
             const files = this.app.vault.getFiles()
                 .filter(f => f.extension === 'md');
             
-            const fileTaskMap: Map<string, string[]> = new Map();
+            const fileTaskMap: Map<string, { taskId: string; lineNumber: number; content: string }[]> = new Map();
             
             for (const file of files) {
                 try {
                     const content = await this.app.vault.cachedRead(file);
                     const lines = content.split('\n');
-                    const taskIds: string[] = [];
                     
-                    for (const line of lines) {
+                    for (let i = 0; i < lines.length; i++) {
+                        const line = lines[i];
                         // 检查是否包含 #todoist 标签
                         if (line.includes('#todoist')) {
                             // 提取 todoist_id: %%[todoist_id:: xxx]%%
                             const match = line.match(/%%\[todoist_id::\s*(\w+)\]%%/);
                             if (match && match[1]) {
-                                taskIds.push(match[1]);
+                                const taskId = match[1];
+                                // 提取任务内容（去掉 checkbox 和 metadata）
+                                const taskContent = this.extractTaskContent(line);
+                                
+                                if (!fileTaskMap.has(file.path)) {
+                                    fileTaskMap.set(file.path, []);
+                                }
+                                fileTaskMap.get(file.path)!.push({
+                                    taskId,
+                                    lineNumber: i,
+                                    content: taskContent
+                                });
                             }
                         }
-                    }
-                    
-                    if (taskIds.length > 0) {
-                        fileTaskMap.set(file.path, taskIds);
                     }
                 } catch (error) {
                     console.error(`Error reading file ${file.path}:`, error);
                 }
             }
 
-            // Step 4: 处理每个文件的任务
+            // Step 4: 处理每个文件的任务，检测冲突
             if (noticeCallback) {
-                noticeCallback('Processing tasks...');
+                noticeCallback('Processing tasks and detecting conflicts...');
             } else {
-                console.log('Processing tasks...');
+                console.log('Processing tasks and detecting conflicts...');
             }
             
+            const conflicts: TaskConflict[] = [];
             let processedCount = 0;
             const totalTasks = Array.from(fileTaskMap.values())
-                .reduce((sum, ids) => sum + ids.length, 0);
+                .reduce((sum, tasks) => sum + tasks.length, 0);
             
-            for (const [filePath, taskIds] of fileTaskMap.entries()) {
+            for (const [filePath, fileTasks] of fileTaskMap.entries()) {
                 const validTaskIds: string[] = [];
                 
-                for (const taskId of taskIds) {
+                for (const taskInfo of fileTasks) {
                     try {
                         // 从 Todoist 获取任务详情
-                        const task = await this.plugin.todoistRestAPI.getTaskById(taskId);
+                        const task = await this.plugin.todoistRestAPI.getTaskById(taskInfo.taskId);
+                        
+                        // 比较内容是否一致
+                        const todoistContent = task.content || '';
+                        const obsidianContent = taskInfo.content;
+                        
+                        if (obsidianContent.trim() !== todoistContent.trim()) {
+                            // 检测到冲突
+                            conflicts.push({
+                                taskId: taskInfo.taskId,
+                                filePath: filePath,
+                                obsidianContent: obsidianContent,
+                                todoistContent: todoistContent,
+                                lineNumber: taskInfo.lineNumber
+                            });
+                        }
                         
                         // 添加 path 字段关联到文件
                         (task as any).path = filePath;
@@ -561,7 +585,7 @@ export class CacheOperation   {
                         // 保存到缓存
                         this.appendTaskToCache(task);
                         
-                        validTaskIds.push(taskId);
+                        validTaskIds.push(taskInfo.taskId);
                         processedCount++;
                         
                         // 每处理 10 个任务更新一次 UI
@@ -570,7 +594,7 @@ export class CacheOperation   {
                         }
                     } catch (error) {
                         // 任务在 Todoist 中不存在，跳过
-                        console.log(`Task ${taskId} not found in Todoist, skipping...`);
+                        console.log(`Task ${taskInfo.taskId} not found in Todoist, skipping...`);
                     }
                 }
                 
@@ -583,11 +607,31 @@ export class CacheOperation   {
                 }
             }
 
-            // Step 5: 保存设置
+            // Step 5: 如果有冲突，弹出窗口让用户选择
+            if (conflicts.length > 0) {
+                if (noticeCallback) {
+                    noticeCallback(`Found ${conflicts.length} conflicts. Please resolve in dialog...`);
+                }
+                
+                await new Promise<void>((resolve) => {
+                    new ConflictResolutionModal(
+                        this.app,
+                        this.plugin,
+                        conflicts,
+                        async (resolutions) => {
+                            await this.resolveConflicts(resolutions, conflicts);
+                            resolve();
+                        }
+                    );
+                });
+            }
+            
+            // Step 6: 保存设置
             await this.plugin.saveSettings();
             
-            const message = `Cache rebuilt! ${processedCount} tasks processed.`;
-            this.plugin.logOperation?.log('CACHE_REBUILT', `Cache rebuilt successfully! ${processedCount} tasks processed.`);
+            const conflictMsg = conflicts.length > 0 ? ` (${conflicts.length} conflicts resolved)` : '';
+            const message = `Cache rebuilt! ${processedCount} tasks processed.${conflictMsg}`;
+            this.plugin.logOperation?.log('CACHE_REBUILT', `Cache rebuilt successfully! ${processedCount} tasks processed.${conflictMsg}`);
             if (noticeCallback) {
                 noticeCallback(message);
             } else {
@@ -598,12 +642,71 @@ export class CacheOperation   {
             
         } catch (error) {
             console.error('Cache rebuild failed:', error);
-            this.plugin.logOperation?.log('CACHE_REBUILT', `Cache rebuild failed: ${error.message}`);
-            const message = `Cache rebuild failed: ${error.message}`;
+            this.plugin.logOperation?.log('CACHE_REBUILT', `Cache rebuild failed: ${(error as Error).message}`);
+            const message = `Cache rebuild failed: ${(error as Error).message}`;
             if (noticeCallback) {
                 noticeCallback(message);
             }
             return { success: false, tasksProcessed: 0 };
+        }
+    }
+
+    private extractTaskContent(line: string): string {
+        // 去掉 checkbox 标记 [- ] 或 [x]
+        let content = line.replace(/^(\s*)([-*])\s+\[(x|X| )\]\s*/, '');
+        // 去掉 #todoist 标签
+        content = content.replace(/#todoist/g, '').trim();
+        // 去掉 todoist_id 元数据
+        content = content.replace(/%%\[todoist_id::\s*\w+\]%%/g, '').trim();
+        // 去掉 link
+        content = content.replace(/\[link\]\([^)]+\)/g, '').trim();
+        // 去掉日期
+        // eslint-disable-next-line no-misleading-character-class
+        content = content.replace(/[🗓️📅📆🗓]\s*\d{4}-\d{2}-\d{2}/gu, '').trim();
+        // 去掉优先级 !!1 !!2 !!3 !!4
+        content = content.replace(/\s!![1-4]\s/g, ' ').trim();
+        
+        return content;
+    }
+
+    private async resolveConflicts(resolutions: Map<string, ConflictResolution>, conflicts: TaskConflict[]): Promise<void> {
+        for (const conflict of conflicts) {
+            const resolution = resolutions.get(conflict.taskId);
+            
+            if (resolution === 'obsidian') {
+                // 用 Obsidian 内容更新 Todoist
+                try {
+                    await this.plugin.todoistRestAPI.UpdateTask(conflict.taskId, {
+                        content: conflict.obsidianContent
+                    });
+                    this.plugin.logOperation?.log('TODOIST_TASK_UPDATED', `Updated task ${conflict.taskId} with Obsidian content`, conflict.filePath, conflict.taskId);
+                } catch (error) {
+                    console.error(`Failed to update task ${conflict.taskId}:`, error);
+                }
+            } else if (resolution === 'todoist') {
+                // 用 Todoist 内容更新 Obsidian 文件
+                try {
+                    const file = this.app.vault.getAbstractFileByPath(conflict.filePath);
+                    if (file) {
+                        const content = await this.app.vault.read(file);
+                        const lines = content.split('\n');
+                        
+                        // 找到对应行并替换内容
+                        if (lines[conflict.lineNumber]) {
+                            const oldContent = this.extractTaskContent(lines[conflict.lineNumber]);
+                            lines[conflict.lineNumber] = lines[conflict.lineNumber].replace(
+                                oldContent,
+                                conflict.todoistContent
+                            );
+                            await this.app.vault.modify(file, lines.join('\n'));
+                            this.plugin.logOperation?.log('FILE_TASK_CONTENT_SYNCED', `Synced task ${conflict.taskId} from Todoist to file`, conflict.filePath, conflict.taskId);
+                        }
+                    }
+                } catch (error) {
+                    console.error(`Failed to update file ${conflict.filePath}:`, error);
+                }
+            }
+            // 如果是 skip，则不做任何操作
         }
     }
 
