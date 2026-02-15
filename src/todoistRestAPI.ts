@@ -66,7 +66,8 @@ export class TodoistRestAPI  {
       const api = await this.initializeAPI()
       try {
         const result = await api.getTasks(options);
-        return result;
+        // API v1 返回分页格式 { results: [], nextCursor: null }
+        return result.results || result;
       } catch (error) {
         throw new Error(`Error get active tasks: ${error.message}`);
       }
@@ -171,7 +172,8 @@ export class TodoistRestAPI  {
         const api = await this.initializeAPI()
         try {
         const result = await api.getProjects();
-        return(result)
+        // API v1 返回分页格式 { results: [], nextCursor: null }
+        return result.results || result;
     
         } catch (error) {
             console.error('Error get all projects', error);
