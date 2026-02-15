@@ -510,7 +510,7 @@ export class CacheOperation   {
             const files = this.app.vault.getFiles()
                 .filter(f => f.extension === 'md');
             
-            const fileTaskMap: Map<string, { taskId: string; lineNumber: number; content: string }[]> = new Map();
+            const fileTaskMap: Map<string, { taskId: string; lineNumber: number; content: string; isCompleted: boolean }[]> = new Map();
             
             for (const file of files) {
                 try {
@@ -527,6 +527,8 @@ export class CacheOperation   {
                                 const taskId = match[1];
                                 // 提取任务内容（去掉 checkbox 和 metadata）
                                 const taskContent = this.extractTaskContent(line);
+                                // 检查任务完成状态 - [x] 表示完成, [ ] 表示未完成
+                                const isCompleted = /\[x\]/i.test(line);
                                 
                                 if (!fileTaskMap.has(file.path)) {
                                     fileTaskMap.set(file.path, []);
@@ -534,7 +536,8 @@ export class CacheOperation   {
                                 fileTaskMap.get(file.path)!.push({
                                     taskId,
                                     lineNumber: i,
-                                    content: taskContent
+                                    content: taskContent,
+                                    isCompleted
                                 });
                             }
                         }
@@ -556,6 +559,9 @@ export class CacheOperation   {
             const totalTasks = Array.from(fileTaskMap.values())
                 .reduce((sum, tasks) => sum + tasks.length, 0);
             
+            // 用于记录无效的 taskId（Todoist 中不存在的）
+            const invalidTaskIds: string[] = [];
+            
             for (const [filePath, fileTasks] of fileTaskMap.entries()) {
                 const validTaskIds: string[] = [];
                 
@@ -568,7 +574,17 @@ export class CacheOperation   {
                         const todoistContent = task.content || '';
                         const obsidianContent = taskInfo.content;
                         
-                        if (obsidianContent.trim() !== todoistContent.trim()) {
+                        // 检查完成状态是否一致
+                        // Todoist API: task.isCompleted 表示完成状态
+                        const todoistIsCompleted = task.isCompleted || false;
+                        const obsidianIsCompleted = taskInfo.isCompleted;
+                        
+                        // 检测内容冲突
+                        const contentConflict = obsidianContent.trim() !== todoistContent.trim();
+                        // 检测完成状态冲突
+                        const statusConflict = obsidianIsCompleted !== todoistIsCompleted;
+                        
+                        if (contentConflict || statusConflict) {
                             // 检测到冲突
                             conflicts.push({
                                 taskId: taskInfo.taskId,
@@ -580,7 +596,9 @@ export class CacheOperation   {
                         }
                         
                         // 添加 path 字段关联到文件
+                        // 同时保存完成状态
                         (task as any).path = filePath;
+                        (task as any).isCompleted = todoistIsCompleted;
                         
                         // 保存到缓存
                         this.appendTaskToCache(task);
@@ -593,16 +611,20 @@ export class CacheOperation   {
                             noticeCallback(`Processing ${processedCount}/${totalTasks}...`);
                         }
                     } catch (error) {
-                        // 任务在 Todoist 中不存在，跳过
-                        console.log(`Task ${taskInfo.taskId} not found in Todoist, skipping...`);
+                        // 任务在 Todoist 中不存在，记录下来
+                        console.log(`Task ${taskInfo.taskId} not found in Todoist, will be removed from metadata...`);
+                        invalidTaskIds.push(taskInfo.taskId);
+                        // 记录日志
+                        this.plugin.logOperation?.log('CACHE_TASK_DELETED', `Task ${taskInfo.taskId} not found in Todoist during rebuild, removing from cache`, filePath, taskInfo.taskId);
                     }
                 }
                 
-                // 更新 fileMetadata
-                if (validTaskIds.length > 0) {
+                // 更新 fileMetadata（排除无效的 taskId）
+                const finalTaskIds = validTaskIds.filter(id => !invalidTaskIds.includes(id));
+                if (finalTaskIds.length > 0) {
                     this.plugin.settings.fileMetadata[filePath] = {
-                        todoistTasks: validTaskIds,
-                        todoistCount: validTaskIds.length
+                        todoistTasks: finalTaskIds,
+                        todoistCount: finalTaskIds.length
                     };
                 }
             }
@@ -620,6 +642,21 @@ export class CacheOperation   {
                         conflicts,
                         async (resolutions) => {
                             await this.resolveConflicts(resolutions, conflicts);
+                            // 解决冲突后，重新更新 fileMetadata
+                            for (const conflict of conflicts) {
+                                const resolution = resolutions.get(conflict.taskId);
+                                if (resolution === 'todoist') {
+                                    // 如果选择保留 Todoist 内容，需要重新保存任务到缓存以更新完成状态
+                                    try {
+                                        const task = await this.plugin.todoistRestAPI.getTaskById(conflict.taskId);
+                                        (task as any).path = conflict.filePath;
+                                        (task as any).isCompleted = task.isCompleted;
+                                        this.plugin.cacheOperation.updateTaskToCacheByID(task);
+                                    } catch (error) {
+                                        console.error(`Failed to update task ${conflict.taskId} after conflict resolution:`, error);
+                                    }
+                                }
+                            }
                             resolve();
                         }
                     );
@@ -629,9 +666,10 @@ export class CacheOperation   {
             // Step 6: 保存设置
             await this.plugin.saveSettings();
             
+            const invalidMsg = invalidTaskIds.length > 0 ? ` (${invalidTaskIds.length} tasks not found in Todoist removed)` : '';
             const conflictMsg = conflicts.length > 0 ? ` (${conflicts.length} conflicts resolved)` : '';
-            const message = `Cache rebuilt! ${processedCount} tasks processed.${conflictMsg}`;
-            this.plugin.logOperation?.log('CACHE_REBUILT', `Cache rebuilt successfully! ${processedCount} tasks processed.${conflictMsg}`);
+            const message = `Cache rebuilt! ${processedCount} tasks processed.${invalidMsg}${conflictMsg}`;
+            this.plugin.logOperation?.log('CACHE_REBUILT', `Cache rebuilt successfully! ${processedCount} tasks processed.${invalidMsg}${conflictMsg}`);
             if (noticeCallback) {
                 noticeCallback(message);
             } else {
