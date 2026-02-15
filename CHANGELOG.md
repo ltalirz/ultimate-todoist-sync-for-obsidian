@@ -1,5 +1,36 @@
 ## CHANGELOG
 
+### [1.0.2] - 2026-02-16
+
+#### Added
+- Added comprehensive operation logging system (`src/logOperation.ts`)
+  - Tracks 30+ log action types including task operations, file operations, cache operations, and Todoist API operations
+  - Persistent log storage in plugin settings
+  - Log viewing modal in settings
+- Added bidirectional sync module split
+  - `src/obsidianToTodoist.ts` - Handles sync from Obsidian to Todoist
+  - `src/todoistToObsidian.ts` - Handles sync from Todoist to Obsidian
+  - `src/syncModule.ts` - Refactored to orchestrate bidirectional sync
+- Added automatic file backup before modifications (`src/backupOperation.ts`)
+  - Backs up files to `.todoist-backups/` directory
+  - Configurable backup retention
+- Added conflict detection and resolution for rebuild cache (`src/conflictModal.ts`)
+  - Interactive modal for resolving content and status conflicts
+  - Options: keep Obsidian, keep Todoist, or skip
+- Added comprehensive `checkDatabase` function
+  - Detects 9 types of issues: missing files, missing metadata, orphaned tasks, duplicate tasks, invalid task IDs, content mismatches, status mismatches, empty metadata, and tasks in files but not in cache
+  - Scans entire vault to find missing cache entries
+
+#### Fixed
+- Fixed checkbox regex bug (`\d+` → `\w+` to support string IDs)
+- Fixed taskParser.ts regex inconsistencies
+- Fixed duplicate module initialization in initializePlugin()
+- Fixed AddTask date handling bug (was converting dueDatetime instead of dueDate)
+- Fixed unused imports and variables in main.ts
+- Improved rebuildCache with checkbox status detection and completion status comparison
+
+---
+
 ### [1.0.1] - 2026-02-16
 
 #### Added
