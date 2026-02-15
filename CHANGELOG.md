@@ -19,7 +19,8 @@
   - Options: keep Obsidian, keep Todoist, or skip
 - Added comprehensive `checkDatabase` function
   - Detects 9 types of issues: missing files, missing metadata, orphaned tasks, duplicate tasks, invalid task IDs, content mismatches, status mismatches, empty metadata, and tasks in files but not in cache
-  - Scans entire vault to find missing cache entries
+  - Generates detailed markdown report with task information (ID, content, file, line, due date, priority, status)
+  - Report saved to `.todoist-reports/` folder
 
 #### Fixed
 - Fixed checkbox regex bug (`\d+` → `\w+` to support string IDs)
