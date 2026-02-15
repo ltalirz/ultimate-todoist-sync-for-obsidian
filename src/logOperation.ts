@@ -39,6 +39,8 @@ export type LogAction =
     | 'CACHE_FILE_METADATA_DELETED'
     | 'CACHE_RENAMED'
     | 'CACHE_REBUILT'
+    | 'DATABASE_CHECK'
+    | 'DATABASE_CHECKED'
     // Todoist API operations
     | 'TODOIST_TASK_CREATED'
     | 'TODOIST_TASK_UPDATED'

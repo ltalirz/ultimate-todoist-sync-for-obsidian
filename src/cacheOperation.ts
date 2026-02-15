@@ -1,12 +1,34 @@
 import { App} from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../main";
-import { LogAction } from './logOperation';
 import { TaskConflict, ConflictResolutionModal } from './conflictModal';
 
 interface Due {
     date?: string;
-    [key: string]: any; // allow for additional properties
-  }
+    [key: string]: any;
+}
+
+export interface DatabaseCheckIssue {
+    type: 'missing_file' | 'missing_metadata' | 'orphaned_task' | 'duplicate_task' | 'invalid_task_id' | 'content_mismatch' | 'status_mismatch' | 'empty_metadata';
+    filePath?: string;
+    taskId?: string;
+    details: string;
+}
+
+export interface DatabaseCheckResult {
+    success: boolean;
+    totalIssues: number;
+    issues: DatabaseCheckIssue[];
+    summary: {
+        missingFiles: number;
+        missingMetadata: number;
+        orphanedTasks: number;
+        duplicateTasks: number;
+        invalidTaskIds: number;
+        contentMismatches: number;
+        statusMismatches: number;
+        emptyMetadata: number;
+    };
+}
 
 export class CacheOperation   {
 	app:App;
@@ -138,15 +160,15 @@ export class CacheOperation   {
     
     }
 
-    getDefaultProjectNameForFilepath(filepath:string){
-        const metadatas = this.plugin.settings.fileMetadata
+    // Helper function to get all file metadatas
+    getDefaultProjectNameForFilepath(filepath: string): string {
+        const metadatas = this.plugin.settings.fileMetadata;
         if (!metadatas[filepath] || metadatas[filepath].defaultProjectId === undefined) {
-            return this.plugin.settings.defaultProjectName
-        }
-        else{
-            const defaultProjectId = metadatas[filepath].defaultProjectId
-            const defaultProjectName = this.getProjectNameByIdFromCache(defaultProjectId)
-            return defaultProjectName
+            return this.plugin.settings.defaultProjectName;
+        } else {
+            const defaultProjectId = metadatas[filepath].defaultProjectId;
+            const defaultProjectName = this.getProjectNameByIdFromCache(defaultProjectId);
+            return defaultProjectName;
         }
     }
 
@@ -746,6 +768,201 @@ export class CacheOperation   {
                 }
             }
             // 如果是 skip，则不做任何操作
+        }
+    }
+
+    async checkDatabase(noticeCallback?: (message: string) => void): Promise<DatabaseCheckResult> {
+        const issues: DatabaseCheckIssue[] = [];
+        const summary = {
+            missingFiles: 0,
+            missingMetadata: 0,
+            orphanedTasks: 0,
+            duplicateTasks: 0,
+            invalidTaskIds: 0,
+            contentMismatches: 0,
+            statusMismatches: 0,
+            emptyMetadata: 0
+        };
+
+        if (noticeCallback) {
+            noticeCallback('Checking database integrity...');
+        }
+
+        try {
+            const fileMetadatas = this.plugin.settings.fileMetadata;
+            const tasks = this.plugin.settings.todoistTasksData.tasks;
+
+            const taskIdsInCache = new Set<string>();
+            const taskIdsInFiles = new Map<string, { filePath: string; lineNumber: number }>();
+
+            for (const [filePath, metadata] of Object.entries(fileMetadatas)) {
+                const file = this.app.vault.getAbstractFileByPath(filePath);
+
+                if (!file) {
+                    issues.push({
+                        type: 'missing_file',
+                        filePath,
+                        details: `File "${filePath}" referenced in metadata does not exist`
+                    });
+                    summary.missingFiles++;
+                    continue;
+                }
+
+                if (!metadata || !metadata.todoistTasks || metadata.todoistTasks.length === 0) {
+                    issues.push({
+                        type: 'empty_metadata',
+                        filePath,
+                        details: `Metadata for "${filePath}" is empty`
+                    });
+                    summary.emptyMetadata++;
+                    continue;
+                }
+
+                const content = await this.app.vault.cachedRead(file);
+                const lines = content.split('\n');
+
+                for (const taskId of metadata.todoistTasks) {
+                    if (taskIdsInFiles.has(taskId)) {
+                        const existing = taskIdsInFiles.get(taskId)!;
+                        issues.push({
+                            type: 'duplicate_task',
+                            filePath,
+                            taskId,
+                            details: `Task ${taskId} appears in multiple files: "${existing.filePath}" and "${filePath}"`
+                        });
+                        summary.duplicateTasks++;
+                    }
+
+                    taskIdsInFiles.set(taskId, { filePath, lineNumber: -1 });
+
+                    const lineWithTask = lines.findIndex(line => line.includes(`%%[todoist_id:: ${taskId}]%%`) || line.includes(`%%[todoist_id::${taskId}]%%`));
+                    if (lineWithTask === -1) {
+                        issues.push({
+                            type: 'missing_metadata',
+                            filePath,
+                            taskId,
+                            details: `Task ${taskId} in metadata but not found in file "${filePath}"`
+                        });
+                        summary.missingMetadata++;
+                    } else {
+                        taskIdsInFiles.set(taskId, { filePath, lineNumber: lineWithTask });
+                    }
+                }
+            }
+
+            for (const task of tasks) {
+                const taskId = task.id;
+                taskIdsInCache.add(taskId);
+
+                if (!taskIdsInFiles.has(taskId)) {
+                    issues.push({
+                        type: 'orphaned_task',
+                        taskId,
+                        details: `Task ${taskId} exists in cache but not in any file metadata`
+                    });
+                    summary.orphanedTasks++;
+                }
+
+                if (!task.path) {
+                    issues.push({
+                        type: 'missing_metadata',
+                        taskId,
+                        details: `Task ${taskId} in cache has no path information`
+                    });
+                    summary.missingMetadata++;
+                    continue;
+                }
+
+                const file = this.app.vault.getAbstractFileByPath(task.path);
+                if (!file) {
+                    issues.push({
+                        type: 'missing_file',
+                        filePath: task.path,
+                        taskId,
+                        details: `Task ${taskId} references missing file "${task.path}"`
+                    });
+                    summary.missingFiles++;
+                    continue;
+                }
+
+                try {
+                    const todoistTask = await this.plugin.todoistRestAPI.getTaskById(taskId);
+                    if (!todoistTask) {
+                        issues.push({
+                            type: 'invalid_task_id',
+                            taskId,
+                            details: `Task ${taskId} not found in Todoist`
+                        });
+                        summary.invalidTaskIds++;
+                        continue;
+                    }
+
+                    const fileContent = await this.app.vault.cachedRead(file);
+                    const lines = fileContent.split('\n');
+                    const fileTaskInfo = taskIdsInFiles.get(taskId);
+
+                    if (fileTaskInfo && fileTaskInfo.lineNumber >= 0 && lines[fileTaskInfo.lineNumber]) {
+                        const line = lines[fileTaskInfo.lineNumber];
+                        const obsidianContent = this.extractTaskContent(line);
+                        const todoistContent = todoistTask.content || '';
+
+                        if (obsidianContent.trim() !== todoistContent.trim()) {
+                            issues.push({
+                                type: 'content_mismatch',
+                                filePath: task.path,
+                                taskId,
+                                details: `Task ${taskId} content differs between Obsidian and Todoist`
+                            });
+                            summary.contentMismatches++;
+                        }
+
+                        const obsidianCompleted = /\[x\]/i.test(line);
+                        const todoistCompleted = todoistTask.isCompleted || false;
+
+                        if (obsidianCompleted !== todoistCompleted) {
+                            issues.push({
+                                type: 'status_mismatch',
+                                filePath: task.path,
+                                taskId,
+                                details: `Task ${taskId} completion status differs between Obsidian (${obsidianCompleted}) and Todoist (${todoistCompleted})`
+                            });
+                            summary.statusMismatches++;
+                        }
+                    }
+                } catch (error) {
+                    issues.push({
+                        type: 'invalid_task_id',
+                        taskId,
+                        details: `Failed to verify task ${taskId} in Todoist: ${(error as Error).message}`
+                    });
+                    summary.invalidTaskIds++;
+                }
+
+                if (noticeCallback && taskIdsInCache.size % 10 === 0) {
+                    noticeCallback(`Checked ${taskIdsInCache.size}/${tasks.length} tasks...`);
+                }
+            }
+
+            const totalIssues = Object.values(summary).reduce((a, b) => a + b, 0);
+            this.plugin.logOperation?.log('DATABASE_CHECKED', `Database check completed: ${totalIssues} issues found`);
+
+            return {
+                success: totalIssues === 0,
+                totalIssues,
+                issues,
+                summary
+            };
+        } catch (error) {
+            this.plugin.logOperation?.log('DATABASE_CHECK', `Database check failed: ${(error as Error).message}`);
+            return {
+                success: false,
+                totalIssues: 0,
+                issues: [{
+                    type: 'missing_metadata',
+                    details: `Database check failed: ${(error as Error).message}`
+                }],
+                summary
+            };
         }
     }
 

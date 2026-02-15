@@ -254,160 +254,45 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 		.setName('Check Database')
-		.setDesc('Check for possible issues: sync error, file renaming not updated, or missed tasks not synchronized.')
+		.setDesc('Check for possible issues: sync errors, file renaming, missing tasks, or conflicts between Obsidian and Todoist.')
 		.addButton(button => button
 			.setButtonText('Check Database')
 			.onClick(async () => {
-				// Add code here to handle exporting Todoist data
 				if(!this.plugin.settings.apiInitialized){
 					new Notice(`Please set the todoist api first`)
 					return
 				}
 
-				//reinstall plugin
+				const checkNotice = new Notice('Checking database integrity...', 0);
 
-
-
-				//check file metadata
-				console.log('checking file metadata')
-				await this.plugin.cacheOperation.checkFileMetadata()
-				this.plugin.saveSettings()
-				const metadatas = await this.plugin.cacheOperation.getFileMetadatas()
-				// check default project task amounts
 				try{
-					const projectId = this.plugin.settings.defaultProjectId
-					let options = {}
-					options.projectId = projectId
-					const tasks = await this.plugin.todoistRestAPI.GetActiveTasks(options)
-					let length = tasks.length
-					if(length >= 300){
-						new Notice(`The number of tasks in the default project exceeds 300, reaching the upper limit. It is not possible to add more tasks. Please modify the default project.`)
-					}
-					//console.log(tasks)
-
-				}catch(error){
-					console.error(`An error occurred while get tasks from todoist: ${error.message}`);
-				}
-
-				if (!await this.plugin.checkAndHandleSyncLock()) return;
-
-
-
-				console.log('checking deleted tasks')
-				//check empty task				
-				for (const key in metadatas) {
-					const value = metadatas[key];
-					//console.log(value)
-					for(const taskId of value.todoistTasks) {
-						
-						//console.log(`${taskId}`)
-						let taskObject
-
-						try{
-							taskObject = await this.plugin.cacheOperation.loadTaskFromCacheyID(taskId)
-						}catch(error){
-							console.error(`An error occurred while loading task cache: ${error.message}`);
-						}
-
-						if(!taskObject){
-							console.log(`The task data of the ${taskId} is empty.`)
-							//get from todoist 
-							try {
-								taskObject = await this.plugin.todoistRestAPI.getTaskById(taskId);
-							  } catch (error) {
-								if (error.message.includes('404')) {
-								  // 处理404错误
-								  console.log(`Task ${taskId} seems to not exist.`);
-								  await this.plugin.cacheOperation.deleteTaskIdFromMetadata(key,taskId)
-								  continue
-								} else {
-								  // 处理其他错误
-								  console.error(error);
-								  continue
-								}
-							  }
-
-						}									
-					};
-
-				  }
-				  this.plugin.saveSettings()
-
-
-				console.log('checking renamed files')
-				try{
-					//check renamed files
-					for (const key in metadatas) {
-						const value = metadatas[key];
-						//console.log(value)
-						const newDescription = this.plugin.taskParser.getObsidianUrlFromFilepath(key)
-						for(const taskId of value.todoistTasks) {
-							
-							//console.log(`${taskId}`)
-							let taskObject
-							try{
-								taskObject = await this.plugin.cacheOperation.loadTaskFromCacheyID(taskId)
-							}catch(error){
-								console.error(`An error occurred while loading task ${taskId} from cache: ${error.message}`);
-								console.log(taskObject)
-							}
-							if(!taskObject){
-								console.log(`Task ${taskId} seems to not exist.`)
-								continue
-							}
-							if(!taskObject?.description){
-								console.log(`The description of the task ${taskId} is empty.`)
-							}							
-							const oldDescription = taskObject?.description ?? '';
-							if(newDescription != oldDescription){
-								console.log('Preparing to update description.')
-								console.log(oldDescription)
-								console.log(newDescription)
-								try{
-									//await this.plugin.todoistSync.updateTaskDescription(key)
-								}catch(error){
-									console.error(`An error occurred while updating task discription: ${error.message}`);
-								}
-
-							}
-			
-						};
-
-					  }
-
-					//check empty file metadata
-					
-					//check calendar format
-
-
-					
-					//check omitted tasks
-					console.log('checking unsynced tasks')
-					const files = this.app.vault.getFiles()
-					files.forEach(async (v, i) => {
-						if(v.extension == "md"){
-							try{
-								//console.log(`Scanning file ${v.path}`)
-								await this.plugin.fileOperation.addTodoistLinkToFile(v.path)
-								if(this.plugin.settings.enableFullVaultSync){
-									await this.plugin.fileOperation.addTodoistTagToFile(v.path)
-								}
-
-								
-							}catch(error){
-								console.error(`An error occurred while check new tasks in the file: ${v.path}, ${error.message}`);
-								
-							}
-
-						}
+					const result = await this.plugin.cacheOperation.checkDatabase((message: string) => {
+						checkNotice.setMessage(message);
 					});
-					this.plugin.syncLock = false
-					new Notice(`All files have been scanned.`)
-				}catch(error){
-					console.error(`An error occurred while scanning the vault.:${error}`)
-					this.plugin.syncLock = false
-				}
 
+					checkNotice.hide();
+
+					if(result.success){
+						new Notice(`Database check passed! No issues found.`);
+					}else{
+						let message = `Found ${result.totalIssues} issues:\n`;
+						message += `- ${result.summary.missingFiles} missing files\n`;
+						message += `- ${result.summary.missingMetadata} missing metadata\n`;
+						message += `- ${result.summary.orphanedTasks} orphaned tasks\n`;
+						message += `- ${result.summary.duplicateTasks} duplicate tasks\n`;
+						message += `- ${result.summary.invalidTaskIds} invalid task IDs\n`;
+						message += `- ${result.summary.contentMismatches} content mismatches\n`;
+						message += `- ${result.summary.statusMismatches} status mismatches\n`;
+						message += `- ${result.summary.emptyMetadata} empty metadata`;
+
+						new Notice(message, 8000);
+
+						this.plugin.logOperation?.log('DATABASE_CHECK', `Found ${result.totalIssues} database issues`);
+					}
+				}catch(error){
+					checkNotice.hide();
+					new Notice(`Database check failed: ${error.message}`);
+				}
 			})
 		);
 
