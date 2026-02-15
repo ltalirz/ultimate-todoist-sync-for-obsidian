@@ -284,11 +284,19 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 						message += `- ${result.summary.contentMismatches} content mismatches\n`;
 						message += `- ${result.summary.statusMismatches} status mismatches\n`;
 						message += `- ${result.summary.emptyMetadata} empty metadata\n`;
-						message += `- ${result.summary.missingInCache} tasks in files but not in cache`;
+						message += `- ${result.summary.missingInCache} tasks in files but not in cache\n\n`;
 
-						new Notice(message, 8000);
+						if (result.reportPath) {
+							message += `Report saved to: ${result.reportPath}`;
+						}
+
+						new Notice(message, 10000);
 
 						this.plugin.logOperation?.log('DATABASE_CHECK', `Found ${result.totalIssues} database issues`);
+					}
+
+					if (result.reportPath) {
+						new Notice(`Detailed report saved to: ${result.reportPath}`, 5000);
 					}
 				}catch(error){
 					checkNotice.hide();
