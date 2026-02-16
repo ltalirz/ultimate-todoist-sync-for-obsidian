@@ -266,7 +266,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 				const checkNotice = new Notice('Checking database integrity...', 0);
 
 				try{
-					const result = await this.plugin.cacheOperation.checkDatabase((message: string) => {
+					const result = await this.plugin.databaseChecker!.checkDatabase((message: string) => {
 						checkNotice.setMessage(message);
 					});
 

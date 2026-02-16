@@ -21,6 +21,9 @@ import { BackupOperation } from './src/backupOperation';
 //sync module
 import { TodoistSync } from './src/syncModule';
 
+//database checker
+import { DatabaseChecker } from './src/databaseChecker';
+
 
 //import modal
 import { SetDefalutProjectInTheFilepathModal } from 'src/modal';
@@ -35,6 +38,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
     todoistSync: TodoistSync | undefined;
     logOperation: LogOperation | undefined;
     backupOperation: BackupOperation | undefined;
+    databaseChecker: DatabaseChecker | undefined;
 	lastLines: Map<string,number>;
 	statusBar;
 	syncLock: Boolean;
@@ -416,6 +420,9 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 
 		//initialize backup operation
 		this.backupOperation = new BackupOperation(this.app,this)
+
+		//initialize database checker
+		this.databaseChecker = new DatabaseChecker(this.app, this)
 
 	}
 
