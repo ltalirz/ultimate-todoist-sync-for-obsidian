@@ -203,7 +203,7 @@ export class DatabaseChecker {
                 for (let i = 0; i < lines.length; i++) {
                     const line = lines[i];
                     if (line.includes('#todoist')) {
-                        const match = line.match(/%%\[todoist_id::\s*(\w+)\]%%/);
+                        const match = line.match(/%%\[todoist_id::\s*([\w-]+)\]%%/);
                         if (match && match[1]) {
                             const taskId = match[1];
                             const taskContent = this.extractTaskContent(line);
@@ -515,7 +515,7 @@ export class DatabaseChecker {
     private extractTaskContent(line: string): string {
         let content = line.replace(/^(\s*)([-*])\s+\[(x|X| )\]\s*/, '');
         content = content.replace(/#todoist/g, '').trim();
-        content = content.replace(/%%\[todoist_id::\s*\w+\]%%/g, '').trim();
+        content = content.replace(/%%\[todoist_id::\s*[\w-]+\]%%/g, '').trim();
         content = content.replace(/\[link\]\([^)]+\)/g, '').trim();
         content = content.replace(/[🗓️📅📆🗓]\s*\d{4}-\d{2}-\d{2}/gu, '').trim();
         content = content.replace(/\s!![1-4]\s/g, ' ').trim();
