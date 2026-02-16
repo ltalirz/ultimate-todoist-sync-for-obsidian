@@ -675,16 +675,11 @@ Generated: ${new Date().toLocaleString()}
 `;
 
         try {
-            const folderExists = this.app.vault.getAbstractFileByPath(reportFolder);
-            if (!folderExists) {
-                try {
-                    await this.app.vault.createFolder(reportFolder);
-                } catch (folderError) {
-                    // 文件夹可能已存在，忽略错误
-                    if (!this.app.vault.getAbstractFileByPath(reportFolder)) {
-                        throw folderError;
-                    }
-                }
+            // 直接尝试创建文件夹，忽略已存在的错误
+            try {
+                await this.app.vault.createFolder(reportFolder);
+            } catch {
+                // 文件夹已存在，忽略
             }
 
             const reportPath = `${reportFolder}/${reportFilename}`;
