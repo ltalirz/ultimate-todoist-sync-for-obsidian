@@ -687,6 +687,7 @@ Generated: ${new Date().toLocaleString()}
             return reportPath;
         } catch (error) {
             console.error('Failed to save report:', error);
+            this.plugin.logOperation?.log('DATABASE_CHECK', `Failed to save report: ${(error as Error).message}`);
             return undefined;
         }
     }
