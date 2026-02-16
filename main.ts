@@ -664,16 +664,16 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 	}
 
 	async checkAndHandleSyncLock() {
-		// Check 1: User manual toggle
-		if (!this.settings.syncEnabled) {
-			console.log('Sync is disabled by user');
+		// Check 1: Database check status (先检查，更重要)
+		if (!this.settings.lastDatabaseCheckPassed) {
+			console.log('Sync is disabled due to database issues');
+			new Notice('Sync is blocked due to database issues. Please fix the issues first.');
 			return false;
 		}
 
-		// Check 2: Database check status
-		if (!this.settings.lastDatabaseCheckPassed) {
-			console.log('Sync is disabled due to database issues');
-			new Notice('Sync is disabled due to database issues. Please run Check Database and fix the issues.');
+		// Check 2: User manual toggle
+		if (!this.settings.syncEnabled) {
+			console.log('Sync is disabled by user');
 			return false;
 		}
 

@@ -419,8 +419,10 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 				: 'Never';
 			
 			let statusText = '';
-			if (!passed) {
+			if (!passed && !enabled) {
 				statusText = '⚠️ Sync is disabled due to database issues';
+			} else if (!passed && enabled) {
+				statusText = '⚠️ Sync is manually enabled but blocked due to database issues';
 			} else if (!enabled) {
 				statusText = '❌ Sync is disabled by user';
 			} else {
