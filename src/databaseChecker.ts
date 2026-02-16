@@ -677,7 +677,14 @@ Generated: ${new Date().toLocaleString()}
         try {
             const folderExists = this.app.vault.getAbstractFileByPath(reportFolder);
             if (!folderExists) {
-                await this.app.vault.createFolder(reportFolder);
+                try {
+                    await this.app.vault.createFolder(reportFolder);
+                } catch (folderError) {
+                    // 文件夹可能已存在，忽略错误
+                    if (!this.app.vault.getAbstractFileByPath(reportFolder)) {
+                        throw folderError;
+                    }
+                }
             }
 
             const reportPath = `${reportFolder}/${reportFilename}`;
