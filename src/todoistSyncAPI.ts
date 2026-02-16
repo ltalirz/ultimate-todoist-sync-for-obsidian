@@ -319,7 +319,7 @@ export class TodoistSyncAPI   {
     }
 
 
-    //get projects activity
+//get projects activity
     //result  {results:[],next_cursor:null}
     async getProjectsActivity() {
       const accessToken = this.plugin.settings.todoistAPIToken
@@ -347,7 +347,281 @@ export class TodoistSyncAPI   {
           throw new Error('Failed to fetch projects activities due to network error');
       }
   }
-     
+
+  // Generate unique UUID for commands
+  private generateUUID(): string {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
+  // Generate temp_id for commands
+  private generateTempId(): string {
+    return 'temp_' + Date.now() + '_' + Math.random().toString(36).substring(2, 15);
+  }
+
+  // Execute Sync API commands
+  async executeCommands(commands: any[]): Promise<any> {
+    const accessToken = this.plugin.settings.todoistAPIToken;
+    const url = 'https://api.todoist.com/api/v1/sync';
+    
+    const options = {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({
+        commands: JSON.stringify(commands)
+      })
+    };
+
+    try {
+      const response = await fetch(url, options);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to execute commands: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error executing commands:', error);
+      throw error;
+    }
+  }
+
+  // Add task using Sync API
+  async addTask(args: {
+    content: string;
+    project_id: string;
+    parent_id?: string;
+    due?: { string?: string; date?: string; datetime?: string };
+    priority?: number;
+    description?: string;
+  }): Promise<{ id: string }> {
+    const tempId = this.generateTempId();
+    const command = {
+      type: 'item_add',
+      uuid: this.generateUUID(),
+      temp_id: tempId,
+      args: args
+    };
+
+    const result = await this.executeCommands([command]);
+    if (result && result.temp_id_mapping && result.temp_id_mapping[tempId]) {
+      return { id: result.temp_id_mapping[tempId] };
+    }
+    throw new Error('Failed to add task: no response');
+  }
+
+  // Update task using Sync API
+  async updateTask(taskId: string, args: {
+    content?: string;
+    description?: string;
+    priority?: number;
+    due?: { string?: string; date?: string };
+  }): Promise<boolean> {
+    const command = {
+      type: 'item_update',
+      uuid: this.generateUUID(),
+      args: {
+        id: taskId,
+        ...args
+      }
+    };
+
+    await this.executeCommands([command]);
+    return true;
+  }
+
+  // Close task using Sync API
+  async closeTask(taskId: string): Promise<boolean> {
+    const command = {
+      type: 'item_close',
+      uuid: this.generateUUID(),
+      args: {
+        id: taskId
+      }
+    };
+
+    await this.executeCommands([command]);
+    return true;
+  }
+
+  // Reopen task using Sync API
+  async reopenTask(taskId: string): Promise<boolean> {
+    const command = {
+      type: 'item_reopen',
+      uuid: this.generateUUID(),
+      args: {
+        id: taskId
+      }
+    };
+
+    await this.executeCommands([command]);
+    return true;
+  }
+
+  // Compatible wrapper: AddTask
+  async AddTask(task: {
+    projectId: string;
+    content: string;
+    parentId?: string;
+    dueDate?: string;
+    dueDatetime?: string;
+    labels?: string[];
+    description?: string;
+    priority?: number;
+  }): Promise<{ id: string }> {
+    const args: any = {
+      content: task.content,
+      project_id: task.projectId
+    };
+
+    if (task.parentId) {
+      args.parent_id = task.parentId;
+    }
+
+    if (task.dueDate) {
+      args.due = { date: task.dueDate };
+    } else if (task.dueDatetime) {
+      args.due = { datetime: task.dueDatetime };
+    }
+
+    if (task.priority) {
+      args.priority = task.priority;
+    }
+
+    if (task.description) {
+      args.description = task.description;
+    }
+
+    if (task.labels && task.labels.length > 0) {
+      args.labels = task.labels;
+    }
+
+    return this.addTask(args);
+  }
+
+  // Compatible wrapper: UpdateTask
+  async UpdateTask(taskId: string, updates: {
+    content?: string;
+    description?: string;
+    labels?: string[];
+    dueDate?: string;
+    dueDatetime?: string;
+    dueString?: string;
+    parentId?: string;
+    priority?: number;
+  }): Promise<boolean> {
+    const args: any = {};
+
+    if (updates.content) args.content = updates.content;
+    if (updates.description) args.description = updates.description;
+    if (updates.labels) args.labels = updates.labels;
+    if (updates.parentId) args.parent_id = updates.parentId;
+    if (updates.priority) args.priority = updates.priority;
+
+    if (updates.dueDate) {
+      args.due = { date: updates.dueDate };
+    } else if (updates.dueDatetime) {
+      args.due = { datetime: updates.dueDatetime };
+    } else if (updates.dueString) {
+      args.due = { string: updates.dueString };
+    }
+
+    return this.updateTask(taskId, args);
+  }
+
+  // Compatible wrapper: CloseTask
+  async CloseTask(taskId: string): Promise<boolean> {
+    return this.closeTask(taskId);
+  }
+
+  // Compatible wrapper: OpenTask
+  async OpenTask(taskId: string): Promise<boolean> {
+    return this.reopenTask(taskId);
+  }
+
+  // Compatible wrapper: GetAllProjects
+  async GetAllProjects(): Promise<any[]> {
+    try {
+      const data = await this.getAllResources();
+      return data.projects || [];
+    } catch (error) {
+      console.error('Error getting all projects:', error);
+      throw error;
+    }
+  }
+
+  // Compatible wrapper: GetTaskById
+  async GetTaskById(taskId: string): Promise<any> {
+    try {
+      const data = await this.getAllResources();
+      const tasks = data.items || [];
+      return tasks.find((t: any) => t.id === taskId);
+    } catch (error) {
+      console.error('Error getting task by id:', error);
+      throw error;
+    }
+  }
+
+  // Compatible wrapper: GetActiveTasks
+  async GetActiveTasks(options?: {
+    projectId?: string;
+    section_id?: string;
+    label?: string;
+    filter?: string;
+    lang?: string;
+    ids?: string[];
+  }): Promise<any[]> {
+    try {
+      const data = await this.getAllResources();
+      let tasks = data.items || [];
+
+      if (options) {
+        if (options.projectId) {
+          tasks = tasks.filter((t: any) => t.project_id === options.projectId);
+        }
+        if (options.section_id) {
+          tasks = tasks.filter((t: any) => t.section_id === options.section_id);
+        }
+        if (options.label) {
+          tasks = tasks.filter((t: any) => t.labels && t.labels.includes(options.label));
+        }
+        if (options.ids && options.ids.length > 0) {
+          tasks = tasks.filter((t: any) => options.ids!.includes(t.id));
+        }
+      }
+
+      return tasks;
+    } catch (error) {
+      console.error('Error getting active tasks:', error);
+      throw error;
+    }
+  }
+
+  // Compatible wrapper: InitializeAPI (returns self for compatibility)
+  initializeAPI(): TodoistSyncAPI {
+    return this;
+  }
+
+  // Delete task using Sync API
+  async deleteTask(taskId: string): Promise<boolean> {
+    const command = {
+      type: 'item_delete',
+      uuid: this.generateUUID(),
+      args: {
+        id: taskId
+      }
+    };
+
+    await this.executeCommands([command]);
+    return true;
+  }
+       
 }
 
 

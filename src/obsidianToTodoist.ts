@@ -41,7 +41,7 @@ export class ObsidianToTodoistSync {
             .filter((taskId: string) => !currentFileValueWithOutFrontMatter.includes(taskId))
             .map(async (taskId: string) => {
                 try {
-                    const api = this.plugin.todoistRestAPI.initializeAPI();
+                    const api = this.plugin.todoistSyncAPI.initializeAPI();
                     const response = await api.deleteTask(taskId);
 
                     if (response) {
@@ -83,7 +83,7 @@ export class ObsidianToTodoistSync {
             const currentTask = await this.plugin.taskParser.convertTextToTodoistTaskObject(linetxt, filepath, line, fileContent);
 
             try {
-                const newTask = await this.plugin.todoistRestAPI.AddTask(currentTask);
+                const newTask = await this.plugin.todoistSyncAPI.AddTask(currentTask);
                 const { id: todoist_id } = newTask;
                 newTask.path = filepath;
                 new Notice(`new task ${newTask.content} id is ${newTask.id}`);
@@ -94,7 +94,7 @@ export class ObsidianToTodoistSync {
                 this.plugin.cacheOperation.appendTaskToCache(newTask);
 
                 if (currentTask.isCompleted === true) {
-                    await this.plugin.todoistRestAPI.CloseTask(newTask.id);
+                    await this.plugin.todoistSyncAPI.CloseTask(newTask.id);
                     this.plugin.cacheOperation.closeTaskToCacheByID(todoist_id);
                     this.plugin.logOperation?.log('OBSIDIAN_TASK_COMPLETED', `Completed task in Obsidian: ${newTask.content}`, filepath, todoist_id);
                     this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Completed task in Todoist: ${newTask.content}`, filepath, todoist_id);
@@ -179,7 +179,7 @@ export class ObsidianToTodoistSync {
                 }
                 console.log(currentTask);
                 try {
-                    const newTask = await this.plugin.todoistRestAPI.AddTask(currentTask);
+                    const newTask = await this.plugin.todoistSyncAPI.AddTask(currentTask);
                     const { id: todoist_id } = newTask;
                     newTask.path = filepath;
                     console.log(newTask);
@@ -188,7 +188,7 @@ export class ObsidianToTodoistSync {
                     this.plugin.cacheOperation.appendTaskToCache(newTask);
 
                     if (currentTask.isCompleted === true) {
-                        await this.plugin.todoistRestAPI.CloseTask(newTask.id);
+                        await this.plugin.todoistSyncAPI.CloseTask(newTask.id);
                         this.plugin.cacheOperation.closeTaskToCacheByID(todoist_id);
                     }
                     this.plugin.saveSettings();
@@ -300,7 +300,7 @@ export class ObsidianToTodoistSync {
                 }
 
                 if (contentChanged || tagsChanged || dueDateChanged || projectChanged || parentIdChanged || priorityChanged) {
-                    const updatedTask = await this.plugin.todoistRestAPI.UpdateTask(lineTask.todoist_id.toString(), updatedContent);
+                    const updatedTask = await this.plugin.todoistSyncAPI.UpdateTask(lineTask.todoist_id.toString(), updatedContent);
                     updatedTask.path = filepath;
                     this.plugin.cacheOperation.updateTaskToCacheByID(updatedTask);
                     this.plugin.logOperation?.log('OBSIDIAN_TASK_MODIFIED', `Updated task: ${updatedTask.content}`, filepath, lineTask_todoist_id);
@@ -311,13 +311,13 @@ export class ObsidianToTodoistSync {
                     console.log(`Status modified for task ${lineTask_todoist_id}`);
                     if (lineTask.isCompleted === true) {
                         console.log(`task completed`);
-                        await this.plugin.todoistRestAPI.CloseTask(lineTask.todoist_id.toString());
+                        await this.plugin.todoistSyncAPI.CloseTask(lineTask.todoist_id.toString());
                         this.plugin.cacheOperation.closeTaskToCacheByID(lineTask_todoist_id.toString());
                         this.plugin.logOperation?.log('OBSIDIAN_TASK_COMPLETED', `Completed task: ${lineTask.content}`, filepath, lineTask_todoist_id);
                         this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Completed task in Todoist: ${lineTask.content}`, filepath, lineTask_todoist_id);
                     } else {
                         console.log(`task uncompleted`);
-                        await this.plugin.todoistRestAPI.OpenTask(lineTask.todoist_id.toString());
+                        await this.plugin.todoistSyncAPI.OpenTask(lineTask.todoist_id.toString());
                         this.plugin.cacheOperation.reopenTaskToCacheByID(lineTask.todoist_id.toString());
                         this.plugin.logOperation?.log('OBSIDIAN_TASK_REOPENED', `Reopened task: ${lineTask.content}`, filepath, lineTask_todoist_id);
                         this.plugin.logOperation?.log('TODOIST_TASK_REOPENED', `Reopened task in Todoist: ${lineTask.content}`, filepath, lineTask_todoist_id);
@@ -408,7 +408,7 @@ export class ObsidianToTodoistSync {
 
     async closeTask(taskId: string): Promise<void> {
         try {
-            await this.plugin.todoistRestAPI.CloseTask(taskId);
+            await this.plugin.todoistSyncAPI.CloseTask(taskId);
             await this.plugin.fileOperation.completeTaskInTheFile(taskId);
             await this.plugin.cacheOperation.closeTaskToCacheByID(taskId);
             this.plugin.saveSettings();
@@ -422,7 +422,7 @@ export class ObsidianToTodoistSync {
 
     async repoenTask(taskId: string): Promise<void> {
         try {
-            await this.plugin.todoistRestAPI.OpenTask(taskId);
+            await this.plugin.todoistSyncAPI.OpenTask(taskId);
             await this.plugin.fileOperation.uncompleteTaskInTheFile(taskId);
             await this.plugin.cacheOperation.reopenTaskToCacheByID(taskId);
             this.plugin.saveSettings();
@@ -438,7 +438,7 @@ export class ObsidianToTodoistSync {
         const deletedTaskIds: string[] = [];
 
         for (const taskId of taskIds) {
-            const api = await this.plugin.todoistRestAPI.initializeAPI();
+            const api = await this.plugin.todoistSyncAPI.initializeAPI();
             try {
                 const response = await api.deleteTask(taskId);
                 console.log(`response is ${response}`);
@@ -479,7 +479,7 @@ export class ObsidianToTodoistSync {
                 const task = await this.plugin.cacheOperation.loadTaskFromCacheyID(taskId);
                 if (task) {
                     const description = `[[${filepath}]]`;
-                    await this.plugin.todoistRestAPI.UpdateTask(taskId, { description });
+                    await this.plugin.todoistSyncAPI.UpdateTask(taskId, { description });
                     this.plugin.logOperation?.log('TODOIST_TASK_UPDATED', `Updated task description: ${taskId}`, filepath, taskId);
                 }
             } catch (error) {

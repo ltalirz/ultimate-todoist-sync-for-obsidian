@@ -256,7 +256,7 @@ export class DatabaseChecker {
 
     async fetchTodoistTasks(): Promise<Map<string, TodoistTask>> {
         const todoistTasksMap = new Map<string, TodoistTask>();
-        const todoistTasks = await this.plugin.todoistRestAPI.GetActiveTasks({});
+        const todoistTasks = await this.plugin.todoistSyncAPI.GetActiveTasks({});
         
         if (!todoistTasks) {
             return todoistTasksMap;

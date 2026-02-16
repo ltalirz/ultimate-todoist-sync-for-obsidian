@@ -484,7 +484,7 @@ export class CacheOperation   {
     async saveProjectsToCache() {
         try{
                 //get projects
-            const projects = await this.plugin.todoistRestAPI.GetAllProjects()
+            const projects = await this.plugin.todoistSyncAPI.GetAllProjects()
             if(!projects){
                 return false
             }
@@ -558,7 +558,7 @@ export class CacheOperation   {
             } else {
                 console.log('Fetching projects from Todoist...');
             }
-            const projects = await this.plugin.todoistRestAPI.GetAllProjects();
+            const projects = await this.plugin.todoistSyncAPI.GetAllProjects();
             if (!projects) {
                 throw new Error('Failed to fetch projects from Todoist');
             }
@@ -632,7 +632,7 @@ export class CacheOperation   {
                 for (const taskInfo of fileTasks) {
                     try {
                         // 从 Todoist 获取任务详情
-                        const task = await this.plugin.todoistRestAPI.getTaskById(taskInfo.taskId);
+                        const task = await this.plugin.todoistSyncAPI.getTaskById(taskInfo.taskId);
                         
                         // 比较内容是否一致
                         const todoistContent = task.content || '';
@@ -712,7 +712,7 @@ export class CacheOperation   {
                                 if (resolution === 'todoist') {
                                     // 如果选择保留 Todoist 内容，需要重新保存任务到缓存以更新完成状态
                                     try {
-                                        const task = await this.plugin.todoistRestAPI.getTaskById(conflict.taskId);
+                                        const task = await this.plugin.todoistSyncAPI.getTaskById(conflict.taskId);
                                         (task as any).path = conflict.filePath;
                                         (task as any).isCompleted = task.isCompleted;
                                         this.plugin.cacheOperation.updateTaskToCacheByID(task);
@@ -778,7 +778,7 @@ export class CacheOperation   {
             if (resolution === 'obsidian') {
                 // 用 Obsidian 内容更新 Todoist
                 try {
-                    await this.plugin.todoistRestAPI.UpdateTask(conflict.taskId, {
+                    await this.plugin.todoistSyncAPI.UpdateTask(conflict.taskId, {
                         content: conflict.obsidianContent
                     });
                     this.plugin.logOperation?.log('TODOIST_TASK_UPDATED', `Updated task ${conflict.taskId} with Obsidian content`, conflict.filePath, conflict.taskId);
