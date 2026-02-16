@@ -23,6 +23,10 @@ export interface UltimateTodoistSyncSettings {
 	statistics: any;
 	debugMode:boolean;
 	useAppURI:boolean;
+	// Sync control
+	syncEnabled: boolean;
+	lastDatabaseCheckPassed: boolean;
+	lastDatabaseCheckTime: number | null;
 	// Log settings
 	enableLog:boolean;
 	logs:Array<{
@@ -48,6 +52,9 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
 	statistics:{},
 	debugMode:false,
 	useAppURI:true,
+	syncEnabled: true,
+	lastDatabaseCheckPassed: true,
+	lastDatabaseCheckTime: null,
 	enableLog:true,
 	logs:[],
 }
@@ -387,6 +394,137 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 						})
 						
 				)
+
+		// ============================================
+		// Database Sync Control Section
+		// ============================================
+		
+		containerEl.createEl('h3', { text: 'Database Sync Control' });
+
+		// Sync Status Display
+		const syncStatusEl = containerEl.createEl('div', { cls: 'setting-item-description' });
+		const updateSyncStatus = () => {
+			const passed = this.plugin.settings.lastDatabaseCheckPassed;
+			const enabled = this.plugin.settings.syncEnabled;
+			const lastCheck = this.plugin.settings.lastDatabaseCheckTime 
+				? new Date(this.plugin.settings.lastDatabaseCheckTime).toLocaleString() 
+				: 'Never';
+			
+			let statusText = '';
+			if (!enabled) {
+				statusText = '❌ Sync is disabled by user';
+			} else if (!passed) {
+				statusText = '⚠️ Sync is disabled due to database issues';
+			} else {
+				statusText = '✅ Sync is enabled';
+			}
+			
+			syncStatusEl.innerHTML = `
+				<div>Status: ${statusText}</div>
+				<div>Last check: ${lastCheck}</div>
+			`;
+		};
+		updateSyncStatus();
+
+		// Sync Enable Toggle
+		new Setting(containerEl)
+			.setName('Enable Sync')
+			.setDesc('Manually enable or disable sync functionality')
+			.addToggle(component =>
+				component
+					.setValue(this.plugin.settings.syncEnabled)
+					.onChange(async (value) => {
+						this.plugin.settings.syncEnabled = value;
+						await this.plugin.saveSettings();
+						updateSyncStatus();
+						new Notice(`Sync ${value ? 'enabled' : 'disabled'} by user`);
+					})
+			);
+
+		// Run Database Check Button
+		new Setting(containerEl)
+			.setName('Run Database Check')
+			.setDesc('Manually run database integrity check')
+			.addButton(component => {
+				component.setButtonText('Check Now');
+				component.onClick(async () => {
+					if (!this.plugin.settings.apiInitialized) {
+						new Notice('Please set the Todoist API first');
+						return;
+					}
+					if (!this.plugin.databaseChecker) {
+						new Notice('Database checker not initialized');
+						return;
+					}
+					
+					const checkNotice = new Notice('Running database check...', 0);
+					try {
+						const result = await this.plugin.databaseChecker.checkDatabase();
+						checkNotice.hide();
+						
+						this.plugin.settings.lastDatabaseCheckPassed = result.success;
+						this.plugin.settings.lastDatabaseCheckTime = Date.now();
+						await this.plugin.saveSettings();
+						updateSyncStatus();
+						
+						if (result.success) {
+							new Notice(`Database check passed! No issues found.`);
+						} else {
+							this.plugin.settings.syncEnabled = false;
+							await this.plugin.saveSettings();
+							new Notice(`Found ${result.totalIssues} database issues. Sync is now disabled.`);
+						}
+					} catch (error) {
+						checkNotice.hide();
+						new Notice(`Database check failed: ${error.message}`);
+					}
+				});
+				return component;
+			});
+
+		// Fix and Enable Sync Button
+		new Setting(containerEl)
+			.setName('Fix & Enable Sync')
+			.setDesc('Run database check, and enable sync if no issues found')
+			.addButton(component => {
+				component.setButtonText('Fix & Enable');
+				component.onClick(async () => {
+					if (!this.plugin.settings.apiInitialized) {
+						new Notice('Please set the Todoist API first');
+						return;
+					}
+					if (!this.plugin.databaseChecker) {
+						new Notice('Database checker not initialized');
+						return;
+					}
+					
+					const checkNotice = new Notice('Running database check...', 0);
+					try {
+						const result = await this.plugin.databaseChecker.checkDatabase();
+						checkNotice.hide();
+						
+						this.plugin.settings.lastDatabaseCheckTime = Date.now();
+						
+						if (result.success) {
+							this.plugin.settings.lastDatabaseCheckPassed = true;
+							this.plugin.settings.syncEnabled = true;
+							await this.plugin.saveSettings();
+							updateSyncStatus();
+							new Notice('Database check passed! Sync is now enabled.');
+						} else {
+							this.plugin.settings.lastDatabaseCheckPassed = false;
+							this.plugin.settings.syncEnabled = false;
+							await this.plugin.saveSettings();
+							updateSyncStatus();
+							new Notice(`Found ${result.totalIssues} issues. Please fix them first.`);
+						}
+					} catch (error) {
+						checkNotice.hide();
+						new Notice(`Database check failed: ${error.message}`);
+					}
+				});
+				return component;
+			});
 	}
 }
 

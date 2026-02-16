@@ -394,10 +394,40 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		this.syncLock = false
 		new Notice(`Ultimate Todoist Sync loaded successfully.`)
 		this.logOperation?.log('PLUGIN_INITIALIZED', 'Plugin initialized successfully');
+
+		// Run database check on startup
+		await this.runStartupDatabaseCheck();
+		
 		return true
 		
 
 
+	}
+
+	async runStartupDatabaseCheck(): Promise<void> {
+		try {
+			if (!this.databaseChecker) {
+				console.log('Database checker not initialized, skipping startup check');
+				return;
+			}
+
+			console.log('Running startup database check...');
+			const result = await this.databaseChecker.checkDatabase();
+
+			this.settings.lastDatabaseCheckPassed = result.success;
+			this.settings.lastDatabaseCheckTime = Date.now();
+			await this.saveSettings();
+
+			if (result.success) {
+				console.log('Startup database check passed');
+			} else {
+				this.settings.syncEnabled = false;
+				await this.saveSettings();
+				new Notice(`Found ${result.totalIssues} database issues. Sync has been disabled until issues are fixed.`);
+			}
+		} catch (error) {
+			console.error('Startup database check failed:', error);
+		}
 	}
 
 	async initializeModuleClass(){
@@ -634,6 +664,19 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 	}
 
 	async checkAndHandleSyncLock() {
+		// Check 1: User manual toggle
+		if (!this.settings.syncEnabled) {
+			console.log('Sync is disabled by user');
+			return false;
+		}
+
+		// Check 2: Database check status
+		if (!this.settings.lastDatabaseCheckPassed) {
+			console.log('Sync is disabled due to database issues');
+			new Notice('Sync is disabled due to database issues. Please run Check Database and fix the issues.');
+			return false;
+		}
+
 		if (this.syncLock) {
 			console.log('sync locked.');
 			const isSyncLockChecked = await this.checkSyncLock();
