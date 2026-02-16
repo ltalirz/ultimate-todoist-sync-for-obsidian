@@ -273,7 +273,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 					checkNotice.hide();
 
 					if(result.success){
-						new Notice(`Database check passed! No issues found.`);
+						new Notice(`Database check passed! No issues found.\nReport saved to: .todoist-reports/`);
 					}else{
 						let message = `Found ${result.totalIssues} issues:\n`;
 						message += `- ${result.summary.taskDeletedInTodoist} deleted in Todoist\n`;
@@ -302,6 +302,8 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 
 					if (result.reportPath) {
 						new Notice(`Detailed report saved to: ${result.reportPath}`, 5000);
+					}else{
+						new Notice(`Report generation failed. Check console for details.`, 5000);
 					}
 				}catch(error){
 					checkNotice.hide();
