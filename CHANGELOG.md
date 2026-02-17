@@ -45,6 +45,8 @@
 - Fixed AddTask date handling bug (was converting dueDatetime instead of dueDate)
 - Fixed unused imports and variables in main.ts
 - Improved rebuildCache with checkbox status detection and completion status comparison
+- Fixed `getPluginPath()` method error - replaced `getBasePath()` with `vault.configDir` for better compatibility
+- Replaced `fetch()` with Obsidian's `requestUrl()` for all Todoist API calls to fix CORS issues and ensure proper `X-Todoist-Client` header is sent
 
 ---
 

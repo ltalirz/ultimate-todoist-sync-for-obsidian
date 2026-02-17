@@ -1,5 +1,6 @@
-import { App} from 'obsidian';
+import { App, Notice, requestUrl } from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../main";
+import { DeviceManager } from './deviceManager';
 
 
 type Event = {
@@ -21,44 +22,230 @@ type FilterOptions = {
 
 export class TodoistSyncAPI   {
 	app:App;
-  plugin: UltimateTodoistSyncForObsidian;
+  	plugin: UltimateTodoistSyncForObsidian;
+  	deviceManager: DeviceManager;
+
+	private readonly PARTIAL_SYNC_LIMIT = 1000;
+	private readonly FULL_SYNC_LIMIT = 100;
+	private readonly WINDOW_DURATION = 15 * 60 * 1000;
+
+	private rateLimitState = {
+		partialSyncCount: 0,
+		fullSyncCount: 0,
+		windowStartTime: Date.now()
+	};
+
+	private syncData: {
+		projects: any[];
+		items: any[];
+		sections: any[];
+		labels: any[];
+		notes: any[];
+		sections_order: any;
+		project_states: any[];
+		day_orders: any;
+		goals: any;
+		notification_thread_entities: any;
+		notification_threads: any;
+		notification_channel_connected_settings: any[];
+		notification_channel_settings: any[];
+		themes: any[];
+		settings: any;
+		user: any;
+		user_plan_limits: any;
+		live_notifications: any[];
+		completed_onboarding: any[];
+		shortcuts: any[];
+		sync_token: string;
+	} | null = null;
 
 	constructor(app:App, plugin:UltimateTodoistSyncForObsidian) {
 		//super(app,settings);
 		this.app = app;
-    this.plugin = plugin;
+    	this.plugin = plugin;
+		this.deviceManager = new DeviceManager(app, plugin);
 	}
 
-    //backup todoist
-    async getAllResources() { 
-    const accessToken = this.plugin.settings.todoistAPIToken
-    const url = 'https://api.todoist.com/api/v1/sync';
-    const options = {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body: new URLSearchParams({
-        sync_token: "*",
-        resource_types: '["all"]'
-      })
-    };
+	private resetRateLimits(): void {
+		this.rateLimitState.partialSyncCount = 0;
+		this.rateLimitState.fullSyncCount = 0;
+		this.rateLimitState.windowStartTime = Date.now();
+	}
+
+	private checkRateLimitWindow(): void {
+		if (Date.now() - this.rateLimitState.windowStartTime > this.WINDOW_DURATION) {
+			this.resetRateLimits();
+		}
+	}
+
+	private async checkRateLimit(isFullSync: boolean): Promise<void> {
+		this.checkRateLimitWindow();
+
+		const limit = isFullSync ? this.FULL_SYNC_LIMIT : this.PARTIAL_SYNC_LIMIT;
+		const used = isFullSync ? this.rateLimitState.fullSyncCount : this.rateLimitState.partialSyncCount;
+
+		if (used >= limit) {
+			const waitMinutes = Math.ceil((this.WINDOW_DURATION - (Date.now() - this.rateLimitState.windowStartTime)) / 60000);
+			throw new Error(`RATE_LIMIT_EXCEEDED:${waitMinutes}`);
+		}
+	}
+
+	private handleRateLimitError(error: Error): void {
+		const message = error.message;
+
+		if (message.includes('RATE_LIMIT_EXCEEDED')) {
+			const waitMinutes = message.split(':')[1] || '15';
+			new Notice(
+				`⚠️ Todoist API Rate Limit Reached!\n\n` +
+				`You have reached the ${this.rateLimitState.fullSyncCount >= this.FULL_SYNC_LIMIT ? 'full' : 'partial'} sync limit.\n` +
+				`Please wait ${waitMinutes} minutes before next sync.\n\n` +
+				`Tip: Reduce sync frequency to avoid hitting limits.`,
+				15000
+			);
+		} else if (message.includes('429')) {
+			new Notice(
+				`⚠️ Too Many Requests to Todoist!\n\n` +
+				`Please wait 15 minutes before next sync.\n\n` +
+				`Tip: Reduce sync frequency to avoid hitting rate limits.`,
+				15000
+			);
+		}
+	}
+
+	private async getClientHeader(): Promise<string> {
+		return await this.deviceManager.getClientHeader();
+	}
+
+	async initializeSync(): Promise<void> {
+		const data = await this.getAllResources(true);
+		this.syncData = data;
+		this.plugin.settings.syncToken = data.sync_token;
+		await this.plugin.saveSettings();
+		console.log('[TodoistSyncAPI] Sync initialized with full data');
+	}
+
+	private async incrementalSync(): Promise<void> {
+		if (!this.syncData) {
+			await this.initializeSync();
+			return;
+		}
+
+		try {
+			const changes = await this.getAllResources(false);
+			this.mergeSyncData(changes);
+			this.plugin.settings.syncToken = changes.sync_token;
+			await this.plugin.saveSettings();
+			console.log('[TodoistSyncAPI] Incremental sync completed');
+		} catch (error) {
+			console.error('[TodoistSyncAPI] Incremental sync failed:', error);
+		}
+	}
+
+	private mergeSyncData(changes: any): void {
+		if (!this.syncData) return;
+
+		if (changes.projects) {
+			const projectMap = new Map(this.syncData.projects.map((p: any) => [p.id, p]));
+			for (const project of changes.projects) {
+				if (project.is_deleted) {
+					projectMap.delete(project.id);
+				} else {
+					projectMap.set(project.id, project);
+				}
+			}
+			this.syncData.projects = Array.from(projectMap.values());
+		}
+
+		if (changes.items) {
+			const itemMap = new Map(this.syncData.items.map((i: any) => [i.id, i]));
+			for (const item of changes.items) {
+				if (item.is_deleted) {
+					itemMap.delete(item.id);
+				} else {
+					itemMap.set(item.id, item);
+				}
+			}
+			this.syncData.items = Array.from(itemMap.values());
+		}
+
+		if (changes.sections) {
+			const sectionMap = new Map(this.syncData.sections.map((s: any) => [s.id, s]));
+			for (const section of changes.sections) {
+				if (section.is_deleted) {
+					sectionMap.delete(section.id);
+				} else {
+					sectionMap.set(section.id, section);
+				}
+			}
+			this.syncData.sections = Array.from(sectionMap.values());
+		}
+
+		if (changes.labels) {
+			const labelMap = new Map(this.syncData.labels.map((l: any) => [l.id, l]));
+			for (const label of changes.labels) {
+				if (label.is_deleted) {
+					labelMap.delete(label.id);
+				} else {
+					labelMap.set(label.id, label);
+				}
+			}
+			this.syncData.labels = Array.from(labelMap.values());
+		}
+	}
+
+	getSyncData(): typeof this.syncData {
+		return this.syncData;
+	}
+
+    async getAllResources(fullSync = false) { 
+		const clientId = await this.getClientHeader();
+    	const accessToken = this.plugin.settings.todoistAPIToken;
+		const syncToken = fullSync ? '*' : (this.plugin.settings.syncToken || '*');
+		
+		await this.checkRateLimit(fullSync);
+
+    	const url = 'https://api.todoist.com/api/v1/sync';
+    	const options = {
+    		url: url,
+    		method: 'POST',
+    		headers: {
+    			'Authorization': `Bearer ${accessToken}`,
+ 				'Content-Type': 'application/x-www-form-urlencoded',
+ 				'X-Todoist-Client': clientId
+    		},
+    		body: new URLSearchParams({
+    			sync_token: syncToken,
+    			resource_types: '["all"]'
+    		}).toString()
+    	};
   
-    try {
-      const response = await fetch(url, options);
+    	try {
+    		const response = await requestUrl(options);
+
+			if (response.status === 429) {
+				throw new Error('RATE_LIMIT_429');
+			}
   
-      if (!response.ok) {
-        throw new Error(`Failed to fetch all resources: ${response.status} ${response.statusText}`);
-      }
+			if (response.status >= 400) {
+ 				throw new Error(`Failed to fetch all resources: ${response.status} ${response.text}`);
+ 			}
   
-      const data = await response.json();
+ 			const data = response.json;
+
+		if (fullSync) {
+			this.rateLimitState.fullSyncCount++;
+		} else {
+			this.rateLimitState.partialSyncCount++;
+		}
   
-      return data;
-    } catch (error) {
-      console.error(error);
-      throw new Error('Failed to fetch all resources due to network error');
-    }
+      		return data;
+    	} catch (error: any) {
+			if (error.message && (error.message.includes('RATE_LIMIT') || error.message.includes('429'))) {
+				this.handleRateLimitError(error);
+			}
+      		console.error(error);
+      		throw new Error('Failed to fetch all resources due to network error');
+    	}
     }
 
     //backup todoist
@@ -66,6 +253,7 @@ export class TodoistSyncAPI   {
       const accessToken = this.plugin.settings.todoistAPIToken
       const url = 'https://api.todoist.com/api/v1/sync';
       const options = {
+        url: url,
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
@@ -74,17 +262,17 @@ export class TodoistSyncAPI   {
         body: new URLSearchParams({
           sync_token: "*",
           resource_types: '["user_plan_limits"]'
-        })
+        }).toString()
       };
     
       try {
-        const response = await fetch(url, options);
+        const response = await requestUrl(options);
     
-        if (!response.ok) {
-          throw new Error(`Failed to fetch all resources: ${response.status} ${response.statusText}`);
+        if (response.status >= 400) {
+          throw new Error(`Failed to fetch all resources: ${response.status} ${response.text}`);
         }
     
-        const data = await response.json();
+        const data = response.json;
         console.log(data)
         return data;
       } catch (error) {
@@ -108,22 +296,23 @@ export class TodoistSyncAPI   {
           },
         ];
         const options = {
+          url: url,
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${accessToken}`,
             'Content-Type': 'application/x-www-form-urlencoded'
           },
-          body: new URLSearchParams({ commands: JSON.stringify(commands) })
+          body: new URLSearchParams({ commands: JSON.stringify(commands) }).toString()
         };
       
         try {
-          const response = await fetch(url, options);
+          const response = await requestUrl(options);
       
-          if (!response.ok) {
-            throw new Error(`Failed to fetch all resources: ${response.status} ${response.statusText}`);
+          if (response.status >= 400) {
+            throw new Error(`Failed to fetch all resources: ${response.status} ${response.text}`);
           }
       
-          const data = await response.json();
+          const data = response.json;
           console.log(data)
           return data;
         } catch (error) {
@@ -131,26 +320,28 @@ export class TodoistSyncAPI   {
           throw new Error('Failed to fetch user resources due to network error');
         }
         }
-  
+   
     //get activity logs
     //result  {results:[],next_cursor:null}
     async getAllActivityEvents() {
+ 	const clientId = await this.getClientHeader();
     const accessToken = this.plugin.settings.todoistAPIToken
-      const headers = new Headers({
-        Authorization: `Bearer ${accessToken}`
-      });
     
       try {
-        const response = await fetch('https://api.todoist.com/api/v1/activities', {
+        const response = await requestUrl({
+          url: 'https://api.todoist.com/api/v1/activities',
           method: 'GET',
-          headers
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+    		'X-Todoist-Client': clientId
+          }
         });
     
-        if (!response.ok) {
+        if (response.status >= 400) {
           throw new Error(`API returned error status: ${response.status}`);
         }
     
-        const data = await response.json();
+        const data = response.json;
     
         // API v1 返回格式: { results: [], next_cursor: null }
         // 转换为旧格式: { events: [] }
@@ -161,13 +352,17 @@ export class TodoistSyncAPI   {
     }
 
     async getNonObsidianAllActivityEvents() {
+	  const clientId = await this.getClientHeader();
       try{
         const allActivity = await this.getAllActivityEvents()
         //console.log(allActivity)
         const allActivityEvents = allActivity.events
-        //client中不包含obsidian 的activity
-        const filteredArray = allActivityEvents.filter(obj => !obj.extra_data.client?.includes("obsidian")); 
-        //console.log(filteredArray)
+        //过滤掉当前设备产生的 activity
+        const filteredArray = allActivityEvents.filter((obj: Event) => {
+			const client = obj.extra_data && obj.extra_data.client;
+			// 过滤掉包含 obsidian 的和当前设备ID的 activity
+			return !client || (!client.includes("obsidian") && client !== clientId); 
+        });
         return(filteredArray)
 
       }catch(err){
@@ -186,7 +381,7 @@ export class TodoistSyncAPI   {
         (options.object_type ? event.object_type === options.object_type : true)
     
         );
-    };
+    }
 
     //get completed items activity
     //result  {results:[],next_cursor:null}
@@ -195,18 +390,19 @@ export class TodoistSyncAPI   {
         const url = 'https://api.todoist.com/api/v1/activities?event_type=completed';
         
         try {
-            const response = await fetch(url, {
+            const response = await requestUrl({
+                url: url,
                 method: 'GET',
                 headers: {
                 'Authorization': `Bearer ${accessToken}`
                 }
             });
         
-            if (!response.ok) {
-            throw new Error(`Failed to fetch completed items: ${response.status} ${response.statusText}`);
+            if (response.status >= 400) {
+            throw new Error(`Failed to fetch completed items: ${response.status} ${response.text}`);
             }
         
-            const data = await response.json();
+            const data = response.json;
         
             // API v1 返回格式: { results: [], next_cursor: null }
             // 转换为旧格式: { events: [] }
@@ -226,18 +422,19 @@ export class TodoistSyncAPI   {
         const url = 'https://api.todoist.com/api/v1/activities?event_type=uncompleted';
     
         try {
-            const response = await fetch(url, {
+            const response = await requestUrl({
+                url: url,
                 method: 'GET',
                 headers: {
                 'Authorization': `Bearer ${accessToken}`
                 }
             });
     
-            if (!response.ok) {
-                throw new Error(`Failed to fetch uncompleted items: ${response.status} ${response.statusText}`);
+            if (response.status >= 400) {
+                throw new Error(`Failed to fetch uncompleted items: ${response.status} ${response.text}`);
             }
     
-            const data = await response.json();
+            const data = response.json;
     
             // API v1 返回格式: { results: [], next_cursor: null }
             // 转换为旧格式: { events: [] }
@@ -248,16 +445,16 @@ export class TodoistSyncAPI   {
         }
     }
   
-  
+   
     //get non-obsidian completed event
     async getNonObsidianCompletedItemsActivity() {
-        const accessToken = this.plugin.settings.todoistAPIToken
+        const clientId = await this.getClientHeader();
         const completedItemsActivity = await this.getCompletedItemsActivity()
         const completedItemsActivityEvents = completedItemsActivity.events
-        //client中不包含obsidian 的activity
-        const filteredArray = completedItemsActivityEvents.filter(obj => {
+        //过滤掉当前设备产生的 activity
+        const filteredArray = completedItemsActivityEvents.filter((obj: Event) => {
             const client = obj.extra_data && obj.extra_data.client;
-            return !client || !client.includes("obsidian");
+            return !client || (!client.includes("obsidian") && client !== clientId);
         }); 
         return(filteredArray)     
     }
@@ -265,12 +462,13 @@ export class TodoistSyncAPI   {
   
     //get non-obsidian uncompleted event
     async getNonObsidianUncompletedItemsActivity() {
+        const clientId = await this.getClientHeader();
         const uncompletedItemsActivity = await this.getUncompletedItemsActivity()
         const uncompletedItemsActivityEvents = uncompletedItemsActivity.events
-        //client中不包含obsidian 的activity
-        const filteredArray = uncompletedItemsActivityEvents.filter(obj => {
+        //过滤掉当前设备产生的 activity
+        const filteredArray = uncompletedItemsActivityEvents.filter((obj: Event) => {
             const client = obj.extra_data && obj.extra_data.client;
-            return !client || !client.includes("obsidian");
+            return !client || (!client.includes("obsidian") && client !== clientId);
         }); 
         return(filteredArray) 
     }
@@ -283,18 +481,19 @@ export class TodoistSyncAPI   {
         const url = 'https://api.todoist.com/api/v1/activities?event_type=updated';
     
         try {
-            const response = await fetch(url, {
+            const response = await requestUrl({
+                url: url,
                 method: 'GET',
                 headers: {
                 'Authorization': `Bearer ${accessToken}`
                 }
             });
     
-            if (!response.ok) {
-                throw new Error(`Failed to fetch updated items: ${response.status} ${response.statusText}`);
+            if (response.status >= 400) {
+                throw new Error(`Failed to fetch updated items: ${response.status} ${response.text}`);
             }
     
-            const data = await response.json();
+            const data = response.json;
     
             // API v1 返回格式: { results: [], next_cursor: null }
             // 转换为旧格式: { events: [] }
@@ -304,19 +503,21 @@ export class TodoistSyncAPI   {
             throw new Error('Failed to fetch updated items due to network error');
         }
     }
-  
-  
+   
+   
     //get non-obsidian updated event
     async  getNonObsidianUpdatedItemsActivity() {
+        const clientId = await this.getClientHeader();
         const updatedItemsActivity = await this.getUpdatedItemsActivity()
         const updatedItemsActivityEvents = updatedItemsActivity.events
-        //client中不包含obsidian 的activity
-        const filteredArray = updatedItemsActivityEvents.filter(obj => {
+        //过滤掉当前设备产生的 activity
+        const filteredArray = updatedItemsActivityEvents.filter((obj: Event) => {
           const client = obj.extra_data && obj.extra_data.client;
-          return !client || !client.includes("obsidian");
+          return !client || (!client.includes("obsidian") && client !== clientId);
         });
         return(filteredArray)
     }
+
 
 
 //get projects activity
@@ -326,18 +527,19 @@ export class TodoistSyncAPI   {
       const url = 'https://api.todoist.com/api/v1/activities?object_type=project';
       
       try {
-          const response = await fetch(url, {
+          const response = await requestUrl({
+              url: url,
               method: 'GET',
               headers: {
               'Authorization': `Bearer ${accessToken}`
               }
           });
       
-          if (!response.ok) {
-            throw new Error(`Failed to fetch projects activities: ${response.status} ${response.statusText}`);
+          if (response.status >= 400) {
+            throw new Error(`Failed to fetch projects activities: ${response.status} ${response.text}`);
           }
       
-          const data = await response.json();
+          const data = response.json;
       
           // API v1 返回格式: { results: [], next_cursor: null }
           // 转换为旧格式: { events: [] }
@@ -364,31 +566,49 @@ export class TodoistSyncAPI   {
 
   // Execute Sync API commands
   async executeCommands(commands: any[]): Promise<any> {
+ 	await this.checkRateLimit(false);
+
+ 	const clientId = await this.getClientHeader();
     const accessToken = this.plugin.settings.todoistAPIToken;
     const url = 'https://api.todoist.com/api/v1/sync';
     
     const options = {
+      url: url,
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/x-www-form-urlencoded'
+ 		'Content-Type': 'application/x-www-form-urlencoded',
+ 		'X-Todoist-Client': clientId
       },
       body: new URLSearchParams({
         commands: JSON.stringify(commands)
-      })
+      }).toString()
     };
 
     try {
-      const response = await fetch(url, options);
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to execute commands: ${response.status} ${response.statusText} - ${errorText}`);
+      const response = await requestUrl(options);
+
+ 		if (response.status === 429) {
+ 			throw new Error('RATE_LIMIT_429');
+ 		}
+
+      if (response.status >= 400) {
+        const errorText = (response as any).text ? await (response as any).text() : 'Unknown error';
+        throw new Error(`Failed to execute commands: ${response.status} - ${errorText}`);
       }
-      const data = await response.json();
+      const data = (response as any).json();
+
+		this.rateLimitState.partialSyncCount++;
+
+		this.incrementalSync();
+
       return data;
-    } catch (error) {
-      console.error('Error executing commands:', error);
-      throw error;
+    } catch (error: any) {
+		if (error.message && (error.message.includes('RATE_LIMIT') || error.message.includes('429'))) {
+			this.handleRateLimitError(error);
+		}
+      	console.error('Error executing commands:', error);
+      	throw error;
     }
   }
 
