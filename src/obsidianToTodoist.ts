@@ -59,7 +59,9 @@ export class ObsidianToTodoistSync {
         if (!deletedTaskIds.length) {
             return;
         }
-        this.plugin.cacheOperation.deleteTaskFromCacheByIDs(deletedTaskIds);
+        for (const taskId of deletedTaskIds) {
+            this.plugin.cacheOperation.deleteTaskFileMapping(taskId);
+        }
         this.plugin.saveSettings();
 
         const newFrontMatter_todoistTasks = frontMatter_todoistTasks.filter(
@@ -91,11 +93,11 @@ export class ObsidianToTodoistSync {
                 this.plugin.logOperation?.log('OBSIDIAN_TASK_CREATED', `Created task in Obsidian: ${newTask.content}`, filepath, todoist_id);
                 this.plugin.logOperation?.log('TODOIST_TASK_CREATED', `Created task in Todoist: ${newTask.content}`, filepath, todoist_id);
 
-                this.plugin.cacheOperation.appendTaskToCache(newTask);
+                this.plugin.cacheOperation.setTaskFileMapping(todoist_id, filepath || '', line);
 
                 if (currentTask.isCompleted === true) {
                     await this.plugin.todoistSyncAPI.CloseTask(newTask.id);
-                    this.plugin.cacheOperation.closeTaskToCacheByID(todoist_id);
+                    // taskFileMapping already set above
                     this.plugin.logOperation?.log('OBSIDIAN_TASK_COMPLETED', `Completed task in Obsidian: ${newTask.content}`, filepath, todoist_id);
                     this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Completed task in Todoist: ${newTask.content}`, filepath, todoist_id);
                 }
@@ -185,11 +187,11 @@ export class ObsidianToTodoistSync {
                     console.log(newTask);
                     new Notice(`new task ${newTask.content} id is ${newTask.id}`);
 
-                    this.plugin.cacheOperation.appendTaskToCache(newTask);
+                this.plugin.cacheOperation.setTaskFileMapping(todoist_id, filepath || '', line);
 
                     if (currentTask.isCompleted === true) {
                         await this.plugin.todoistSyncAPI.CloseTask(newTask.id);
-                        this.plugin.cacheOperation.closeTaskToCacheByID(todoist_id);
+                        // taskFileMapping already set above
                     }
                     this.plugin.saveSettings();
 
@@ -236,13 +238,15 @@ export class ObsidianToTodoistSync {
             const lineTask = await this.plugin.taskParser.convertTextToTodoistTaskObject(lineText, filepath, lineNumber, fileContent);
             const lineTask_todoist_id = (lineTask.todoist_id).toString();
 
-            const savedTask = await this.plugin.cacheOperation.loadTaskFromCacheyID(lineTask_todoist_id);
-            if (!savedTask) {
+            const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(lineTask_todoist_id);
+            if (!taskMapping) {
                 console.log(`Local cache has no task ${lineTask.todoist_id}`);
                 const url = this.plugin.taskParser.getObsidianUrlFromFilepath(filepath);
                 console.log(url);
                 return;
             }
+
+            const savedTask = await this.plugin.todoistSyncAPI.GetTaskById(lineTask_todoist_id);
 
             const lineTaskContent = lineTask.content;
             const contentModified = !this.plugin.taskParser.taskContentCompare(lineTask, savedTask);
@@ -301,8 +305,7 @@ export class ObsidianToTodoistSync {
 
                 if (contentChanged || tagsChanged || dueDateChanged || projectChanged || parentIdChanged || priorityChanged) {
                     const updatedTask = await this.plugin.todoistSyncAPI.UpdateTask(lineTask.todoist_id.toString(), updatedContent);
-                    updatedTask.path = filepath;
-                    this.plugin.cacheOperation.updateTaskToCacheByID(updatedTask);
+                    // taskFileMapping already set, no need to update
                     this.plugin.logOperation?.log('OBSIDIAN_TASK_MODIFIED', `Updated task: ${updatedTask.content}`, filepath, lineTask_todoist_id);
                     this.plugin.logOperation?.log('TODOIST_TASK_UPDATED', `Updated task in Todoist: ${updatedTask.content}`, filepath, lineTask_todoist_id);
                 }
@@ -312,13 +315,13 @@ export class ObsidianToTodoistSync {
                     if (lineTask.isCompleted === true) {
                         console.log(`task completed`);
                         await this.plugin.todoistSyncAPI.CloseTask(lineTask.todoist_id.toString());
-                        this.plugin.cacheOperation.closeTaskToCacheByID(lineTask_todoist_id.toString());
+                        // taskFileMapping already set, no need to update
                         this.plugin.logOperation?.log('OBSIDIAN_TASK_COMPLETED', `Completed task: ${lineTask.content}`, filepath, lineTask_todoist_id);
                         this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Completed task in Todoist: ${lineTask.content}`, filepath, lineTask_todoist_id);
                     } else {
                         console.log(`task uncompleted`);
                         await this.plugin.todoistSyncAPI.OpenTask(lineTask.todoist_id.toString());
-                        this.plugin.cacheOperation.reopenTaskToCacheByID(lineTask.todoist_id.toString());
+                        // taskFileMapping already set, no need to update
                         this.plugin.logOperation?.log('OBSIDIAN_TASK_REOPENED', `Reopened task: ${lineTask.content}`, filepath, lineTask_todoist_id);
                         this.plugin.logOperation?.log('TODOIST_TASK_REOPENED', `Reopened task in Todoist: ${lineTask.content}`, filepath, lineTask_todoist_id);
                     }
@@ -410,7 +413,7 @@ export class ObsidianToTodoistSync {
         try {
             await this.plugin.todoistSyncAPI.CloseTask(taskId);
             await this.plugin.fileOperation.completeTaskInTheFile(taskId);
-            await this.plugin.cacheOperation.closeTaskToCacheByID(taskId);
+            // taskFileMapping already set, no need to update
             this.plugin.saveSettings();
             new Notice(`Task ${taskId} is closed.`);
             this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Closed task via checkbox: ${taskId}`, undefined, taskId);
@@ -424,7 +427,7 @@ export class ObsidianToTodoistSync {
         try {
             await this.plugin.todoistSyncAPI.OpenTask(taskId);
             await this.plugin.fileOperation.uncompleteTaskInTheFile(taskId);
-            await this.plugin.cacheOperation.reopenTaskToCacheByID(taskId);
+            // taskFileMapping already set, no need to update
             this.plugin.saveSettings();
             new Notice(`Task ${taskId} is reopend.`);
             this.plugin.logOperation?.log('TODOIST_TASK_REOPENED', `Reopened task via checkbox: ${taskId}`, undefined, taskId);
@@ -459,7 +462,9 @@ export class ObsidianToTodoistSync {
             return [];
         }
 
-        await this.plugin.cacheOperation.deleteTaskFromCacheByIDs(deletedTaskIds);
+        for (const taskId of deletedTaskIds) {
+            this.plugin.cacheOperation.deleteTaskFileMapping(taskId);
+        }
         this.plugin.saveSettings();
 
         return deletedTaskIds;
@@ -476,8 +481,8 @@ export class ObsidianToTodoistSync {
 
         for (const taskId of todoistTasks) {
             try {
-                const task = await this.plugin.cacheOperation.loadTaskFromCacheyID(taskId);
-                if (task) {
+                const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId);
+                if (taskMapping) {
                     const description = `[[${filepath}]]`;
                     await this.plugin.todoistSyncAPI.UpdateTask(taskId, { description });
                     this.plugin.logOperation?.log('TODOIST_TASK_UPDATED', `Updated task description: ${taskId}`, filepath, taskId);

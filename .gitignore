@@ -25,3 +25,6 @@ userData
 
 # Add js build artifacts
 *.js
+
+
+opencode-session-history

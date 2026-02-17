@@ -151,6 +151,23 @@ export class CacheOperation   {
         console.log(`${filepath} is deleted from file metadatas.`)
     }
 
+    // TaskFileMapping methods - replaces todoistTasksData.tasks
+    getTaskFileMapping(taskId: string): { filePath: string; lineNumber: number } | null {
+        return this.plugin.settings.taskFileMapping[taskId] ?? null;
+    }
+
+    setTaskFileMapping(taskId: string, filePath: string, lineNumber: number): void {
+        this.plugin.settings.taskFileMapping[taskId] = { filePath, lineNumber };
+    }
+
+    deleteTaskFileMapping(taskId: string): void {
+        delete this.plugin.settings.taskFileMapping[taskId];
+    }
+
+    getAllTaskFileMappings(): { [taskId: string]: { filePath: string; lineNumber: number } } {
+        return this.plugin.settings.taskFileMapping ?? {};
+    }
+
 
     //Check errors in filemata where the filepath is incorrect.
     async checkFileMetadata(){

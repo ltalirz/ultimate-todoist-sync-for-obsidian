@@ -768,8 +768,10 @@ export class TodoistSyncAPI   {
   // Compatible wrapper: GetAllProjects
   async GetAllProjects(): Promise<any[]> {
     try {
-      const data = await this.getAllResources();
-      return data.projects || [];
+      if (!this.syncData) {
+        await this.getAllResources(true);
+      }
+      return this.syncData?.projects || [];
     } catch (error) {
       console.error('Error getting all projects:', error);
       throw error;
@@ -779,8 +781,10 @@ export class TodoistSyncAPI   {
   // Compatible wrapper: GetTaskById
   async GetTaskById(taskId: string): Promise<any> {
     try {
-      const data = await this.getAllResources();
-      const tasks = data.items || [];
+      if (!this.syncData) {
+        await this.getAllResources(true);
+      }
+      const tasks = this.syncData?.items || [];
       return tasks.find((t: any) => t.id === taskId);
     } catch (error) {
       console.error('Error getting task by id:', error);
@@ -798,8 +802,10 @@ export class TodoistSyncAPI   {
     ids?: string[];
   }): Promise<any[]> {
     try {
-      const data = await this.getAllResources();
-      let tasks = data.items || [];
+      if (!this.syncData) {
+        await this.getAllResources(true);
+      }
+      let tasks = this.syncData?.items || [];
 
       if (options) {
         if (options.projectId) {
@@ -819,6 +825,34 @@ export class TodoistSyncAPI   {
       return tasks;
     } catch (error) {
       console.error('Error getting active tasks:', error);
+      throw error;
+    }
+  }
+
+  // Get project by ID from syncData
+  async getProjectById(projectId: string): Promise<any> {
+    try {
+      if (!this.syncData) {
+        await this.getAllResources(true);
+      }
+      const projects = this.syncData?.projects || [];
+      return projects.find((p: any) => p.id === projectId);
+    } catch (error) {
+      console.error('Error getting project by id:', error);
+      throw error;
+    }
+  }
+
+  // Get project by name from syncData
+  async getProjectByName(projectName: string): Promise<any> {
+    try {
+      if (!this.syncData) {
+        await this.getAllResources(true);
+      }
+      const projects = this.syncData?.projects || [];
+      return projects.find((p: any) => p.name === projectName);
+    } catch (error) {
+      console.error('Error getting project by name:', error);
       throw error;
     }
   }

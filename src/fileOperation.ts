@@ -53,8 +53,12 @@ export class FileOperation   {
      // 完成一个任务，将其标记为已完成
     async completeTaskInTheFile(taskId: string) {
         // 获取任务文件路径
-        const currentTask = await this.plugin.cacheOperation.loadTaskFromCacheyID(taskId)
-        const filepath = currentTask.path
+        const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId)
+        if (!taskMapping) {
+            console.error(`Task ${taskId} not found in taskFileMapping`);
+            return;
+        }
+        const filepath = taskMapping.filePath
     
         // 获取文件对象并更新内容
         const file = this.app.vault.getAbstractFileByPath(filepath)
@@ -83,8 +87,12 @@ export class FileOperation   {
     // uncheck 已完成的任务，
     async uncompleteTaskInTheFile(taskId: string) {
         // 获取任务文件路径
-        const currentTask = await this.plugin.cacheOperation.loadTaskFromCacheyID(taskId)
-        const filepath = currentTask.path
+        const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId)
+        if (!taskMapping) {
+            console.error(`Task ${taskId} not found in taskFileMapping`);
+            return;
+        }
+        const filepath = taskMapping.filePath
     
         // 获取文件对象并更新内容
         const file = this.app.vault.getAbstractFileByPath(filepath)
@@ -178,8 +186,13 @@ export class FileOperation   {
                 console.log(line)
                 //console.log('prepare to add todoist link')
                 const taskID = this.plugin.taskParser.getTodoistIdFromLineText(line)
-                const taskObject = this.plugin.cacheOperation.loadTaskFromCacheyID(taskID)
-                const todoistLink = taskObject.url
+                const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskID)
+                if (!taskMapping) {
+                    console.error(`Task ${taskID} not found in taskFileMapping`);
+                    continue;
+                }
+                const todoistTask = await this.plugin.todoistSyncAPI.GetTaskById(taskID)
+                const todoistLink = todoistTask?.url || ''
                 const link = `[link](${todoistLink})`
                 const newLine = this.plugin.taskParser.addTodoistLink(line,link)
                 console.log(newLine)
@@ -253,8 +266,12 @@ export class FileOperation   {
     async syncUpdatedTaskContentToTheFile(evt:Object) {
         const taskId = evt.object_id
         // 获取任务文件路径
-        const currentTask = await this.plugin.cacheOperation.loadTaskFromCacheyID(taskId)
-        const filepath = currentTask.path
+        const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId)
+        if (!taskMapping) {
+            console.error(`Task ${taskId} not found in taskFileMapping`);
+            return;
+        }
+        const filepath = taskMapping.filePath
     
         // 获取文件对象并更新内容
         const file = this.app.vault.getAbstractFileByPath(filepath)
@@ -289,8 +306,12 @@ export class FileOperation   {
     async syncUpdatedTaskDueDateToTheFile(evt:Object) {
         const taskId = evt.object_id
         // 获取任务文件路径
-        const currentTask = await this.plugin.cacheOperation.loadTaskFromCacheyID(taskId)
-        const filepath = currentTask.path
+        const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId)
+        if (!taskMapping) {
+            console.error(`Task ${taskId} not found in taskFileMapping`);
+            return;
+        }
+        const filepath = taskMapping.filePath
     
         // 获取文件对象并更新内容
         const file = this.app.vault.getAbstractFileByPath(filepath)
@@ -348,8 +369,12 @@ export class FileOperation   {
         const note = evt.extra_data.content
         const datetime = this.plugin.taskParser.ISOStringToLocalDatetimeString(evt.event_date)
         // 获取任务文件路径
-        const currentTask = await this.plugin.cacheOperation.loadTaskFromCacheyID(taskId)
-        const filepath = currentTask.path
+        const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId)
+        if (!taskMapping) {
+            console.error(`Task ${taskId} not found in taskFileMapping`);
+            return;
+        }
+        const filepath = taskMapping.filePath
     
         // 获取文件对象并更新内容
         const file = this.app.vault.getAbstractFileByPath(filepath)

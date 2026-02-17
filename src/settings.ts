@@ -12,13 +12,18 @@ export interface UltimateTodoistSyncSettings {
     initialized:boolean;
 	//mySetting: string;
 	//todoistTasksFilePath: string;
-	todoistAPIToken: string; // replace with correct type
+	todoistAPIToken: string;
 	apiInitialized:boolean;
 	defaultProjectName: string;
 	defaultProjectId:string;
 	automaticSynchronizationInterval:Number;
-	todoistTasksData:any;
 	fileMetadata:any;
+	taskFileMapping: {
+		[taskId: string]: {
+			filePath: string;
+			lineNumber: number;
+		};
+	};
 	enableFullVaultSync: boolean;
 	statistics: any;
 	debugMode:boolean;
@@ -27,6 +32,10 @@ export interface UltimateTodoistSyncSettings {
 	syncEnabled: boolean;
 	lastDatabaseCheckPassed: boolean;
 	lastDatabaseCheckTime: number | null;
+	// Sync token for incremental sync
+	syncToken: string | null;
+	// Device ID generated flag (for display only)
+	deviceIdGenerated: boolean;
 	// Log settings
 	enableLog:boolean;
 	logs:Array<{
@@ -45,9 +54,9 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
 	todoistAPIToken: '',
 	defaultProjectName:"Inbox",
 	defaultProjectId:"",
-	automaticSynchronizationInterval: 300, //default aync interval 300s
-	todoistTasksData:{"projects":[],"tasks":[],"events":[]},
+	automaticSynchronizationInterval: 300,
 	fileMetadata:{},
+	taskFileMapping: {},
 	enableFullVaultSync:false,
 	statistics:{},
 	debugMode:false,
@@ -55,6 +64,8 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
 	syncEnabled: false,
 	lastDatabaseCheckPassed: false,
 	lastDatabaseCheckTime: null,
+	syncToken: null,
+	deviceIdGenerated: false,
 	enableLog:true,
 	logs:[],
 }
@@ -78,10 +89,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 
 		containerEl.createEl('h2', { text: 'Settings for Ultimate Todoist Sync for Obsidian.' });
 
-		const myProjectsOptions: MyProject | undefined = this.plugin.settings.todoistTasksData?.projects?.reduce((obj, item) => {
-			obj[(item.id).toString()] = item.name;
-			return obj;
-		  }, {});	  
+		const myProjectsOptions: Record<string, string> = {};	  
 
 		new Setting(containerEl)
 			.setName('Todoist API')
@@ -179,7 +187,9 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 						.addOptions(myProjectsOptions)
 						.onChange((value)=>{
 							this.plugin.settings.defaultProjectId = value
-							this.plugin.settings.defaultProjectName = this.plugin.cacheOperation.getProjectNameByIdFromCache(value)
+							// TODO: Replace with getProjectById from todoistSyncAPI
+							const projectName = this.plugin.cacheOperation.getProjectNameByIdFromCache(value);
+							this.plugin.settings.defaultProjectName = projectName || value;
 							this.plugin.saveSettings()
 							
 							

@@ -24,6 +24,9 @@ import { TodoistSync } from './src/syncModule';
 //database checker
 import { DatabaseChecker } from './src/databaseChecker';
 
+//device manager
+import { DeviceManager } from './src/deviceManager';
+
 
 //import modal
 import { SetDefalutProjectInTheFilepathModal } from 'src/modal';
@@ -39,6 +42,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
     logOperation: LogOperation | undefined;
     backupOperation: BackupOperation | undefined;
     databaseChecker: DatabaseChecker | undefined;
+    deviceManager: DeviceManager | undefined;
 	lastLines: Map<string,number>;
 	statusBar;
 	syncLock: Boolean;
@@ -453,6 +457,18 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 
 		//initialize database checker
 		this.databaseChecker = new DatabaseChecker(this.app, this)
+
+		//initialize device manager
+		this.deviceManager = new DeviceManager(this.app, this)
+
+		//initialize sync data (full sync on startup)
+		try {
+			await this.todoistSyncAPI?.initializeSync();
+			this.settings.deviceIdGenerated = true;
+			await this.saveSettings();
+		} catch (error) {
+			console.error('[Plugin] Failed to initialize sync:', error);
+		}
 
 	}
 
