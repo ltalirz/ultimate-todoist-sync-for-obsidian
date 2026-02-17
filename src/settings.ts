@@ -32,8 +32,6 @@ export interface UltimateTodoistSyncSettings {
 	syncEnabled: boolean;
 	lastDatabaseCheckPassed: boolean;
 	lastDatabaseCheckTime: number | null;
-	// Sync token for incremental sync
-	syncToken: string | null;
 	// Full sync data cache (raw API response)
 	syncDataCache: Record<string, any> | null;
 	// Device ID generated flag (for display only)
@@ -66,7 +64,6 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
 	syncEnabled: false,
 	lastDatabaseCheckPassed: false,
 	lastDatabaseCheckTime: null,
-	syncToken: null,
 	syncDataCache: null,
 	deviceIdGenerated: false,
 	enableLog:true,

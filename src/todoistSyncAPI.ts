@@ -108,7 +108,6 @@ export class TodoistSyncAPI   {
 		
 		// Save to cache
 		this.plugin.settings.syncDataCache = data;
-		this.plugin.settings.syncToken = data.sync_token;
 		await this.plugin.saveSettings();
 		console.log('[TodoistSyncAPI] Sync initialized with full data and cached');
 	}
@@ -125,7 +124,6 @@ export class TodoistSyncAPI   {
 			
 			// Save updated syncData to cache
 			this.plugin.settings.syncDataCache = this.syncData;
-			this.plugin.settings.syncToken = changes.sync_token;
 			await this.plugin.saveSettings();
 			console.log('[TodoistSyncAPI] Incremental sync completed and cached');
 		} catch (error) {
@@ -202,7 +200,7 @@ export class TodoistSyncAPI   {
     async getAllResources(fullSync = false) { 
 		const clientId = await this.getClientHeader();
     	const accessToken = this.plugin.settings.todoistAPIToken;
-		const syncToken = fullSync ? '*' : (this.plugin.settings.syncToken || '*');
+		const syncToken = fullSync ? '*' : (this.syncData?.sync_token || '*');
 		
 		await this.checkRateLimit(fullSync);
 
