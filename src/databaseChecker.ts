@@ -3,42 +3,44 @@ import UltimateTodoistSyncForObsidian from '../main';
 
 export interface DatabaseCheckIssue {
     type: 
-        | 'task_deleted_in_todoist'
-        | 'missing_in_cache'
-        | 'new_task_not_synced'
-        | 'file_reference_missing'
-        | 'orphaned_in_cache'
-        | 'task_not_in_vault'
-        | 'content_mismatch'
-        | 'cache_content_outdated'
-        | 'status_mismatch'
-        | 'cache_status_outdated'
-        | 'duedate_mismatch'
-        | 'duplicate_task'
-        | 'priority_mismatch'
-        | 'label_mismatch'
-        | 'project_mismatch'
-        | 'empty_metadata';
+        // taskFileMapping 相关问题
+        | 'mapping_file_not_found'    // taskFileMapping 中的文件不存在
+        | 'mapping_task_not_in_todoist'  // taskFileMapping 中的 taskId 在 Todoist 不存在
+        | 'mapping_orphan'           // taskFileMapping 孤岛 (Todoist和Vault都没有)
+        | 'vault_task_no_mapping'    // Vault 有任务但 taskFileMapping 没有
+        // 数据一致性问题
+        | 'task_deleted_in_todoist'  // Vault+Mapping 有，但 Todoist 没有
+        | 'task_not_in_vault'        // Todoist 有，但 Vault 没有对应文件
+        | 'new_task_not_synced'      // Vault 有但 Todoist 没有 (新任务)
+        | 'content_mismatch'         // 内容不一致
+        | 'status_mismatch'          // 完成状态不一致
+        | 'priority_mismatch'        // 优先级不一致
+        | 'label_mismatch'          // 标签不一致
+        | 'project_mismatch'         // 项目不一致
+        | 'line_number_mismatch'     // 行号不一致
+        | 'duplicate_task';          // 重复任务
     filePath?: string;
     taskId?: string;
     details: string;
     taskContent?: string;
     obsidianContent?: string;
     todoistContent?: string;
-    cacheContent?: string;
     obsidianStatus?: boolean;
     todoistStatus?: boolean;
-    cacheStatus?: boolean;
     dueDate?: string;
-    cacheDueDate?: string;
     priority?: number;
-    cachePriority?: number;
+    obsidianPriority?: number;
+    todoistPriority?: number;
     projectId?: string;
-    cacheProjectId?: string;
+    obsidianProjectId?: string;
+    todoistProjectId?: string;
     projectName?: string;
     lineNumber?: number;
+    obsidianLineNumber?: number;
+    mappingLineNumber?: number;
     labels?: string[];
-    cacheLabels?: string[];
+    obsidianLabels?: string[];
+    todoistLabels?: string[];
 }
 
 export interface VaultTask {
@@ -76,22 +78,22 @@ export interface DatabaseCheckResult {
     totalIssues: number;
     issues: DatabaseCheckIssue[];
     summary: {
+        // taskFileMapping 相关
+        mappingFileNotFound: number;
+        mappingTaskNotInTodoist: number;
+        mappingOrphan: number;
+        vaultTaskNoMapping: number;
+        // 数据一致性
         taskDeletedInTodoist: number;
-        missingInCache: number;
-        newTaskNotSynced: number;
-        fileReferenceMissing: number;
-        orphanedInCache: number;
         taskNotInVault: number;
+        newTaskNotSynced: number;
         contentMismatch: number;
-        cacheContentOutdated: number;
         statusMismatch: number;
-        cacheStatusOutdated: number;
-        duedateMismatch: number;
-        duplicateTask: number;
         priorityMismatch: number;
         labelMismatch: number;
         projectMismatch: number;
-        emptyMetadata: number;
+        lineNumberMismatch: number;
+        duplicateTask: number;
     };
     reportPath?: string;
 }
@@ -108,56 +110,62 @@ export class DatabaseChecker {
     async checkDatabase(noticeCallback?: (message: string) => void): Promise<DatabaseCheckResult> {
         const issues: DatabaseCheckIssue[] = [];
         const summary = {
+            mappingFileNotFound: 0,
+            mappingTaskNotInTodoist: 0,
+            mappingOrphan: 0,
+            vaultTaskNoMapping: 0,
             taskDeletedInTodoist: 0,
-            missingInCache: 0,
-            newTaskNotSynced: 0,
-            fileReferenceMissing: 0,
-            orphanedInCache: 0,
             taskNotInVault: 0,
+            newTaskNotSynced: 0,
             contentMismatch: 0,
-            cacheContentOutdated: 0,
             statusMismatch: 0,
-            cacheStatusOutdated: 0,
-            duedateMismatch: 0,
-            duplicateTask: 0,
             priorityMismatch: 0,
             labelMismatch: 0,
             projectMismatch: 0,
-            emptyMetadata: 0
+            lineNumberMismatch: 0,
+            duplicateTask: 0
         };
 
         if (noticeCallback) {
-            noticeCallback('Starting 3-way data comparison...');
+            noticeCallback('Starting data consistency check...');
         }
 
         try {
+            // Step 1: Scan Vault tasks
             if (noticeCallback) {
                 noticeCallback('Step 1/4: Scanning vault files...');
             }
-
             const vaultTasksMap = await this.scanVaultTasks();
 
+            // Step 2: Get Todoist tasks from syncData
             if (noticeCallback) {
-                noticeCallback('Step 2/4: Loading local cache...');
+                noticeCallback('Step 2/4: Loading Todoist data from syncData...');
             }
+            let syncData = this.plugin.todoistSyncAPI.getSyncData();
+            if (!syncData) {
+                await this.plugin.todoistSyncAPI.initializeSync();
+                syncData = this.plugin.todoistSyncAPI.getSyncData();
+            }
+            const todoistTasksMap = this.getTodoistTasksFromSyncData(syncData);
 
-            const cacheTasksMap = this.loadCacheTasks();
-
+            // Step 3: Get taskFileMapping
             if (noticeCallback) {
-                noticeCallback('Step 3/4: Fetching data from Todoist...');
+                noticeCallback('Step 3/4: Loading taskFileMapping...');
             }
+            const taskFileMapping = this.plugin.settings.taskFileMapping || {};
 
-            const todoistTasksMap = await this.fetchTodoistTasks();
-
+            // Step 4: Analyze differences
             if (noticeCallback) {
                 noticeCallback('Step 4/4: Analyzing differences...');
             }
 
-            const result = this.compareThreeWay(vaultTasksMap, cacheTasksMap, todoistTasksMap);
+            const result = this.compareThreeSources(
+                vaultTasksMap,
+                todoistTasksMap,
+                taskFileMapping
+            );
             issues.push(...result.issues);
-            for (const key of Object.keys(summary) as (keyof typeof summary)[]) {
-                (summary as any)[key] = (result.summary as any)[key];
-            }
+            Object.assign(summary, result.summary);
 
             const totalIssues = Object.values(summary).reduce((a, b) => a + b, 0);
             this.plugin.logOperation?.log('DATABASE_CHECKED', `Database check completed: ${totalIssues} issues found`);
@@ -291,129 +299,200 @@ export class DatabaseChecker {
         return todoistTasksMap;
     }
 
-    compareThreeWay(
+    getTodoistTasksFromSyncData(syncData: Record<string, any> | null): Map<string, TodoistTask> {
+        const todoistTasksMap = new Map<string, TodoistTask>();
+        if (!syncData || !syncData.items) {
+            return todoistTasksMap;
+        }
+        
+        for (const task of syncData.items) {
+            if (!task) continue;
+            const taskAny = task as any;
+            todoistTasksMap.set(task.id, {
+                taskId: task.id,
+                content: task.content || '',
+                isCompleted: taskAny.isCompleted || taskAny.completedAt !== null || false,
+                dueDate: task.due?.date,
+                priority: task.priority || 4,
+                projectId: task.projectId || '',
+                labels: task.labels || []
+            });
+        }
+
+        return todoistTasksMap;
+    }
+
+    compareThreeSources(
         vaultTasksMap: Map<string, VaultTask>,
-        cacheTasksMap: Map<string, CacheTask>,
-        todoistTasksMap: Map<string, TodoistTask>
+        todoistTasksMap: Map<string, TodoistTask>,
+        taskFileMapping: Record<string, { filePath: string; lineNumber: number }>
     ): { issues: DatabaseCheckIssue[], summary: DatabaseCheckResult['summary'] } {
         const issues: DatabaseCheckIssue[] = [];
         const summary = {
+            mappingFileNotFound: 0,
+            mappingTaskNotInTodoist: 0,
+            mappingOrphan: 0,
+            vaultTaskNoMapping: 0,
             taskDeletedInTodoist: 0,
-            missingInCache: 0,
-            newTaskNotSynced: 0,
-            fileReferenceMissing: 0,
-            orphanedInCache: 0,
             taskNotInVault: 0,
+            newTaskNotSynced: 0,
             contentMismatch: 0,
-            cacheContentOutdated: 0,
             statusMismatch: 0,
-            cacheStatusOutdated: 0,
-            duedateMismatch: 0,
-            duplicateTask: 0,
             priorityMismatch: 0,
             labelMismatch: 0,
             projectMismatch: 0,
-            emptyMetadata: 0
+            lineNumberMismatch: 0,
+            duplicateTask: 0
         };
 
+        // Get all files in vault for path validation
+        const vaultFiles = new Set(this.app.vault.getFiles().map(f => f.path));
+
+        // Check taskFileMapping validity
+        for (const [taskId, mapping] of Object.entries(taskFileMapping)) {
+            // Check if file exists
+            if (!vaultFiles.has(mapping.filePath)) {
+                issues.push({
+                    type: 'mapping_file_not_found',
+                    filePath: mapping.filePath,
+                    taskId,
+                    lineNumber: mapping.lineNumber,
+                    details: `Mapping references file "${mapping.filePath}" which does not exist in vault`
+                });
+                summary.mappingFileNotFound++;
+            }
+
+            // Check if task exists in Todoist
+            if (!todoistTasksMap.has(taskId)) {
+                issues.push({
+                    type: 'mapping_task_not_in_todoist',
+                    filePath: mapping.filePath,
+                    taskId,
+                    lineNumber: mapping.lineNumber,
+                    details: `Mapping task "${taskId}" does not exist in Todoist (deleted in Todoist)`
+                });
+                summary.mappingTaskNotInTodoist++;
+            }
+        }
+
+        // Collect all task IDs
         const allTaskIds = new Set<string>();
         for (const taskId of vaultTasksMap.keys()) allTaskIds.add(taskId);
-        for (const taskId of cacheTasksMap.keys()) allTaskIds.add(taskId);
         for (const taskId of todoistTasksMap.keys()) allTaskIds.add(taskId);
+        for (const taskId of Object.keys(taskFileMapping)) allTaskIds.add(taskId);
 
         for (const taskId of allTaskIds) {
             const vaultTask = vaultTasksMap.get(taskId);
-            const cacheTask = cacheTasksMap.get(taskId);
             const todoistTask = todoistTasksMap.get(taskId);
+            const mapping = taskFileMapping[taskId];
 
             const inVault = !!vaultTask;
-            const inCache = !!cacheTask;
             const inTodoist = !!todoistTask;
+            const inMapping = !!mapping;
 
-            if (inVault && inCache && !inTodoist) {
+            // ============ 8 种组合情况 ============
+
+            // 情况2: Vault ✓ + Todoist ✓ + Mapping ✗
+            // settings丢失，需要重建mapping
+            if (inVault && inTodoist && !inMapping) {
+                issues.push({
+                    type: 'vault_task_no_mapping',
+                    filePath: vaultTask!.filePath,
+                    taskId,
+                    lineNumber: vaultTask!.lineNumber,
+                    details: `Task exists in Vault and Todoist but no mapping in settings (settings lost or needs rebuild)`,
+                    obsidianContent: vaultTask!.content,
+                    todoistContent: todoistTask!.content,
+                    obsidianStatus: vaultTask!.isCompleted,
+                    todoistStatus: todoistTask!.isCompleted
+                });
+                summary.vaultTaskNoMapping++;
+            }
+
+            // 情况3: Vault ✓ + Todoist ✗ + Mapping ✓
+            // Todoist端删除任务
+            else if (inVault && !inTodoist && inMapping) {
                 issues.push({
                     type: 'task_deleted_in_todoist',
                     filePath: vaultTask!.filePath,
                     taskId,
                     lineNumber: vaultTask!.lineNumber,
-                    details: `Task "${cacheTask!.content}" exists in Vault and Cache but was deleted in Todoist`,
-                    taskContent: cacheTask!.content,
+                    details: `Task exists in Vault and mapping but was deleted in Todoist`,
                     obsidianContent: vaultTask!.content,
-                    cacheContent: cacheTask!.content,
-                    obsidianStatus: vaultTask!.isCompleted,
-                    cacheStatus: cacheTask!.isCompleted
+                    obsidianStatus: vaultTask!.isCompleted
                 });
                 summary.taskDeletedInTodoist++;
             }
-            else if (inVault && !inCache && inTodoist) {
-                issues.push({
-                    type: 'missing_in_cache',
-                    filePath: vaultTask!.filePath,
-                    taskId,
-                    lineNumber: vaultTask!.lineNumber,
-                    details: `Task "${todoistTask!.content}" exists in Vault and Todoist but not in local cache`,
-                    taskContent: todoistTask!.content,
-                    obsidianContent: vaultTask!.content,
-                    obsidianStatus: vaultTask!.isCompleted,
-                    dueDate: todoistTask!.dueDate,
-                    cacheDueDate: undefined,
-                    priority: todoistTask!.priority
-                });
-                summary.missingInCache++;
-            }
-            else if (inVault && !inCache && !inTodoist) {
+
+            // 情况4: Vault ✓ + Todoist ✗ + Mapping ✗
+            // 新任务未同步
+            else if (inVault && !inTodoist && !inMapping) {
                 issues.push({
                     type: 'new_task_not_synced',
                     filePath: vaultTask!.filePath,
                     taskId,
                     lineNumber: vaultTask!.lineNumber,
-                    details: `Task "${vaultTask!.content}" in Vault is not synced to Todoist and not in cache`,
-                    taskContent: vaultTask!.content,
+                    details: `New task in Vault not yet synced to Todoist`,
                     obsidianContent: vaultTask!.content,
                     obsidianStatus: vaultTask!.isCompleted
                 });
                 summary.newTaskNotSynced++;
             }
-            else if (!inVault && inCache && inTodoist) {
-                issues.push({
-                    type: 'file_reference_missing',
-                    taskId,
-                    details: `Task "${todoistTask!.content}" exists in Cache and Todoist but Vault file reference is missing`,
-                    taskContent: todoistTask!.content,
-                    cacheContent: cacheTask!.content,
-                    filePath: cacheTask!.path,
-                    todoistContent: todoistTask!.content,
-                    todoistStatus: todoistTask!.isCompleted,
-                    cacheStatus: cacheTask!.isCompleted
-                });
-                summary.fileReferenceMissing++;
-            }
-            else if (!inVault && inCache && !inTodoist) {
-                issues.push({
-                    type: 'orphaned_in_cache',
-                    taskId,
-                    details: `Task "${cacheTask!.content}" exists in Cache but not in Vault and was deleted in Todoist`,
-                    taskContent: cacheTask!.content,
-                    cacheContent: cacheTask!.content,
-                    filePath: cacheTask!.path,
-                    cacheStatus: cacheTask!.isCompleted
-                });
-                summary.orphanedInCache++;
-            }
-            else if (!inVault && !inCache && inTodoist) {
+
+            // 情况5: Vault ✗ + Todoist ✓ + Mapping ✓
+            // Vault文件丢失
+            else if (!inVault && inTodoist && inMapping) {
                 issues.push({
                     type: 'task_not_in_vault',
+                    filePath: mapping.filePath,
                     taskId,
-                    details: `Task "${todoistTask!.content}" exists in Todoist but not in any Vault file`,
-                    taskContent: todoistTask!.content,
+                    lineNumber: mapping.lineNumber,
+                    details: `Task exists in Todoist and mapping but Vault file is missing (file deleted or moved)`,
                     todoistContent: todoistTask!.content,
-                    todoistStatus: todoistTask!.isCompleted,
-                    dueDate: todoistTask!.dueDate,
-                    priority: todoistTask!.priority
+                    todoistStatus: todoistTask!.isCompleted
                 });
                 summary.taskNotInVault++;
             }
-            else if (inVault && inCache && inTodoist) {
+
+            // 情况6: Vault ✗ + Todoist ✓ + Mapping ✗
+            // 其他设备添加的任务
+            else if (!inVault && inTodoist && !inMapping) {
+                // This is normal - task was added from another device
+                // No issue, just informational
+            }
+
+            // 情况7: Vault ✗ + Todoist ✗ + Mapping ✓
+            // mapping孤岛
+            else if (!inVault && !inTodoist && inMapping) {
+                issues.push({
+                    type: 'mapping_orphan',
+                    filePath: mapping.filePath,
+                    taskId,
+                    lineNumber: mapping.lineNumber,
+                    details: `Mapping exists but task is deleted in both Vault and Todoist (orphan mapping)`,
+                    mappingLineNumber: mapping.lineNumber
+                });
+                summary.mappingOrphan++;
+            }
+
+            // 情况1: Vault ✓ + Todoist ✓ + Mapping ✓
+            // 全部正常，检查数据一致性
+            else if (inVault && inTodoist && inMapping) {
+                // Check line number
+                if (vaultTask!.lineNumber !== mapping.lineNumber) {
+                    issues.push({
+                        type: 'line_number_mismatch',
+                        filePath: vaultTask!.filePath,
+                        taskId,
+                        lineNumber: vaultTask!.lineNumber,
+                        obsidianLineNumber: vaultTask!.lineNumber,
+                        mappingLineNumber: mapping.lineNumber,
+                        details: `Line number mismatch: Vault line ${vaultTask!.lineNumber + 1}, Mapping line ${mapping.lineNumber + 1}`
+                    });
+                    summary.lineNumberMismatch++;
+                }
+
+                // Check content
                 if (vaultTask!.content.trim() !== todoistTask!.content.trim()) {
                     issues.push({
                         type: 'content_mismatch',
@@ -421,104 +500,77 @@ export class DatabaseChecker {
                         taskId,
                         lineNumber: vaultTask!.lineNumber,
                         details: `Task content differs between Vault and Todoist`,
-                        taskContent: todoistTask!.content,
                         obsidianContent: vaultTask!.content.substring(0, 100),
-                        todoistContent: todoistTask!.content.substring(0, 100),
-                        obsidianStatus: vaultTask!.isCompleted,
-                        todoistStatus: todoistTask!.isCompleted,
-                        dueDate: todoistTask!.dueDate
+                        todoistContent: todoistTask!.content.substring(0, 100)
                     });
                     summary.contentMismatch++;
                 }
 
-                if (cacheTask!.content.trim() !== todoistTask!.content.trim()) {
-                    issues.push({
-                        type: 'cache_content_outdated',
-                        filePath: cacheTask!.path,
-                        taskId,
-                        details: `Cache content is outdated compared to Todoist`,
-                        taskContent: todoistTask!.content,
-                        cacheContent: cacheTask!.content.substring(0, 100),
-                        todoistContent: todoistTask!.content.substring(0, 100),
-                        cacheStatus: cacheTask!.isCompleted,
-                        todoistStatus: todoistTask!.isCompleted
-                    });
-                    summary.cacheContentOutdated++;
-                }
-
+                // Check status
                 if (vaultTask!.isCompleted !== todoistTask!.isCompleted) {
                     issues.push({
                         type: 'status_mismatch',
                         filePath: vaultTask!.filePath,
                         taskId,
                         lineNumber: vaultTask!.lineNumber,
-                        details: `Task completion status differs: Vault is ${vaultTask!.isCompleted ? 'completed' : 'incomplete'}, Todoist is ${todoistTask!.isCompleted ? 'completed' : 'incomplete'}`,
-                        taskContent: todoistTask!.content,
+                        details: `Status mismatch: Vault is ${vaultTask!.isCompleted ? 'completed' : 'incomplete'}, Todoist is ${todoistTask!.isCompleted ? 'completed' : 'incomplete'}`,
                         obsidianStatus: vaultTask!.isCompleted,
-                        todoistStatus: todoistTask!.isCompleted,
-                        dueDate: todoistTask!.dueDate
+                        todoistStatus: todoistTask!.isCompleted
                     });
                     summary.statusMismatch++;
                 }
 
-                if (cacheTask!.isCompleted !== todoistTask!.isCompleted) {
-                    issues.push({
-                        type: 'cache_status_outdated',
-                        filePath: cacheTask!.path,
-                        taskId,
-                        details: `Cache status is outdated: Cache is ${cacheTask!.isCompleted ? 'completed' : 'incomplete'}, Todoist is ${todoistTask!.isCompleted ? 'completed' : 'incomplete'}`,
-                        taskContent: todoistTask!.content,
-                        cacheStatus: cacheTask!.isCompleted,
-                        todoistStatus: todoistTask!.isCompleted
-                    });
-                    summary.cacheStatusOutdated++;
-                }
-
-                if (cacheTask!.dueDate !== todoistTask!.dueDate) {
-                    issues.push({
-                        type: 'duedate_mismatch',
-                        filePath: cacheTask!.path,
-                        taskId,
-                        details: `Due date differs: Cache is "${cacheTask!.dueDate || 'none'}", Todoist is "${todoistTask!.dueDate || 'none'}"`,
-                        taskContent: todoistTask!.content,
-                        dueDate: todoistTask!.dueDate,
-                        cacheDueDate: cacheTask!.dueDate
-                    });
-                    summary.duedateMismatch++;
-                }
-
-                if (cacheTask!.priority !== todoistTask!.priority) {
+                // Check priority
+                const vaultPriority = 5 - (vaultTask!.labels?.some(l => l.startsWith('p1')) ? 1 : 
+                                           vaultTask!.labels?.some(l => l.startsWith('p2')) ? 2 : 
+                                           vaultTask!.labels?.some(l => l.startsWith('p3')) ? 3 : 4) || 4;
+                if (vaultPriority !== todoistTask!.priority) {
                     issues.push({
                         type: 'priority_mismatch',
-                        filePath: cacheTask!.path,
+                        filePath: vaultTask!.filePath,
                         taskId,
-                        details: `Priority differs: Cache is ${cacheTask!.priority}, Todoist is ${todoistTask!.priority}`,
-                        taskContent: todoistTask!.content,
-                        priority: todoistTask!.priority,
-                        cachePriority: cacheTask!.priority
+                        lineNumber: vaultTask!.lineNumber,
+                        details: `Priority mismatch: Vault is ${vaultPriority}, Todoist is ${todoistTask!.priority}`,
+                        obsidianPriority: vaultPriority,
+                        todoistPriority: todoistTask!.priority
                     });
                     summary.priorityMismatch++;
                 }
 
-                if (cacheTask!.projectId !== todoistTask!.projectId) {
-                    let cacheProjectName: string | null | undefined;
-                    let todoistProjectName: string | null | undefined;
-                    const syncData = this.plugin.todoistSyncAPI.getSyncData();
-                    if (syncData) {
-                        const projects = syncData.projects || [];
-                        cacheProjectName = projects.find((p: any) => p.id === cacheTask!.projectId)?.name;
-                        todoistProjectName = projects.find((p: any) => p.id === todoistTask!.projectId)?.name;
-                    }
+                // Check labels
+                const obsidianLabels = vaultTask!.labels || [];
+                const todoistLabels = todoistTask!.labels || [];
+                const labelDiff = obsidianLabels.filter(l => !todoistLabels.includes(l)).length > 0 ||
+                                 todoistLabels.filter(l => !obsidianLabels.includes(l)).length > 0;
+                if (labelDiff) {
                     issues.push({
-                        type: 'project_mismatch',
-                        filePath: cacheTask!.path,
+                        type: 'label_mismatch',
+                        filePath: vaultTask!.filePath,
                         taskId,
-                        details: `Project differs: Cache is "${cacheProjectName || cacheTask!.projectId}", Todoist is "${todoistProjectName || todoistTask!.projectId}"`,
-                        taskContent: todoistTask!.content,
-                        projectId: todoistTask!.projectId,
-                        cacheProjectId: cacheTask!.projectId
+                        lineNumber: vaultTask!.lineNumber,
+                        details: `Labels differ: Vault [${obsidianLabels.join(', ')}], Todoist [${todoistLabels.join(', ')}]`,
+                        obsidianLabels,
+                        todoistLabels
                     });
-                    summary.projectMismatch++;
+                    summary.labelMismatch++;
+                }
+
+                // Check project (optional - might not be needed if using default project)
+                if (mapping && vaultTask!.filePath) {
+                    const fileMetadata = this.plugin.settings.fileMetadata?.[vaultTask!.filePath];
+                    const mappingProjectId = fileMetadata?.defaultProjectId;
+                    if (mappingProjectId && mappingProjectId !== todoistTask!.projectId) {
+                        issues.push({
+                            type: 'project_mismatch',
+                            filePath: vaultTask!.filePath,
+                            taskId,
+                            lineNumber: vaultTask!.lineNumber,
+                            details: `Project differs: Mapping project is ${mappingProjectId}, Todoist is ${todoistTask!.projectId}`,
+                            obsidianProjectId: mappingProjectId,
+                            todoistProjectId: todoistTask!.projectId
+                        });
+                        summary.projectMismatch++;
+                    }
                 }
             }
         }
@@ -567,29 +619,26 @@ Generated: ${new Date().toLocaleString()}
 
 | Issue Type | Count |
 |------------|-------|
+| Mapping File Not Found | ${result.summary.mappingFileNotFound} |
+| Mapping Task Not in Todoist | ${result.summary.mappingTaskNotInTodoist} |
+| Mapping Orphan | ${result.summary.mappingOrphan} |
+| Vault Task No Mapping | ${result.summary.vaultTaskNoMapping} |
 | Task Deleted in Todoist | ${result.summary.taskDeletedInTodoist} |
-| Missing in Cache | ${result.summary.missingInCache} |
-| New Task Not Synced | ${result.summary.newTaskNotSynced} |
-| File Reference Missing | ${result.summary.fileReferenceMissing} |
-| Orphaned in Cache | ${result.summary.orphanedInCache} |
 | Task Not in Vault | ${result.summary.taskNotInVault} |
+| New Task Not Synced | ${result.summary.newTaskNotSynced} |
 | Content Mismatch | ${result.summary.contentMismatch} |
-| Cache Content Outdated | ${result.summary.cacheContentOutdated} |
 | Status Mismatch | ${result.summary.statusMismatch} |
-| Cache Status Outdated | ${result.summary.cacheStatusOutdated} |
-| Due Date Mismatch | ${result.summary.duedateMismatch} |
-| Duplicate Task | ${result.summary.duplicateTask} |
 | Priority Mismatch | ${result.summary.priorityMismatch} |
 | Label Mismatch | ${result.summary.labelMismatch} |
 | Project Mismatch | ${result.summary.projectMismatch} |
-| Empty Metadata | ${result.summary.emptyMetadata} |
+| Line Number Mismatch | ${result.summary.lineNumberMismatch} |
+| Duplicate Task | ${result.summary.duplicateTask} |
 
 ---
 
 ## Detailed Issues
 
 `;
-
         if (result.issues.length === 0) {
             markdown += '*No issues found. Database is healthy.*\n';
         } else {
@@ -602,22 +651,20 @@ Generated: ${new Date().toLocaleString()}
             }
 
             const typeLabels: Record<string, string> = {
+                'mapping_file_not_found': 'Mapping File Not Found',
+                'mapping_task_not_in_todoist': 'Mapping Task Not in Todoist',
+                'mapping_orphan': 'Mapping Orphan',
+                'vault_task_no_mapping': 'Vault Task No Mapping',
                 'task_deleted_in_todoist': 'Task Deleted in Todoist',
-                'missing_in_cache': 'Missing in Cache',
-                'new_task_not_synced': 'New Task Not Synced',
-                'file_reference_missing': 'File Reference Missing',
-                'orphaned_in_cache': 'Orphaned in Cache',
                 'task_not_in_vault': 'Task Not in Vault',
+                'new_task_not_synced': 'New Task Not Synced',
                 'content_mismatch': 'Content Mismatch (Vault vs Todoist)',
-                'cache_content_outdated': 'Cache Content Outdated',
                 'status_mismatch': 'Status Mismatch (Vault vs Todoist)',
-                'cache_status_outdated': 'Cache Status Outdated',
-                'duedate_mismatch': 'Due Date Mismatch',
-                'duplicate_task': 'Duplicate Task',
                 'priority_mismatch': 'Priority Mismatch',
                 'label_mismatch': 'Label Mismatch',
                 'project_mismatch': 'Project Mismatch',
-                'empty_metadata': 'Empty Metadata'
+                'line_number_mismatch': 'Line Number Mismatch',
+                'duplicate_task': 'Duplicate Task'
             };
 
             const priorityLabels: Record<number, string> = {
@@ -637,7 +684,7 @@ Generated: ${new Date().toLocaleString()}
                     const taskContent = issue.taskContent?.substring(0, 40) || issue.obsidianContent?.substring(0, 40) || '-';
                     const filePath = issue.filePath || '-';
                     const lineNum = issue.lineNumber !== undefined ? String(issue.lineNumber + 1) : '-';
-                    const dueDate = issue.dueDate || issue.cacheDueDate || '-';
+                    const dueDate = issue.dueDate || '-';
                     const priority = issue.priority ? priorityLabels[issue.priority] || String(issue.priority) : '-';
                     
                     let status = '-';
@@ -653,17 +700,14 @@ Generated: ${new Date().toLocaleString()}
                 }
                 markdown += '\n';
 
-                if (type === 'content_mismatch' || type === 'cache_content_outdated') {
+                if (type === 'content_mismatch') {
                     markdown += `#### Detailed Comparison\n\n`;
                     for (let i = 0; i < issues.length; i++) {
                         const issue = issues[i];
-                        if (issue.obsidianContent || issue.todoistContent || issue.cacheContent) {
+                        if (issue.obsidianContent || issue.todoistContent) {
                             markdown += `**Issue ${i + 1}:** \`${issue.taskId}\`\n`;
                             if (issue.obsidianContent) {
                                 markdown += `- **Vault:** ${issue.obsidianContent}\n`;
-                            }
-                            if (issue.cacheContent) {
-                                markdown += `- **Cache:** ${issue.cacheContent}\n`;
                             }
                             if (issue.todoistContent) {
                                 markdown += `- **Todoist:** ${issue.todoistContent}\n`;
@@ -679,9 +723,9 @@ Generated: ${new Date().toLocaleString()}
 
 ## Statistics
 
-- Total Vault Tasks: ${result.issues.filter(i => i.obsidianContent || i.filePath).length}
-- Total Cache Tasks: ${result.issues.filter(i => i.cacheContent || i.cacheStatus !== undefined).length}
-- Total Todoist Tasks: ${result.issues.filter(i => i.todoistContent || i.todoistStatus !== undefined).length}
+- Total Issues Found: ${result.totalIssues}
+- Mapping Related Issues: ${result.summary.mappingFileNotFound + result.summary.mappingTaskNotInTodoist + result.summary.mappingOrphan + result.summary.vaultTaskNoMapping}
+- Data Consistency Issues: ${result.summary.contentMismatch + result.summary.statusMismatch + result.summary.priorityMismatch + result.summary.labelMismatch + result.summary.projectMismatch + result.summary.lineNumberMismatch}
 
 ---
 
