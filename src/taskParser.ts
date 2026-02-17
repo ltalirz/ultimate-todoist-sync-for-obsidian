@@ -148,11 +148,11 @@ export class TaskParser   {
         //use tag as project name
 
         let projectId = this.plugin.cacheOperation.getDefaultProjectIdForFilepath(filepath as string)
-        let projectName = this.plugin.cacheOperation.getProjectNameByIdFromCache(projectId)
+        let projectName = (await this.plugin.todoistSyncAPI.getProjectById(projectId))?.name ?? this.plugin.settings.defaultProjectName
 
         if(hasParent){
             projectId = parentTaskObject.projectId
-            projectName =this.plugin.cacheOperation.getProjectNameByIdFromCache(projectId)
+            projectName =(await this.plugin.todoistSyncAPI.getProjectById(projectId))?.name ?? this.plugin.settings.defaultProjectName
         }
         if(!hasParent){
                     //匹配 tag 和 peoject
@@ -161,7 +161,7 @@ export class TaskParser   {
                 //console.log(label)
                 let labelName = label.replace(/#/g, "");
                 //console.log(labelName)
-                let hasProjectId = this.plugin.cacheOperation.getProjectIdByNameFromCache(labelName)
+                let hasProjectId = (await this.plugin.todoistSyncAPI.getProjectByName(labelName))?.id
                 if(!hasProjectId){
                     continue
                 }

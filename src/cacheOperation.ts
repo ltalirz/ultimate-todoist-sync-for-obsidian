@@ -226,8 +226,8 @@ export class CacheOperation   {
             return this.plugin.settings.defaultProjectName;
         } else {
             const defaultProjectId = metadatas[filepath].defaultProjectId;
-            const defaultProjectName = this.getProjectNameByIdFromCache(defaultProjectId);
-            return defaultProjectName;
+            const project = this.plugin.todoistSyncAPI.getSyncData()?.projects?.find((p: any) => p.id === defaultProjectId);
+            return project?.name || this.plugin.settings.defaultProjectName;
         }
     }
 

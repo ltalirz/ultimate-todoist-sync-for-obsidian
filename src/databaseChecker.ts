@@ -235,15 +235,19 @@ export class DatabaseChecker {
 
     loadCacheTasks(): Map<string, CacheTask> {
         const cacheTasksMap = new Map<string, CacheTask>();
-        const cachedTasks = this.plugin.settings.todoistTasksData.tasks || [];
+        const taskFileMapping = this.plugin.settings.taskFileMapping || {};
+        const syncData = this.plugin.todoistSyncAPI.getSyncData();
+        const items = syncData?.items || [];
         
-        for (const task of cachedTasks) {
+        for (const task of items) {
             if (!task) continue;
+            const mapping = taskFileMapping[task.id];
+            if (!mapping) continue;
             cacheTasksMap.set(task.id, {
                 taskId: task.id,
                 content: task.content,
                 isCompleted: task.isCompleted || false,
-                path: task.path || '',
+                path: mapping.filePath,
                 dueDate: task.due?.date,
                 priority: task.priority || 4,
                 projectId: task.projectId || '',
@@ -491,9 +495,11 @@ export class DatabaseChecker {
                 if (cacheTask!.projectId !== todoistTask!.projectId) {
                     let cacheProjectName: string | null | undefined;
                     let todoistProjectName: string | null | undefined;
-                    if (this.plugin.cacheOperation) {
-                        cacheProjectName = this.plugin.cacheOperation.getProjectNameByIdFromCache(cacheTask!.projectId);
-                        todoistProjectName = this.plugin.cacheOperation.getProjectNameByIdFromCache(todoistTask!.projectId);
+                    const syncData = this.plugin.todoistSyncAPI.getSyncData();
+                    if (syncData) {
+                        const projects = syncData.projects || [];
+                        cacheProjectName = projects.find((p: any) => p.id === cacheTask!.projectId)?.name;
+                        todoistProjectName = projects.find((p: any) => p.id === todoistTask!.projectId)?.name;
                     }
                     issues.push({
                         type: 'project_mismatch',

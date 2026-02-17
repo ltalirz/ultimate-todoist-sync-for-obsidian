@@ -187,9 +187,8 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 						.addOptions(myProjectsOptions)
 						.onChange((value)=>{
 							this.plugin.settings.defaultProjectId = value
-							// TODO: Replace with getProjectById from todoistSyncAPI
-							const projectName = this.plugin.cacheOperation.getProjectNameByIdFromCache(value);
-							this.plugin.settings.defaultProjectName = projectName || value;
+							const project = this.plugin.todoistSyncAPI.getSyncData()?.projects?.find((p: any) => p.id === value);
+							this.plugin.settings.defaultProjectName = project?.name || value;
 							this.plugin.saveSettings()
 							
 							

@@ -27,10 +27,12 @@ export class SetDefalutProjectInTheFilepathModal extends Modal {
     contentEl.createEl('h5', { text: 'Set default project for todoist tasks in the current file' });
 
     this.defaultProjectId = await this.plugin.cacheOperation.getDefaultProjectIdForFilepath(this.filepath)
-    this.defaultProjectName = await this.plugin.cacheOperation.getProjectNameByIdFromCache(this.defaultProjectId)
+    const project = await this.plugin.todoistSyncAPI.getProjectById(this.defaultProjectId)
+    this.defaultProjectName = project?.name ?? this.plugin.settings.defaultProjectName
     console.log(this.defaultProjectId)
     console.log(this.defaultProjectName)
-    const myProjectsOptions: MyProject | undefined = this.plugin.settings.todoistTasksData?.projects?.reduce((obj, item) => {
+    const projects = this.plugin.todoistSyncAPI.getSyncData()?.projects || []
+    const myProjectsOptions: MyProject | undefined = projects.reduce((obj, item) => {
         obj[(item.id).toString()] = item.name;
         return obj;
         }, {}
