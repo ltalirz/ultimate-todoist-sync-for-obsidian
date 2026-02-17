@@ -134,52 +134,37 @@ export class TodoistSyncAPI   {
 	private mergeSyncData(changes: any): void {
 		if (!this.syncData) return;
 
-		if (changes.projects) {
-			const projectMap = new Map(this.syncData.projects.map((p: any) => [p.id, p]));
-			for (const project of changes.projects) {
-				if (project.is_deleted) {
-					projectMap.delete(project.id);
-				} else {
-					projectMap.set(project.id, project);
-				}
+		// Merge all top-level fields from the API response
+		for (const key of Object.keys(changes)) {
+			if (key === 'sync_token') {
+				// Update sync_token separately
+				this.syncData.sync_token = changes.sync_token;
+				continue;
 			}
-			this.syncData.projects = Array.from(projectMap.values());
-		}
 
-		if (changes.items) {
-			const itemMap = new Map(this.syncData.items.map((i: any) => [i.id, i]));
-			for (const item of changes.items) {
-				if (item.is_deleted) {
-					itemMap.delete(item.id);
-				} else {
-					itemMap.set(item.id, item);
-				}
-			}
-			this.syncData.items = Array.from(itemMap.values());
-		}
+			const changesData = changes[key];
 
-		if (changes.sections) {
-			const sectionMap = new Map(this.syncData.sections.map((s: any) => [s.id, s]));
-			for (const section of changes.sections) {
-				if (section.is_deleted) {
-					sectionMap.delete(section.id);
+			// Handle array data with ID-based merging (projects, items, sections, labels, notes)
+			if (Array.isArray(changesData)) {
+				const existingData = this.syncData[key];
+				if (Array.isArray(existingData)) {
+					const dataMap = new Map(existingData.map((item: any) => [item.id, item]));
+					for (const item of changesData) {
+						if (item.is_deleted) {
+							dataMap.delete(item.id);
+						} else {
+							dataMap.set(item.id, item);
+						}
+					}
+					this.syncData[key] = Array.from(dataMap.values());
 				} else {
-					sectionMap.set(section.id, section);
+					// No existing data, just use the changes
+					this.syncData[key] = changesData;
 				}
+			} else {
+				// Non-array data (objects like settings, user, etc.) - just replace
+				this.syncData[key] = changesData;
 			}
-			this.syncData.sections = Array.from(sectionMap.values());
-		}
-
-		if (changes.labels) {
-			const labelMap = new Map(this.syncData.labels.map((l: any) => [l.id, l]));
-			for (const label of changes.labels) {
-				if (label.is_deleted) {
-					labelMap.delete(label.id);
-				} else {
-					labelMap.set(label.id, label);
-				}
-			}
-			this.syncData.labels = Array.from(labelMap.values());
 		}
 	}
 
