@@ -319,27 +319,22 @@ export class CacheOperation   {
             }
             this.plugin.logOperation?.log('CACHE_REBUILT', 'Starting cache rebuild...');
 
-            // Step 1: 清空现有缓存
-            this.plugin.settings.todoistTasksData = {
-                projects: [],
-                tasks: [],
-                events: []
-            };
-            this.plugin.settings.fileMetadata = {};
+            // Step 1: Clear taskFileMapping (keep fileMetadata for other uses)
+            this.plugin.settings.taskFileMapping = {};
 
-            // Step 2: 从 Todoist 获取项目列表
+            // Step 2: Ensure syncData is loaded
             if (noticeCallback) {
-                noticeCallback('Fetching projects from Todoist...');
+                noticeCallback('Ensuring sync data is loaded...');
             } else {
-                console.log('Fetching projects from Todoist...');
+                console.log('Ensuring sync data is loaded...');
             }
-            const projects = await this.plugin.todoistSyncAPI.GetAllProjects();
-            if (!projects) {
-                throw new Error('Failed to fetch projects from Todoist');
+            
+            const syncData = this.plugin.todoistSyncAPI.getSyncData();
+            if (!syncData) {
+                await this.plugin.todoistSyncAPI.initializeSync();
             }
-            this.plugin.settings.todoistTasksData.projects = projects;
 
-            // Step 3: 扫描 Vault 中的所有 .md 文件
+            // Step 3: Scan Vault for all .md files
             if (noticeCallback) {
                 noticeCallback('Scanning vault for tasks...');
             } else {
@@ -358,15 +353,15 @@ export class CacheOperation   {
                     
                     for (let i = 0; i < lines.length; i++) {
                         const line = lines[i];
-                        // 检查是否包含 #todoist 标签
+                        // Check for #todoist tag
                         if (line.includes('#todoist')) {
-                            // 提取 todoist_id: %%[todoist_id:: xxx]%%
+                            // Extract todoist_id: %%[todoist_id:: xxx]%%
                             const match = line.match(/%%\[todoist_id::\s*(\w+)\]%%/);
                             if (match && match[1]) {
                                 const taskId = match[1];
-                                // 提取任务内容（去掉 checkbox 和 metadata）
+                                // Extract task content (remove checkbox and metadata)
                                 const taskContent = this.extractTaskContent(line);
-                                // 检查任务完成状态 - [x] 表示完成, [ ] 表示未完成
+                                // Check completion status - [x] = completed, [ ] = not completed
                                 const isCompleted = /\[x\]/i.test(line);
                                 
                                 if (!fileTaskMap.has(file.path)) {
@@ -386,7 +381,7 @@ export class CacheOperation   {
                 }
             }
 
-            // Step 4: 处理每个文件的任务，检测冲突
+            // Step 4: Process tasks and detect conflicts
             if (noticeCallback) {
                 noticeCallback('Processing tasks and detecting conflicts...');
             } else {
@@ -398,33 +393,37 @@ export class CacheOperation   {
             const totalTasks = Array.from(fileTaskMap.values())
                 .reduce((sum, tasks) => sum + tasks.length, 0);
             
-            // 用于记录无效的 taskId（Todoist 中不存在的）
+            // Track invalid taskIds (not in Todoist)
             const invalidTaskIds: string[] = [];
             
             for (const [filePath, fileTasks] of fileTaskMap.entries()) {
-                const validTaskIds: string[] = [];
-                
                 for (const taskInfo of fileTasks) {
                     try {
-                        // 从 Todoist 获取任务详情
-                        const task = await this.plugin.todoistSyncAPI.getTaskById(taskInfo.taskId);
+                        // Get task from syncData
+                        const task = await this.plugin.todoistSyncAPI.GetTaskById(taskInfo.taskId);
                         
-                        // 比较内容是否一致
+                        if (!task) {
+                            // Task doesn't exist in Todoist
+                            console.log(`Task ${taskInfo.taskId} not found in Todoist, will be removed...`);
+                            invalidTaskIds.push(taskInfo.taskId);
+                            this.plugin.logOperation?.log('CACHE_TASK_DELETED', `Task ${taskInfo.taskId} not found in Todoist during rebuild`, filePath, taskInfo.taskId);
+                            continue;
+                        }
+                        
+                        // Compare content
                         const todoistContent = task.content || '';
                         const obsidianContent = taskInfo.content;
                         
-                        // 检查完成状态是否一致
-                        // Todoist API: task.isCompleted 表示完成状态
+                        // Check completion status
                         const todoistIsCompleted = task.isCompleted || false;
                         const obsidianIsCompleted = taskInfo.isCompleted;
                         
-                        // 检测内容冲突
+                        // Detect content conflict
                         const contentConflict = obsidianContent.trim() !== todoistContent.trim();
-                        // 检测完成状态冲突
+                        // Detect status conflict
                         const statusConflict = obsidianIsCompleted !== todoistIsCompleted;
                         
                         if (contentConflict || statusConflict) {
-                            // 检测到冲突
                             conflicts.push({
                                 taskId: taskInfo.taskId,
                                 filePath: filePath,
@@ -434,41 +433,26 @@ export class CacheOperation   {
                             });
                         }
                         
-                        // 添加 path 字段关联到文件
-                        // 同时保存完成状态
-                        (task as any).path = filePath;
-                        (task as any).isCompleted = todoistIsCompleted;
+                        // Save to taskFileMapping
+                        this.plugin.settings.taskFileMapping[taskInfo.taskId] = {
+                            filePath: filePath,
+                            lineNumber: taskInfo.lineNumber
+                        };
                         
-                        // 保存到缓存
-                        this.appendTaskToCache(task);
-                        
-                        validTaskIds.push(taskInfo.taskId);
                         processedCount++;
                         
-                        // 每处理 10 个任务更新一次 UI
+                        // Update UI every 10 tasks
                         if (noticeCallback && processedCount % 10 === 0) {
                             noticeCallback(`Processing ${processedCount}/${totalTasks}...`);
                         }
                     } catch (error) {
-                        // 任务在 Todoist 中不存在，记录下来
-                        console.log(`Task ${taskInfo.taskId} not found in Todoist, will be removed from metadata...`);
+                        console.error(`Error processing task ${taskInfo.taskId}:`, error);
                         invalidTaskIds.push(taskInfo.taskId);
-                        // 记录日志
-                        this.plugin.logOperation?.log('CACHE_TASK_DELETED', `Task ${taskInfo.taskId} not found in Todoist during rebuild, removing from cache`, filePath, taskInfo.taskId);
                     }
-                }
-                
-                // 更新 fileMetadata（排除无效的 taskId）
-                const finalTaskIds = validTaskIds.filter(id => !invalidTaskIds.includes(id));
-                if (finalTaskIds.length > 0) {
-                    this.plugin.settings.fileMetadata[filePath] = {
-                        todoistTasks: finalTaskIds,
-                        todoistCount: finalTaskIds.length
-                    };
                 }
             }
 
-            // Step 5: 如果有冲突，弹出窗口让用户选择
+            // Step 5: Resolve conflicts
             if (conflicts.length > 0) {
                 if (noticeCallback) {
                     noticeCallback(`Found ${conflicts.length} conflicts. Please resolve in dialog...`);
@@ -481,28 +465,13 @@ export class CacheOperation   {
                         conflicts,
                         async (resolutions) => {
                             await this.resolveConflicts(resolutions, conflicts);
-                            // 解决冲突后，重新更新 fileMetadata
-                            for (const conflict of conflicts) {
-                                const resolution = resolutions.get(conflict.taskId);
-                                if (resolution === 'todoist') {
-                                    // 如果选择保留 Todoist 内容，需要重新保存任务到缓存以更新完成状态
-                                    try {
-                                        const task = await this.plugin.todoistSyncAPI.getTaskById(conflict.taskId);
-                                        (task as any).path = conflict.filePath;
-                                        (task as any).isCompleted = task.isCompleted;
-                                        this.plugin.cacheOperation.updateTaskToCacheByID(task);
-                                    } catch (error) {
-                                        console.error(`Failed to update task ${conflict.taskId} after conflict resolution:`, error);
-                                    }
-                                }
-                            }
                             resolve();
                         }
                     );
                 });
             }
             
-            // Step 6: 保存设置
+            // Step 6: Save settings
             await this.plugin.saveSettings();
             
             const invalidMsg = invalidTaskIds.length > 0 ? ` (${invalidTaskIds.length} tasks not found in Todoist removed)` : '';
