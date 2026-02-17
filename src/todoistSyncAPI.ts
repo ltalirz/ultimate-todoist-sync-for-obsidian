@@ -35,29 +35,8 @@ export class TodoistSyncAPI   {
 		windowStartTime: Date.now()
 	};
 
-	private syncData: {
-		projects: any[];
-		items: any[];
-		sections: any[];
-		labels: any[];
-		notes: any[];
-		sections_order: any;
-		project_states: any[];
-		day_orders: any;
-		goals: any;
-		notification_thread_entities: any;
-		notification_threads: any;
-		notification_channel_connected_settings: any[];
-		notification_channel_settings: any[];
-		themes: any[];
-		settings: any;
-		user: any;
-		user_plan_limits: any;
-		live_notifications: any[];
-		completed_onboarding: any[];
-		shortcuts: any[];
-		sync_token: string;
-	} | null = null;
+	// Store complete raw API response
+	private syncData: Record<string, any> | null = null;
 
 	constructor(app:App, plugin:UltimateTodoistSyncForObsidian) {
 		//super(app,settings);
@@ -117,11 +96,21 @@ export class TodoistSyncAPI   {
 	}
 
 	async initializeSync(): Promise<void> {
+		// Try to load from cache first
+		if (this.plugin.settings.syncDataCache) {
+			this.syncData = this.plugin.settings.syncDataCache;
+			console.log('[TodoistSyncAPI] Loaded sync data from cache');
+		}
+		
+		// Fetch fresh data (full sync)
 		const data = await this.getAllResources(true);
 		this.syncData = data;
+		
+		// Save to cache
+		this.plugin.settings.syncDataCache = data;
 		this.plugin.settings.syncToken = data.sync_token;
 		await this.plugin.saveSettings();
-		console.log('[TodoistSyncAPI] Sync initialized with full data');
+		console.log('[TodoistSyncAPI] Sync initialized with full data and cached');
 	}
 
 	private async incrementalSync(): Promise<void> {
@@ -133,9 +122,12 @@ export class TodoistSyncAPI   {
 		try {
 			const changes = await this.getAllResources(false);
 			this.mergeSyncData(changes);
+			
+			// Save updated syncData to cache
+			this.plugin.settings.syncDataCache = this.syncData;
 			this.plugin.settings.syncToken = changes.sync_token;
 			await this.plugin.saveSettings();
-			console.log('[TodoistSyncAPI] Incremental sync completed');
+			console.log('[TodoistSyncAPI] Incremental sync completed and cached');
 		} catch (error) {
 			console.error('[TodoistSyncAPI] Incremental sync failed:', error);
 		}
@@ -193,8 +185,18 @@ export class TodoistSyncAPI   {
 		}
 	}
 
-	getSyncData(): typeof this.syncData {
+	getSyncData(): Record<string, any> | null {
 		return this.syncData;
+	}
+
+	// Load sync data from cache (called on plugin startup)
+	loadFromCache(): boolean {
+		if (this.plugin.settings.syncDataCache) {
+			this.syncData = this.plugin.settings.syncDataCache;
+			console.log('[TodoistSyncAPI] Loaded sync data from cache');
+			return true;
+		}
+		return false;
 	}
 
     async getAllResources(fullSync = false) { 

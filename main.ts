@@ -461,9 +461,14 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		//initialize device manager
 		this.deviceManager = new DeviceManager(this.app, this)
 
-		//initialize sync data (full sync on startup)
+		//initialize sync data (load from cache or full sync on startup)
 		try {
-			await this.todoistSyncAPI?.initializeSync();
+			// Try to load from cache first
+			const loaded = this.todoistSyncAPI?.loadFromCache();
+			if (!loaded) {
+				// No cache, do full sync
+				await this.todoistSyncAPI?.initializeSync();
+			}
 			this.settings.deviceIdGenerated = true;
 			await this.saveSettings();
 		} catch (error) {
