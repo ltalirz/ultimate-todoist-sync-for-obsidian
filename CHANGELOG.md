@@ -1,5 +1,36 @@
 ## CHANGELOG
 
+### [1.0.4] - 2026-02-17
+
+#### Added
+- **Full syncData persistence**: Added `syncDataCache` field to settings to store complete Todoist API response
+  - All API data (projects, items, sections, labels, notes, user, etc.) is now persisted
+  - Plugin startup loads from cache first, reducing API calls
+  - Data is saved to cache after full sync and incremental sync
+
+#### Changed
+- **Removed syncToken from settings**: Token now only stored in memory within syncDataCache
+  - Read from `this.syncData?.sync_token` instead of `settings.syncToken`
+- **Improved mergeSyncData**: Now merges all API response fields dynamically instead of hardcoded fields
+  - Supports projects, items, sections, labels, notes, and all other API fields
+  - Properly handles is_deleted flag for all array types
+
+#### Fixed
+- **rebuildCache refactored**: Updated to use new architecture
+  - Clears taskFileMapping instead of deprecated todoistTasksData
+  - Ensures syncData is loaded before rebuilding
+  - Uses setTaskFileMapping instead of appendTaskToCache
+  - Simplified conflict resolution (no cache update needed)
+
+#### Tests
+- Added comprehensive test suite: `tests/sync-api/test-todoist-sync-api-full.mjs`
+  - Tests all Sync API methods: getAllResources, incrementalSync, addTask, updateTask, closeTask, reopenTask, deleteTask
+  - Tests activity events: getAllActivityEvents, getCompletedItemsActivity, getUncompletedItemsActivity, getUpdatedItemsActivity
+  - Tests data lookups: getProjectById, getProjectByName, GetTaskById, GetActiveTasks
+  - Tests mergeSyncData with update, add, and delete scenarios
+
+---
+
 ### [1.0.3] - 2026-02-17
 
 #### Changed
