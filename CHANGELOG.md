@@ -1,5 +1,37 @@
 ## CHANGELOG
 
+### [1.0.3] - 2026-02-17
+
+#### Changed
+- **Major Refactoring: Simplified Data Architecture**
+  - Removed `todoistTasksData` from settings (was storing tasks/projects/events in persistent storage)
+  - Added `taskFileMapping` to settings (stores taskId → {filePath, lineNumber} mapping only)
+  - Now using `syncData` (in-memory from Todoist API) as single source of truth for tasks/projects
+  - Todoist API is now the primary data source instead of local cache
+
+#### Refactored Files
+- `src/settings.ts`: Removed `todoistTasksData` interface, added `taskFileMapping` interface
+- `src/todoistSyncAPI.ts`: 
+  - Modified `GetAllProjects()`, `GetTaskById()`, `GetActiveTasks()` to read from `syncData` with fallback to full sync
+  - Added `getProjectById()`, `getProjectByName()` methods for project lookups
+  - Added `getSyncData()` public method to access in-memory sync data
+- `src/cacheOperation.ts`:
+  - Added 4 new taskFileMapping methods: `getTaskFileMapping()`, `setTaskFileMapping()`, `deleteTaskFileMapping()`, `getAllTaskFileMappings()`
+  - Deprecated all old cache methods (made them no-ops): `loadTasksFromCache`, `saveTasksToCache`, `appendTaskToCache`, `closeTaskToCacheByID`, `reopenTaskToCacheByID`, etc.
+  - Updated `getDefaultProjectNameForFilepath()` to use todoistSyncAPI
+- `src/obsidianToTodoist.ts`: Replaced all cacheOperation calls with taskFileMapping or removed them
+- `src/fileOperation.ts`: Replaced all `loadTaskFromCacheyID()` calls with `getTaskFileMapping()` + `GetTaskById()`
+- `src/taskParser.ts`: Replaced cache methods with todoistSyncAPI methods
+- `src/databaseChecker.ts`: Uses `syncData.items` + `taskFileMapping` instead of `todoistTasksData.tasks`
+- `src/modal.ts`: Uses `todoistSyncAPI.getSyncData().projects` instead of `todoistTasksData.projects`
+- `src/todoistToObsidian.ts`: Simplified to use taskFileMapping, removed event tracking calls
+
+#### Notes
+- Events (todoist → obsidian sync) are temporarily ignored to simplify one-way sync first
+- This refactoring reduces data duplication and ensures Todoist is the single source of truth
+
+---
+
 ### [1.0.2] - 2026-02-16
 
 #### Added
