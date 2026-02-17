@@ -12,22 +12,16 @@
 - **Removed syncToken from settings**: Token now only stored in memory within syncDataCache
   - Read from `this.syncData?.sync_token` instead of `settings.syncToken`
 - **Improved mergeSyncData**: Now merges all API response fields dynamically instead of hardcoded fields
-  - Supports projects, items, sections, labels, notes, and all other API fields
-  - Properly handles is_deleted flag for all array types
+- **databaseChecker completely rewritten**: 
+  - Now checks 8 combinations of 3 data sources (Vault, Todoist, taskFileMapping)
+  - New issue types: mapping_file_not_found, mapping_task_not_in_todoist, mapping_orphan, vault_task_no_mapping, line_number_mismatch
+  - Report format updated: shows data source combinations table first, then detailed issues by type
 
 #### Fixed
-- **rebuildCache refactored**: Updated to use new architecture
-  - Clears taskFileMapping instead of deprecated todoistTasksData
-  - Ensures syncData is loaded before rebuilding
-  - Uses setTaskFileMapping instead of appendTaskToCache
-  - Simplified conflict resolution (no cache update needed)
+- **rebuildCache refactored**: Updated to use new architecture with taskFileMapping
 
 #### Tests
 - Added comprehensive test suite: `tests/sync-api/test-todoist-sync-api-full.mjs`
-  - Tests all Sync API methods: getAllResources, incrementalSync, addTask, updateTask, closeTask, reopenTask, deleteTask
-  - Tests activity events: getAllActivityEvents, getCompletedItemsActivity, getUncompletedItemsActivity, getUpdatedItemsActivity
-  - Tests data lookups: getProjectById, getProjectByName, GetTaskById, GetActiveTasks
-  - Tests mergeSyncData with update, add, and delete scenarios
 
 ---
 
