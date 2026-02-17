@@ -30,6 +30,8 @@ export interface UltimateTodoistSyncSettings {
 	useAppURI:boolean;
 	// Sync control
 	syncEnabled: boolean;
+	obsidianToTodoistEnabled: boolean;
+	todoistToObsidianEnabled: boolean;
 	lastDatabaseCheckPassed: boolean;
 	lastDatabaseCheckTime: number | null;
 	// Full sync data cache (raw API response)
@@ -62,6 +64,8 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
 	debugMode:false,
 	useAppURI:true,
 	syncEnabled: false,
+	obsidianToTodoistEnabled: true,
+	todoistToObsidianEnabled: false,
 	lastDatabaseCheckPassed: false,
 	lastDatabaseCheckTime: null,
 	syncDataCache: null,
@@ -422,20 +426,22 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 		const syncStatusEl = containerEl.createEl('div', { cls: 'setting-item-description' });
 		const updateSyncStatus = () => {
 			const passed = this.plugin.settings.lastDatabaseCheckPassed;
-			const enabled = this.plugin.settings.syncEnabled;
+			const mainEnabled = this.plugin.settings.syncEnabled;
+			const o2tEnabled = this.plugin.settings.obsidianToTodoistEnabled;
+			const t2oEnabled = this.plugin.settings.todoistToObsidianEnabled;
 			const lastCheck = this.plugin.settings.lastDatabaseCheckTime 
 				? new Date(this.plugin.settings.lastDatabaseCheckTime).toLocaleString() 
 				: 'Never';
 			
 			let statusText = '';
-			if (!passed && !enabled) {
-				statusText = '⚠️ Sync is disabled due to database issues';
-			} else if (!passed && enabled) {
-				statusText = '⚠️ Sync is manually enabled but blocked due to database issues';
-			} else if (!enabled) {
-				statusText = '❌ Sync is disabled by user';
+			if (!passed) {
+				statusText = '⚠️ Sync blocked due to database issues';
+			} else if (!mainEnabled) {
+				statusText = '❌ Sync disabled (main switch off)';
 			} else {
-				statusText = '✅ Sync is enabled';
+				const o2t = o2tEnabled ? '✅' : '❌';
+				const t2o = t2oEnabled ? '✅' : '❌';
+				statusText = `✅ Sync enabled (O→T: ${o2t}, T→O: ${t2o})`;
 			}
 			
 			syncStatusEl.innerHTML = `
@@ -445,10 +451,10 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 		};
 		updateSyncStatus();
 
-		// Sync Enable Toggle
+		// Sync Enable Toggle (Main Switch)
 		new Setting(containerEl)
 			.setName('Enable Sync')
-			.setDesc('Manually enable or disable sync functionality')
+			.setDesc('Main sync toggle')
 			.addToggle(component =>
 				component
 					.setValue(this.plugin.settings.syncEnabled)
@@ -457,6 +463,36 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 						updateSyncStatus();
 						new Notice(`Sync ${value ? 'enabled' : 'disabled'} by user`);
+					})
+			);
+
+		// Obsidian → Todoist Toggle
+		new Setting(containerEl)
+			.setName('Obsidian → Todoist')
+			.setDesc('Sync tasks from Obsidian to Todoist')
+			.addToggle(component =>
+				component
+					.setValue(this.plugin.settings.obsidianToTodoistEnabled)
+					.onChange(async (value) => {
+						this.plugin.settings.obsidianToTodoistEnabled = value;
+						await this.plugin.saveSettings();
+						updateSyncStatus();
+						new Notice(`Obsidian → Todoist sync ${value ? 'enabled' : 'disabled'}`);
+					})
+			);
+
+		// Todoist → Obsidian Toggle
+		new Setting(containerEl)
+			.setName('Todoist → Obsidian')
+			.setDesc('Sync tasks from Todoist to Obsidian')
+			.addToggle(component =>
+				component
+					.setValue(this.plugin.settings.todoistToObsidianEnabled)
+					.onChange(async (value) => {
+						this.plugin.settings.todoistToObsidianEnabled = value;
+						await this.plugin.saveSettings();
+						updateSyncStatus();
+						new Notice(`Todoist → Obsidian sync ${value ? 'enabled' : 'disabled'}`);
 					})
 			);
 

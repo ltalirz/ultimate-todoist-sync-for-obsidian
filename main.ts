@@ -100,7 +100,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 					if(!( this.checkModuleClass())){
 						return
 					}
-					if (!await this.checkAndHandleSyncLock()) return;
+					if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
 					await this.todoistSync.deletedTaskCheck();
 					this.syncLock = false;
 					this.saveSettings()	
@@ -156,7 +156,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				if(this.settings.enableFullVaultSync){
 					return
 				}
-				if (!await this.checkAndHandleSyncLock()) return;
+				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
 				await this.todoistSync.lineContentNewTaskCheck(editor,view)
 				this.syncLock = false
 				this.saveSettings()
@@ -190,7 +190,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				if(!( this.checkModuleClass())){
 						return
 				}
-				if (!await this.checkAndHandleSyncLock()) return;
+				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
 				await this.todoistSync.deleteTasksByIds(frontMatter.todoistTasks)
 				this.syncLock = false
 				this.saveSettings()
@@ -227,7 +227,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			this.logOperation?.log('FILE_RENAMED', `File renamed from ${oldpath} to ${file.path}`, file.path);
 			
 			//update task description
-			if (!await this.checkAndHandleSyncLock()) return;
+			if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
 			try {
 				await this.todoistSync.updateTaskDescription(file.path)
 			} catch(error) {
@@ -258,7 +258,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 					return
 				}
 
-				if (!await this.checkAndHandleSyncLock()) return;
+				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
 				
 				await this.todoistSync.fullTextNewTaskCheck(filepath)
 				this.syncLock = false;
@@ -510,7 +510,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				}
 				this.lastLines.set(fileName as string, line as number);
 				try{
-					if (!await this.checkAndHandleSyncLock()) return;
+					if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
 					await this.todoistSync.lineModifiedTaskCheck(filepath as string,lastLineText,lastLine as number,fileContent)
 					this.syncLock = false;
 				}catch(error){
@@ -556,7 +556,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			//console.log('未找到 todoist_id');
 			//开始全文搜索，检查status更新
 			try{
-				if (!await this.checkAndHandleSyncLock()) return;
+				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
 				await this.todoistSync.fullTextModifiedTaskCheck()
 				this.syncLock = false;
 			}catch(error){
@@ -613,7 +613,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		}
 		console.log("Todoist scheduled synchronization task started at", new Date().toLocaleString());
 		try {
-			if (!await this.checkAndHandleSyncLock()) return;
+			if (!await this.checkAndHandleSyncLock('todoistToObsidian')) return;
 			try {
 				await this.todoistSync.syncTodoistToObsidian();
 			} catch(error) {
@@ -639,7 +639,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 					console.log(fileKey)
 				}
 
-				if (!await this.checkAndHandleSyncLock()) return;
+				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
 				try {
 					await this.todoistSync.fullTextNewTaskCheck(fileKey);
 				} catch(error) {
@@ -647,7 +647,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				}
 				this.syncLock = false;
 
-				if (!await this.checkAndHandleSyncLock()) return;
+				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
 				try {
 					await this.todoistSync.deletedTaskCheck(fileKey);
 				} catch(error) {
@@ -655,7 +655,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				}
 				this.syncLock = false;
 
-				if (!await this.checkAndHandleSyncLock()) return;
+				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
 				try {
 					await this.todoistSync.fullTextModifiedTaskCheck(fileKey);
 				} catch(error) {
@@ -684,7 +684,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		return true;
 	}
 
-	async checkAndHandleSyncLock() {
+	async checkAndHandleSyncLock(direction?: 'obsidianToTodoist' | 'todoistToObsidian'): Promise<boolean> {
 		// Check 1: Database check status (先检查，更重要)
 		if (!this.settings.lastDatabaseCheckPassed) {
 			console.log('Sync is disabled due to database issues');
@@ -692,9 +692,20 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			return false;
 		}
 
-		// Check 2: User manual toggle
+		// Check 2: User manual toggle (main switch)
 		if (!this.settings.syncEnabled) {
-			console.log('Sync is disabled by user');
+			console.log('Sync is disabled by user (main switch off)');
+			return false;
+		}
+
+		// Check 3: Direction-specific toggle
+		if (direction === 'obsidianToTodoist' && !this.settings.obsidianToTodoistEnabled) {
+			console.log('Obsidian → Todoist sync is disabled by user');
+			return false;
+		}
+		
+		if (direction === 'todoistToObsidian' && !this.settings.todoistToObsidianEnabled) {
+			console.log('Todoist → Obsidian sync is disabled by user');
 			return false;
 		}
 
