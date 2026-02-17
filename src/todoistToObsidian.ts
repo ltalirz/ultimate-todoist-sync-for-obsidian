@@ -122,8 +122,8 @@ export class TodoistToObsidianSync {
             const now: Date = new Date();
             const timeString = `${now.getFullYear()}${now.getMonth() + 1}${now.getDate()}-${now.getHours()}${now.getMinutes()}${now.getSeconds()}`;
 
-            const backupFolder = '.todoist-backups';
-            const fileName = `backup-${timeString}.json`;
+            const backupFolder = '.ultimate-todoist-backup';
+            const fileName = `todoist-data-backup-${timeString}.json`;
             const fullPath = `${backupFolder}/${fileName}`;
 
             const folderExists = this.app.vault.getAbstractFileByPath(backupFolder);

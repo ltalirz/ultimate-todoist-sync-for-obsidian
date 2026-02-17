@@ -495,6 +495,75 @@ export class FileOperation   {
         }
       }
 
+    /**
+     * Update task ID in vault file (for legacy ID conversion)
+     */
+    async updateTaskIdInVault(
+        filePath: string, 
+        lineNumber: number, 
+        oldId: string, 
+        newId: string
+    ): Promise<void> {
+        try {
+            const file = this.app.vault.getAbstractFileByPath(filePath);
+            if (!file) {
+                console.error(`[updateTaskIdInVault] File not found: ${filePath}`);
+                return;
+            }
+            
+            const content = await this.app.vault.read(file);
+            const lines = content.split('\n');
+            
+            if (lineNumber >= lines.length) {
+                console.error(`[updateTaskIdInVault] Line ${lineNumber} out of range in ${filePath}`);
+                return;
+            }
+
+            let line = lines[lineNumber];
+            let hasChanges = false;
+            
+            // 1. Replace todoist_id metadata: %%[todoist_id:: oldId]%% -> %%[todoist_id:: newId]%%
+            const oldIdPattern = new RegExp(`%%\\[todoist_id::\\s*${oldId}\\]%%`, 'g');
+            if (oldIdPattern.test(line)) {
+                line = line.replace(oldIdPattern, `%%[todoist_id:: ${newId}]%%`);
+                hasChanges = true;
+            }
+            
+            // 2. Replace App URI: todoist://task?id=oldId -> todoist://task?id=newId
+            const oldAppUriPattern = new RegExp(`todoist://task\\?id=${oldId}`, 'g');
+            if (oldAppUriPattern.test(line)) {
+                line = line.replace(oldAppUriPattern, `todoist://task?id=${newId}`);
+                hasChanges = true;
+            }
+            
+            // 3. Replace Web URL: https://todoist.com/app/task/oldId -> https://todoist.com/app/task/newId
+            const oldWebUrlPattern = new RegExp(`https://todoist\\.com/app/task/${oldId}`, 'g');
+            if (oldWebUrlPattern.test(line)) {
+                line = line.replace(oldWebUrlPattern, `https://todoist.com/app/task/${newId}`);
+                hasChanges = true;
+            }
+            
+            if (!hasChanges) {
+                console.warn(`[updateTaskIdInVault] No ID patterns found in line ${lineNumber} of ${filePath}`);
+                return;
+            }
+            
+            lines[lineNumber] = line;
+            
+            await this.plugin.backupOperation?.backupFile(filePath);
+            await this.app.vault.modify(file, lines.join('\n'));
+            
+            this.plugin.logOperation?.log(
+                'FILE_TASK_ID_UPDATED', 
+                `Updated task ID ${oldId} -> ${newId}`, 
+                filePath, 
+                newId
+            );
+            console.log(`[updateTaskIdInVault] Updated task ID ${oldId} -> ${newId} in ${filePath}`);
+        } catch (error) {
+            console.error(`[updateTaskIdInVault] Failed to update task ID in vault:`, error);
+        }
+    }
 
 
 

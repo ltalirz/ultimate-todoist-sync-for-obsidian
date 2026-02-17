@@ -4,7 +4,7 @@ import UltimateTodoistSyncForObsidian from "../main";
 export class BackupOperation {
     app: App;
     plugin: UltimateTodoistSyncForObsidian;
-    private backupFolder = '.todoist-backups';
+    private backupFolder = '.ultimate-todoist-backup';
     private maxBackupsPerFile = 5;
 
     constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
