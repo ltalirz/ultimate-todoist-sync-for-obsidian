@@ -603,7 +603,21 @@ export class DatabaseChecker {
     async generateReport(result: DatabaseCheckResult): Promise<string | undefined> {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const reportFilename = `database-check-${timestamp}.md`;
-        const reportFolder = '.todoist-reports';
+
+        // Get statistics from issues
+        const vaultTasksWithMapping = result.issues.filter(i => 
+            (i.type === 'content_mismatch' || i.type === 'status_mismatch' || 
+             i.type === 'priority_mismatch' || i.type === 'label_mismatch' ||
+             i.type === 'project_mismatch' || i.type === 'line_number_mismatch')
+        ).length;
+        
+        const vaultNoMapping = result.summary.vaultTaskNoMapping;
+        const taskDeletedInTodoist = result.summary.taskDeletedInTodoist;
+        const newTaskNotSynced = result.summary.newTaskNotSynced;
+        const taskNotInVault = result.summary.taskNotInVault;
+        const mappingOrphan = result.summary.mappingOrphan;
+        const mappingFileNotFound = result.summary.mappingFileNotFound;
+        const mappingTaskNotInTodoist = result.summary.mappingTaskNotInTodoist;
 
         let markdown = `# Database Check Report
 
@@ -611,28 +625,24 @@ Generated: ${new Date().toLocaleString()}
 
 ## Summary
 
-| Status | Count |
-|--------|-------|
+| Status | Total Issues |
+|--------|--------------|
 | ${result.success ? '✅ Passed' : '❌ Issues Found'} | ${result.totalIssues} |
 
-### Issue Breakdown
+---
 
-| Issue Type | Count |
-|------------|-------|
-| Mapping File Not Found | ${result.summary.mappingFileNotFound} |
-| Mapping Task Not in Todoist | ${result.summary.mappingTaskNotInTodoist} |
-| Mapping Orphan | ${result.summary.mappingOrphan} |
-| Vault Task No Mapping | ${result.summary.vaultTaskNoMapping} |
-| Task Deleted in Todoist | ${result.summary.taskDeletedInTodoist} |
-| Task Not in Vault | ${result.summary.taskNotInVault} |
-| New Task Not Synced | ${result.summary.newTaskNotSynced} |
-| Content Mismatch | ${result.summary.contentMismatch} |
-| Status Mismatch | ${result.summary.statusMismatch} |
-| Priority Mismatch | ${result.summary.priorityMismatch} |
-| Label Mismatch | ${result.summary.labelMismatch} |
-| Project Mismatch | ${result.summary.projectMismatch} |
-| Line Number Mismatch | ${result.summary.lineNumberMismatch} |
-| Duplicate Task | ${result.summary.duplicateTask} |
+## Data Sources Overview
+
+| Combination | Vault | Todoist | Mapping | Count | Description |
+|-------------|-------|---------|---------|-------|-------------|
+| Normal | ✅ | ✅ | ✅ | ${vaultTasksWithMapping} | All present, check consistency |
+| Settings Lost | ✅ | ✅ | ❌ | ${vaultNoMapping} | Need rebuild mapping |
+| Deleted in Todoist | ✅ | ❌ | ✅ | ${taskDeletedInTodoist} | Task deleted in Todoist |
+| Not Synced | ✅ | ❌ | ❌ | ${newTaskNotSynced} | New task not yet synced |
+| File Missing | ❌ | ✅ | ✅ | ${taskNotInVault} | Vault file missing |
+| Orphan Mapping | ❌ | ❌ | ✅ | ${mappingOrphan} | Mapping orphan |
+| Mapping File Not Found | - | - | - | ${mappingFileNotFound} | Mapping file doesn't exist |
+| Mapping Task Not in Todoist | - | - | - | ${mappingTaskNotInTodoist} | Task deleted in Todoist |
 
 ---
 
@@ -642,6 +652,7 @@ Generated: ${new Date().toLocaleString()}
         if (result.issues.length === 0) {
             markdown += '*No issues found. Database is healthy.*\n';
         } else {
+            // Group issues by type
             const groupedByType = new Map<string, DatabaseCheckIssue[]>();
             for (const issue of result.issues) {
                 if (!groupedByType.has(issue.type)) {
@@ -654,12 +665,12 @@ Generated: ${new Date().toLocaleString()}
                 'mapping_file_not_found': 'Mapping File Not Found',
                 'mapping_task_not_in_todoist': 'Mapping Task Not in Todoist',
                 'mapping_orphan': 'Mapping Orphan',
-                'vault_task_no_mapping': 'Vault Task No Mapping',
-                'task_deleted_in_todoist': 'Task Deleted in Todoist',
-                'task_not_in_vault': 'Task Not in Vault',
+                'vault_task_no_mapping': 'Vault Task No Mapping (Settings Lost)',
+                'task_deleted_in_task_deleted_in_todoist': 'Task Deleted in Todoist',
+                'task_not_in_vault': 'Task Not in Vault (File Missing)',
                 'new_task_not_synced': 'New Task Not Synced',
-                'content_mismatch': 'Content Mismatch (Vault vs Todoist)',
-                'status_mismatch': 'Status Mismatch (Vault vs Todoist)',
+                'content_mismatch': 'Content Mismatch',
+                'status_mismatch': 'Status Mismatch',
                 'priority_mismatch': 'Priority Mismatch',
                 'label_mismatch': 'Label Mismatch',
                 'project_mismatch': 'Project Mismatch',
@@ -668,79 +679,129 @@ Generated: ${new Date().toLocaleString()}
             };
 
             const priorityLabels: Record<number, string> = {
-                1: 'Low',
-                2: 'Medium',
-                3: 'High',
-                4: 'Urgent'
+                1: 'P1 (Low)',
+                2: 'P2 (Medium)',
+                3: 'P3 (High)',
+                4: 'P4 (Urgent)'
             };
 
+            // Output each issue type with details
             for (const [type, issues] of groupedByType) {
-                markdown += `### ${typeLabels[type] || type}\n\n`;
-                markdown += `| # | Task ID | Content | File | Line | Due Date | Priority | Status | Details |\n`;
-                markdown += `|---|---------|---------|------|------|----------|----------|--------|--------|\n`;
+                const label = typeLabels[type] || type;
+                markdown += `### ${label} (${issues.length})\n\n`;
+
+                // Create table for this issue type
+                markdown += `| # | Task ID | Content | File | Line | Status | Details |\n`;
+                markdown += `|---|---------|---------|------|------|--------|---------|\n`;
                 
                 for (let i = 0; i < issues.length; i++) {
                     const issue = issues[i];
-                    const taskContent = issue.taskContent?.substring(0, 40) || issue.obsidianContent?.substring(0, 40) || '-';
-                    const filePath = issue.filePath || '-';
+                    const taskContent = issue.taskContent?.substring(0, 30) || issue.obsidianContent?.substring(0, 30) || '-';
+                    const filePath = issue.filePath ? issue.filePath.split('/').pop() : '-';
                     const lineNum = issue.lineNumber !== undefined ? String(issue.lineNumber + 1) : '-';
-                    const dueDate = issue.dueDate || '-';
-                    const priority = issue.priority ? priorityLabels[issue.priority] || String(issue.priority) : '-';
                     
-                    let status = '-';
-                    if (issue.obsidianStatus !== undefined || issue.todoistStatus !== undefined) {
+                    let statusCol = '';
+                    if (issue.obsidianStatus !== undefined && issue.todoistStatus !== undefined) {
                         const obs = issue.obsidianStatus ? '✅' : '⬜';
                         const todo = issue.todoistStatus ? '✅' : '⬜';
-                        status = `Obs:${obs} Todo:${todo}`;
+                        statusCol = `Obs:${obs} Todo:${todo}`;
+                    } else if (issue.obsidianStatus !== undefined) {
+                        statusCol = issue.obsidianStatus ? '✅' : '⬜';
+                    } else if (issue.todoistStatus !== undefined) {
+                        statusCol = issue.todoistStatus ? '✅' : '⬜';
+                    } else {
+                        statusCol = '-';
                     }
 
-                    const details = issue.details.substring(0, 60);
+                    const details = issue.details.substring(0, 40);
                     
-                    markdown += `| ${i + 1} | \`${issue.taskId || '-'}\` | ${taskContent} | ${filePath.split('/').pop() || '-'} | ${lineNum} | ${dueDate} | ${priority} | ${status} | ${details} |\n`;
+                    markdown += `| ${i + 1} | \`${issue.taskId || '-'}\` | ${taskContent} | ${filePath} | ${lineNum} | ${statusCol} | ${details} |\n`;
                 }
                 markdown += '\n';
 
+                // Add detailed comparison for mismatch types
                 if (type === 'content_mismatch') {
-                    markdown += `#### Detailed Comparison\n\n`;
-                    for (let i = 0; i < issues.length; i++) {
+                    markdown += `#### Content Details\n\n`;
+                    for (let i = 0; i < Math.min(issues.length, 10); i++) {
                         const issue = issues[i];
-                        if (issue.obsidianContent || issue.todoistContent) {
-                            markdown += `**Issue ${i + 1}:** \`${issue.taskId}\`\n`;
-                            if (issue.obsidianContent) {
-                                markdown += `- **Vault:** ${issue.obsidianContent}\n`;
-                            }
-                            if (issue.todoistContent) {
-                                markdown += `- **Todoist:** ${issue.todoistContent}\n`;
-                            }
-                            markdown += '\n';
+                        markdown += `**Task \`${issue.taskId}\`:**\n`;
+                        if (issue.obsidianContent) {
+                            markdown += `- **Vault:** ${issue.obsidianContent}\n`;
                         }
+                        if (issue.todoistContent) {
+                            markdown += `- **Todoist:** ${issue.todoistContent}\n`;
+                        }
+                        markdown += '\n';
                     }
+                    if (issues.length > 10) {
+                        markdown += `*... and ${issues.length - 10} more*\n\n`;
+                    }
+                }
+
+                if (type === 'status_mismatch') {
+                    markdown += `#### Status Details\n\n`;
+                    for (let i = 0; i < Math.min(issues.length, 10); i++) {
+                        const issue = issues[i];
+                        const obsStatus = issue.obsidianStatus ? 'Completed' : 'Incomplete';
+                        const todoStatus = issue.todoistStatus ? 'Completed' : 'Incomplete';
+                        markdown += `- **\`${issue.taskId}\`**: Vault is **${obsStatus}**, Todoist is **${todoStatus}**\n`;
+                    }
+                    if (issues.length > 10) {
+                        markdown += `*... and ${issues.length - 10} more*\n`;
+                    }
+                    markdown += '\n';
+                }
+
+                if (type === 'priority_mismatch') {
+                    markdown += `#### Priority Details\n\n`;
+                    for (let i = 0; i < Math.min(issues.length, 10); i++) {
+                        const issue = issues[i];
+                        const obsP = priorityLabels[issue.obsidianPriority || 4] || `P${issue.obsidianPriority || 4}`;
+                        const todoP = priorityLabels[issue.todoistPriority || 4] || `P${issue.todoistPriority || 4}`;
+                        markdown += `- **\`${issue.taskId}\`**: Vault is **${obsP}**, Todoist is **${todoP}**\n`;
+                    }
+                    if (issues.length > 10) {
+                        markdown += `*... and ${issues.length - 10} more*\n`;
+                    }
+                    markdown += '\n';
+                }
+
+                if (type === 'label_mismatch') {
+                    markdown += `#### Label Details\n\n`;
+                    for (let i = 0; i < Math.min(issues.length, 10); i++) {
+                        const issue = issues[i];
+                        const obsLabels = issue.obsidianLabels?.join(', ') || 'none';
+                        const todoLabels = issue.todoistLabels?.join(', ') || 'none';
+                        markdown += `- **\`${issue.taskId}\`**: Vault has **[${obsLabels}]**, Todoist has **[${todoLabels}]**\n`;
+                    }
+                    if (issues.length > 10) {
+                        markdown += `*... and ${issues.length - 10} more*\n`;
+                    }
+                    markdown += '\n';
+                }
+
+                if (type === 'line_number_mismatch') {
+                    markdown += `#### Line Number Details\n\n`;
+                    for (let i = 0; i < Math.min(issues.length, 10); i++) {
+                        const issue = issues[i];
+                        markdown += `- **\`${issue.taskId}\`**: Vault line **${(issue.obsidianLineNumber || 0) + 1}**, Mapping line **${(issue.mappingLineNumber || 0) + 1}**\n`;
+                    }
+                    if (issues.length > 10) {
+                        markdown += `*... and ${issues.length - 10} more*\n`;
+                    }
+                    markdown += '\n';
                 }
             }
         }
 
         markdown += `---
 
-## Statistics
-
-- Total Issues Found: ${result.totalIssues}
-- Mapping Related Issues: ${result.summary.mappingFileNotFound + result.summary.mappingTaskNotInTodoist + result.summary.mappingOrphan + result.summary.vaultTaskNoMapping}
-- Data Consistency Issues: ${result.summary.contentMismatch + result.summary.statusMismatch + result.summary.priorityMismatch + result.summary.labelMismatch + result.summary.projectMismatch + result.summary.lineNumberMismatch}
-
----
-
 *Report generated by Ultimate Todoist Sync for Obsidian*
 `;
 
         try {
-            // 直接尝试创建文件夹，忽略已存在的错误
-            try {
-                await this.app.vault.createFolder(reportFolder);
-            } catch {
-                // 文件夹已存在，忽略
-            }
-
-            const reportPath = `${reportFolder}/${reportFilename}`;
+            // Create report in vault root
+            const reportPath = reportFilename;
             await this.app.vault.create(reportPath, markdown);
 
             this.plugin.logOperation?.log('DATABASE_CHECK', `Report saved to ${reportPath}`);
