@@ -3,6 +3,11 @@
 ### [1.0.4] - 2026-02-17
 
 #### Added
+- **Three-way sync direction controls**: Added two new settings for granular sync control
+  - `obsidianToTodoistEnabled` (default: true) - Enable/disable Obsidian → Todoist sync
+  - `todoistToObsidianEnabled` (default: false) - Enable/disable Todoist → Obsidian sync
+  - Both directions are independently controllable via new UI toggles in settings
+  - Sync status display now shows direction states
 - **Full syncData persistence**: Added `syncDataCache` field to settings to store complete Todoist API response
   - All API data (projects, items, sections, labels, notes, user, etc.) is now persisted
   - Plugin startup loads from cache first, reducing API calls
