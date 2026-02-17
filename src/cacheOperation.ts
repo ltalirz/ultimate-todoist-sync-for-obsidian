@@ -256,300 +256,58 @@ export class CacheOperation   {
     }
 
       
-    // 从 Cache读取所有task
+    // DEPRECATED: Using syncData from Todoist API instead - no longer needed
     loadTasksFromCache() {
-    try {
-        const savedTasks = this.plugin.settings.todoistTasksData.tasks
-        return savedTasks;
-    } catch (error) {
-        console.error(`Error loading tasks from Cache: ${error}`);
         return [];
     }
-    }
-      
 
-    // 覆盖保存所有task到cache
-    saveTasksToCache(newTasks) {
-        try {
-            this.plugin.settings.todoistTasksData.tasks = newTasks
-            
-        } catch (error) {
-            console.error(`Error saving tasks to Cache: ${error}`);
-            return false;
-        }
-    }
-      
-      
-      
-      
-    // append event 到 Cache
-    appendEventToCache(event:Object[]) {
-        try {
-            this.plugin.settings.todoistTasksData.events.push(event)
-        } catch (error) {
-            console.error(`Error append event to Cache: ${error}`);
-        }
+    // DEPRECATED: Using syncData from Todoist API instead - no longer needed
+    saveTasksToCache(_newTasks: any): boolean {
+        return true;
     }
 
-    // append events 到 Cache
-    appendEventsToCache(events:Object[]) {
-        try {
-            this.plugin.settings.todoistTasksData.events.push(...events)
-        } catch (error) {
-            console.error(`Error append events to Cache: ${error}`);
-        }
-    }
-      
-      
-    // 从 Cache 文件中读取所有events
-    loadEventsFromCache() {
-    try {
+    // DEPRECATED: Event tracking no longer needed for one-way sync
+    appendEventToCache(_event: Object[]): void {}
+    appendEventsToCache(_events: Object[]): void {}
+    loadEventsFromCache(): any[] { return []; }
+    appendTaskToCache(_task: any): void {}
+    loadTaskFromCacheyID(_taskId: string): any { return null; }
+    updateTaskToCacheByID(_task: any): void {}
+    modifyTaskToCacheByID(_taskId: string, _params: { content?: string, due?: Due }): void {}
+    reopenTaskToCacheByID(_taskId: string): void {}
+    closeTaskToCacheByID(_taskId: string): void {}
+    deleteTaskFromCache(_taskId: string): void {}
+    deleteTaskFromCacheByIDs(_deletedTaskIds: string[]): void {}
 
-            const savedEvents = this.plugin.settings.todoistTasksData.events
-            return savedEvents;
-        } catch (error) {
-            console.error(`Error loading events from Cache: ${error}`);
-        }
+    // DEPRECATED: Using todoistSyncAPI.getProjectByName instead
+    getProjectIdByNameFromCache(projectName: string): any {
+        return this.plugin.todoistSyncAPI.getSyncData()?.projects?.find((p: any) => p.name === projectName)?.id || null;
     }
 
+    // DEPRECATED: Using todoistSyncAPI.getProjectById instead
+    getProjectNameByIdFromCache(projectId: string): any {
+        return this.plugin.todoistSyncAPI.getSyncData()?.projects?.find((p: any) => p.id === projectId)?.name || null;
+    }
 
-      
-    // 追加到 Cache 文件
-    appendTaskToCache(task) {
-        try {
-            if(task === null){
-                return
+    // DEPRECATED: Using syncData from Todoist API instead
+    async saveProjectsToCache(): Promise<boolean> { return true; }
+
+    // DEPRECATED: Using taskFileMapping instead
+    async updateRenamedFilePath(oldpath: string, newpath: string): Promise<void> {
+        const taskFileMapping = this.plugin.settings.taskFileMapping || {};
+        const fileMetadata = this.plugin.settings.fileMetadata || {};
+        for (const [taskId, mapping] of Object.entries(taskFileMapping)) {
+            if (mapping.filePath === oldpath) {
+                taskFileMapping[taskId] = { ...mapping, filePath: newpath };
             }
-            const savedTasks = this.plugin.settings.todoistTasksData.tasks
-            this.plugin.settings.todoistTasksData.tasks.push(task);
-            this.plugin.logOperation?.log('CACHE_TASK_ADDED', `Added task to cache: ${task.content || task.id}`, task.path, task.id);
-        } catch (error) {
-            console.error(`Error appending task to Cache: ${error}`);
         }
-    }
-    loadTaskFromCacheyID(taskId) {
-        try {
-
-            const savedTasks = this.plugin.settings.todoistTasksData.tasks
-            //console.log(savedTasks)
-            const savedTask = savedTasks.find((t) => t.id === taskId);
-            //console.log(savedTask)
-            return(savedTask)
-        } catch (error) {
-            console.error(`Error finding task from Cache: ${error}`);
-            return [];
+        this.plugin.settings.taskFileMapping = taskFileMapping;
+        if (fileMetadata[oldpath]) {
+            fileMetadata[newpath] = fileMetadata[oldpath];
+            delete fileMetadata[oldpath];
+            this.plugin.settings.fileMetadata = fileMetadata;
         }
-    }
-      
-    //覆盖update指定id的task
-    updateTaskToCacheByID(task) {
-        try {
-            //删除就的task
-            this.deleteTaskFromCache(task.id)
-            //添加新的task
-            this.appendTaskToCache(task)
-            this.plugin.logOperation?.log('CACHE_TASK_UPDATED', `Updated task in cache: ${task.content || task.id}`, task.path, task.id);
-        } catch (error) {
-            console.error(`Error updating task to Cache: ${error}`);
-            return [];
-        }
-    }
-
-    //due 的结构  {date: "2025-02-25",isRecurring: false,lang: "en",string: "2025-02-25"}
-
-
-
-    modifyTaskToCacheByID(taskId: string, { content, due }: { content?: string, due?: Due }): void {
-        try {
-          const savedTasks = this.plugin.settings.todoistTasksData.tasks;
-          const taskIndex = savedTasks.findIndex((task) => task.id === taskId);
-      
-          if (taskIndex !== -1) {
-            const updatedTask = { ...savedTasks[taskIndex] };
-            
-            if (content !== undefined) {
-              updatedTask.content = content;
-            }
-      
-            if (due !== undefined) {
-              if (due === null) {
-                updatedTask.due = null;
-              } else {
-                updatedTask.due = due;
-              }
-            }
-      
-            savedTasks[taskIndex] = updatedTask;
-      
-            this.plugin.settings.todoistTasksData.tasks = savedTasks;
-          } else {
-            throw new Error(`Task with ID ${taskId} not found in cache.`);
-          }
-        } catch (error) {
-          // Handle the error appropriately, e.g. by logging it or re-throwing it.
-        }
-      }
-      
-      
-      //open a task status
-    reopenTaskToCacheByID(taskId:string) {
-        try {
-            const savedTasks = this.plugin.settings.todoistTasksData.tasks
-
-        
-            // 遍历数组以查找具有指定 ID 的项
-            for (let i = 0; i < savedTasks.length; i++) {
-            if (savedTasks[i].id === taskId) {
-                // 修改对象的属性
-                savedTasks[i].isCompleted = false;
-                break; // 找到并修改了该项，跳出循环
-            }
-            }
-            this.plugin.settings.todoistTasksData.tasks = savedTasks
-            this.plugin.logOperation?.log('CACHE_TASK_REOPENED', `Reopened task in cache: ${taskId}`, undefined, taskId);
-        
-        } catch (error) {
-            console.error(`Error open task to Cache file: ${error}`);
-            return [];
-        }
-    }
-      
-      
-      
-    //close a task status
-    closeTaskToCacheByID(taskId:string):Promise<void> {
-        try {
-            const savedTasks = this.plugin.settings.todoistTasksData.tasks
-        
-            // 遍历数组以查找具有指定 ID 的项
-            for (let i = 0; i < savedTasks.length; i++) {
-            if (savedTasks[i].id === taskId) {
-                // 修改对象的属性
-                savedTasks[i].isCompleted = true;
-                break; // 找到并修改了该项，跳出循环
-            }
-            }
-            this.plugin.settings.todoistTasksData.tasks = savedTasks
-            this.plugin.logOperation?.log('CACHE_TASK_COMPLETED', `Completed task in cache: ${taskId}`, undefined, taskId);
-        
-        } catch (error) {
-            console.error(`Error close task to Cache file: ${error}`);
-            throw error; // 抛出错误使调用方能够捕获并处理它
-        }
-    }
-      
-      
-    // 通过 ID 删除任务
-    deleteTaskFromCache(taskId) {
-        try {
-        const savedTasks = this.plugin.settings.todoistTasksData.tasks
-        const newSavedTasks = savedTasks.filter((t) => t.id !== taskId);
-        this.plugin.settings.todoistTasksData.tasks = newSavedTasks
-        this.plugin.logOperation?.log('CACHE_TASK_DELETED', `Deleted task from cache: ${taskId}`, undefined, taskId);
-        } catch (error) {
-        console.error(`Error deleting task from Cache file: ${error}`);
-        }
-    }
-      
-      
-      
-      
-      
-    // 通过 ID 数组 删除task
-    deleteTaskFromCacheByIDs(deletedTaskIds) {
-        try {
-            const savedTasks = this.plugin.settings.todoistTasksData.tasks
-            const newSavedTasks = savedTasks.filter((t) => !deletedTaskIds.includes(t.id))
-            this.plugin.settings.todoistTasksData.tasks = newSavedTasks
-            this.plugin.logOperation?.log('CACHE_TASK_DELETED', `Deleted ${deletedTaskIds.length} tasks from cache`, undefined, deletedTaskIds.join(', '));
-        } catch (error) {
-            console.error(`Error deleting task from Cache : ${error}`);
-        }
-    }
-      
-      
-    //通过 name 查找 project id
-    getProjectIdByNameFromCache(projectName:string) {
-        try {
-        const savedProjects = this.plugin.settings.todoistTasksData.projects
-        const targetProject = savedProjects.find(obj => obj.name === projectName);
-        const projectId = targetProject ? targetProject.id : null;
-        return(projectId)
-        } catch (error) {
-        console.error(`Error finding project from Cache file: ${error}`);
-        return(false)
-        }
-    }
-
-
-     
-    getProjectNameByIdFromCache(projectId:string) {
-        try {
-        const savedProjects = this.plugin.settings.todoistTasksData.projects
-        const targetProject = savedProjects.find(obj => obj.id === projectId);
-        const projectName = targetProject ? targetProject.name : null;
-        return(projectName)
-        } catch (error) {
-        console.error(`Error finding project from Cache file: ${error}`);
-        return(false)
-        }
-    }
-      
-
-
-    //save projects data to json file
-    async saveProjectsToCache() {
-        try{
-                //get projects
-            const projects = await this.plugin.todoistSyncAPI.GetAllProjects()
-            if(!projects){
-                return false
-            }
-        
-            //save to json
-            this.plugin.settings.todoistTasksData.projects = projects
-            this.plugin.logOperation?.log('PROJECT_UPDATED', `Updated ${projects.length} projects in cache`);
-
-            return true
-
-        }catch(error){
-            return false
-            console.log(`error downloading projects: ${error}`)
-
-    }
-    
-    }
-
-
-    async updateRenamedFilePath(oldpath:string,newpath:string){
-        try{
-            console.log(`oldpath is ${oldpath}`)
-            console.log(`newpath is ${newpath}`)
-            const savedTask = await this.loadTasksFromCache()
-            //console.log(savedTask)
-            const newTasks = savedTask.map(obj => {
-                if (obj.path === oldpath) {
-                  return { ...obj, path: newpath };
-                }else {
-                    return obj;
-                }
-            })
-            //console.log(newTasks)
-            await this.saveTasksToCache(newTasks)
-
-            //update filepath
-            const fileMetadatas = this.plugin.settings.fileMetadata
-            fileMetadatas[newpath] = fileMetadatas[oldpath]
-            delete fileMetadatas[oldpath]
-            this.plugin.settings.fileMetadata = fileMetadatas
-
-            this.plugin.logOperation?.log('CACHE_RENAMED', `Renamed file path from ${oldpath} to ${newpath}`, newpath);
-
-        }catch(error){
-            console.log(`Error updating renamed file path to cache: ${error}`)
-        }
-
-
+        this.plugin.logOperation?.log('CACHE_RENAMED', `Renamed file path from ${oldpath} to ${newpath}`, newpath);
     }
 
     async rebuildCache(noticeCallback?: (message: string) => void): Promise<{ success: boolean; tasksProcessed: number }> {

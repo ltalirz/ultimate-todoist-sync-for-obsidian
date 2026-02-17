@@ -120,13 +120,13 @@ export class TaskParser   {
                     //console.log(`缩进为 ${this.getTabIndentation(line)}`)
                     continue       
             }
-            if((this.getTabIndentation(line) < this.getTabIndentation(lineText))){
+                if((this.getTabIndentation(line) < this.getTabIndentation(lineText))){
                 //console.log(`缩进为 ${this.getTabIndentation(line)}`)
                 if(this.hasTodoistId(line)){
                     parentId = this.getTodoistIdFromLineText(line)
                     hasParent = true
                     //console.log(`parent id is ${parentId}`)
-                    parentTaskObject = this.plugin.cacheOperation.loadTaskFromCacheyID(parentId)
+                    parentTaskObject = await this.plugin.todoistSyncAPI.GetTaskById(parentId)
                     break
                 }
                 else{
