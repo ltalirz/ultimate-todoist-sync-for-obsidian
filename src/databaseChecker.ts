@@ -235,9 +235,17 @@ export class DatabaseChecker {
 
     loadCacheTasks(): Map<string, CacheTask> {
         const cacheTasksMap = new Map<string, CacheTask>();
+        
+        // Ensure syncData is loaded
+        let syncData = this.plugin.todoistSyncAPI.getSyncData();
+        if (!syncData) {
+            console.warn('[DatabaseChecker] syncData not loaded, attempting to load...');
+            // Can't await here, return empty map
+            return cacheTasksMap;
+        }
+        
         const taskFileMapping = this.plugin.settings.taskFileMapping || {};
-        const syncData = this.plugin.todoistSyncAPI.getSyncData();
-        const items = syncData?.items || [];
+        const items = syncData.items || [];
         
         for (const task of items) {
             if (!task) continue;
