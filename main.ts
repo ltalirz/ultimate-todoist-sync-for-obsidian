@@ -548,8 +548,10 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			//console.log(taskId)
 			//const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (target.checked) {
+				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
 				this.todoistSync.closeTask(taskId);
 			} else {
+				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
 				this.todoistSync.repoenTask(taskId);
 			}
 		} else {
