@@ -860,7 +860,66 @@ export class TodoistSyncAPI   {
     await this.executeCommands([command]);
     return true;
   }
-       
+
+  /**
+   * Convert legacy (numeric) IDs to new opaque string IDs by matching task content
+   * @param tasksNeedConversion - Array of tasks with legacy IDs and their content
+   * @returns Mapping from legacy ID to new ID
+   */
+  async convertLegacyIds(
+    tasksNeedConversion: { taskId: string; content: string; filePath: string; lineNumber: number }[]
+  ): Promise<{ [oldId: string]: string }> {
+    const mapping: { [oldId: string]: string } = {};
+    
+    if (!tasksNeedConversion || tasksNeedConversion.length === 0) {
+      return mapping;
+    }
+
+    try {
+      if (!this.syncData) {
+        await this.getAllResources(true);
+      }
+      const allTasks = this.syncData?.items || [];
+      
+      for (const taskInfo of tasksNeedConversion) {
+        const normalizedContent = this.normalizeContent(taskInfo.content);
+        
+        const matches = allTasks.filter((t: any) => 
+          this.normalizeContent(t.content) === normalizedContent
+        );
+        
+        if (matches.length === 0) {
+          console.log(`[convertLegacyIds] No match found for: ${taskInfo.content}`);
+          continue;
+        }
+        
+        if (matches.length > 1) {
+          throw new Error(
+            `[convertLegacyIds] Multiple matches found for "${taskInfo.content}" in ${taskInfo.filePath}:${taskInfo.lineNumber}. ` +
+            `Found ${matches.length} tasks with same content. Please resolve manually.`
+          );
+        }
+        
+        mapping[taskInfo.taskId] = matches[0].id;
+        console.log(`[convertLegacyIds] Mapped ${taskInfo.taskId} -> ${matches[0].id} (${taskInfo.content})`);
+      }
+      
+      console.log(`[convertLegacyIds] Converted ${Object.keys(mapping).length} IDs`);
+    } catch (error) {
+      console.error('[convertLegacyIds] Error converting legacy IDs:', error);
+      throw error;
+    }
+    
+    return mapping;
+  }
+
+  private normalizeContent(content: string): string {
+    return content
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+        
 }
 
 

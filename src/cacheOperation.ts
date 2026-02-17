@@ -360,7 +360,7 @@ export class CacheOperation   {
                             if (match && match[1]) {
                                 const taskId = match[1];
                                 // Extract task content (remove checkbox and metadata)
-                                const taskContent = this.extractTaskContent(line);
+                                const taskContent = this.plugin.taskParser.getTaskContentFromLineText(line);
                                 // Check completion status - [x] = completed, [ ] = not completed
                                 const isCompleted = /\[x\]/i.test(line);
                                 
@@ -381,6 +381,45 @@ export class CacheOperation   {
                 }
             }
 
+            // Step 3.5: Detect and convert legacy IDs
+            if (noticeCallback) {
+                noticeCallback('Checking for legacy IDs...');
+            } else {
+                console.log('Checking for legacy IDs...');
+            }
+
+            // Get active task IDs from syncData (from Step 2)
+            const activeTaskIds = new Set(syncData?.items?.map(t => t.id) || []);
+
+            // Find potential legacy IDs (not in syncData)
+            const tasksNeedConversion: { taskId: string; content: string; filePath: string; lineNumber: number }[] = [];
+
+            for (const [filePath, fileTasks] of fileTaskMap.entries()) {
+                for (const taskInfo of fileTasks) {
+                    if (!activeTaskIds.has(taskInfo.taskId)) {
+                        // ID not in syncData - might be legacy
+                        tasksNeedConversion.push({
+                            taskId: taskInfo.taskId,
+                            content: taskInfo.content,
+                            filePath,
+                            lineNumber: taskInfo.lineNumber
+                        });
+                    }
+                }
+            }
+
+            // Convert legacy IDs if any
+            let idMapping: { [oldId: string]: string } = {};
+            let convertedCount = 0;
+            if (tasksNeedConversion.length > 0) {
+                if (noticeCallback) {
+                    noticeCallback(`Converting ${tasksNeedConversion.length} legacy IDs...`);
+                }
+                idMapping = await this.plugin.todoistSyncAPI.convertLegacyIds(tasksNeedConversion);
+                convertedCount = Object.keys(idMapping).length;
+                console.log(`[rebuildCache] Converted ${convertedCount} legacy IDs`);
+            }
+
             // Step 4: Process tasks and detect conflicts
             if (noticeCallback) {
                 noticeCallback('Processing tasks and detecting conflicts...');
@@ -399,20 +438,46 @@ export class CacheOperation   {
             for (const [filePath, fileTasks] of fileTaskMap.entries()) {
                 for (const taskInfo of fileTasks) {
                     try {
-                        // Get task from syncData
-                        const task = await this.plugin.todoistSyncAPI.GetTaskById(taskInfo.taskId);
+                        // Use converted ID if available
+                        const taskId = idMapping[taskInfo.taskId] || taskInfo.taskId;
+                        
+                        // Get task from syncData using potentially converted ID
+                        const task = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
                         
                         if (!task) {
-                            // Task doesn't exist in Todoist
-                            console.log(`Task ${taskInfo.taskId} not found in Todoist, will be removed...`);
+                            // Task doesn't exist in Todoist (even after ID conversion)
+                            console.log(`Task ${taskId} (original: ${taskInfo.taskId}) not found in Todoist, will be removed...`);
                             invalidTaskIds.push(taskInfo.taskId);
                             this.plugin.logOperation?.log('CACHE_TASK_DELETED', `Task ${taskInfo.taskId} not found in Todoist during rebuild`, filePath, taskInfo.taskId);
                             continue;
                         }
                         
+                        // If ID was converted, update the vault file and taskFileMapping
+                        if (idMapping[taskInfo.taskId]) {
+                            await this.plugin.fileOperation.updateTaskIdInVault(
+                                taskInfo.filePath,
+                                taskInfo.lineNumber,
+                                taskInfo.taskId,
+                                taskId
+                            );
+                            
+                            // Update taskFileMapping with new ID
+                            this.plugin.settings.taskFileMapping[taskId] = {
+                                filePath: taskInfo.filePath,
+                                lineNumber: taskInfo.lineNumber
+                            };
+                            // Delete old mapping
+                            delete this.plugin.settings.taskFileMapping[taskInfo.taskId];
+                            
+                            console.log(`[rebuildCache] Updated mapping: ${taskInfo.taskId} -> ${taskId}`);
+                        }
+                        
                         // Compare content
                         const todoistContent = task.content || '';
                         const obsidianContent = taskInfo.content;
+                        
+                        // Use converted ID if available
+                        const mappingTaskId = idMapping[taskInfo.taskId] || taskInfo.taskId;
                         
                         // Check completion status
                         const todoistIsCompleted = task.isCompleted || false;
@@ -425,7 +490,7 @@ export class CacheOperation   {
                         
                         if (contentConflict || statusConflict) {
                             conflicts.push({
-                                taskId: taskInfo.taskId,
+                                taskId: mappingTaskId,
                                 filePath: filePath,
                                 obsidianContent: obsidianContent,
                                 todoistContent: todoistContent,
@@ -433,8 +498,8 @@ export class CacheOperation   {
                             });
                         }
                         
-                        // Save to taskFileMapping
-                        this.plugin.settings.taskFileMapping[taskInfo.taskId] = {
+                        // Save to taskFileMapping (use converted ID if available)
+                        this.plugin.settings.taskFileMapping[mappingTaskId] = {
                             filePath: filePath,
                             lineNumber: taskInfo.lineNumber
                         };
@@ -476,8 +541,9 @@ export class CacheOperation   {
             
             const invalidMsg = invalidTaskIds.length > 0 ? ` (${invalidTaskIds.length} tasks not found in Todoist removed)` : '';
             const conflictMsg = conflicts.length > 0 ? ` (${conflicts.length} conflicts resolved)` : '';
-            const message = `Cache rebuilt! ${processedCount} tasks processed.${invalidMsg}${conflictMsg}`;
-            this.plugin.logOperation?.log('CACHE_REBUILT', `Cache rebuilt successfully! ${processedCount} tasks processed.${invalidMsg}${conflictMsg}`);
+            const convertedMsg = convertedCount > 0 ? ` (${convertedCount} legacy IDs converted)` : '';
+            const message = `Cache rebuilt! ${processedCount} tasks processed.${convertedMsg}${invalidMsg}${conflictMsg}`;
+            this.plugin.logOperation?.log('CACHE_REBUILT', `Cache rebuilt successfully! ${processedCount} tasks processed.${convertedMsg}${invalidMsg}${conflictMsg}`);
             if (noticeCallback) {
                 noticeCallback(message);
             } else {

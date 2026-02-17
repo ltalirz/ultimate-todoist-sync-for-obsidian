@@ -159,7 +159,7 @@ export class DatabaseChecker {
                 noticeCallback('Step 4/4: Analyzing differences...');
             }
 
-            const result = this.compareThreeSources(
+            const result = await this.compareThreeSources(
                 vaultTasksMap,
                 todoistTasksMap,
                 taskFileMapping
@@ -214,7 +214,7 @@ export class DatabaseChecker {
                         const match = line.match(/%%\[todoist_id::\s*([\w-]+)\]%%/);
                         if (match && match[1]) {
                             const taskId = match[1];
-                            const taskContent = this.extractTaskContent(line);
+                            const taskContent = this.plugin.taskParser.getTaskContentFromLineText(line);
                             const isCompleted = /\[x\]/i.test(line);
                             const labels = this.extractLabelsFromLine(line);
 
@@ -322,11 +322,11 @@ export class DatabaseChecker {
         return todoistTasksMap;
     }
 
-    compareThreeSources(
+    async compareThreeSources(
         vaultTasksMap: Map<string, VaultTask>,
         todoistTasksMap: Map<string, TodoistTask>,
         taskFileMapping: Record<string, { filePath: string; lineNumber: number }>
-    ): { issues: DatabaseCheckIssue[], summary: DatabaseCheckResult['summary'] } {
+    ): Promise<{ issues: DatabaseCheckIssue[], summary: DatabaseCheckResult['summary'] }> {
         const issues: DatabaseCheckIssue[] = [];
         const summary = {
             mappingFileNotFound: 0,
@@ -369,7 +369,7 @@ export class DatabaseChecker {
                     filePath: mapping.filePath,
                     taskId,
                     lineNumber: mapping.lineNumber,
-                    details: `Mapping task "${taskId}" does not exist in Todoist (deleted in Todoist)`
+                    details: `Mapping task "${taskId}" does not exist in Todoist (deleted in Todoist or ID needs rebuild)`
                 });
                 summary.mappingTaskNotInTodoist++;
             }
@@ -417,7 +417,7 @@ export class DatabaseChecker {
                     filePath: vaultTask!.filePath,
                     taskId,
                     lineNumber: vaultTask!.lineNumber,
-                    details: `Task exists in Vault and mapping but was deleted in Todoist`,
+                    details: `Task exists in Vault and mapping but was deleted in Todoist (or needs rebuild)`,
                     obsidianContent: vaultTask!.content,
                     obsidianStatus: vaultTask!.isCompleted
                 });
@@ -578,16 +578,6 @@ export class DatabaseChecker {
         return { issues, summary };
     }
 
-    private extractTaskContent(line: string): string {
-        let content = line.replace(/^(\s*)([-*])\s+\[(x|X| )\]\s*/, '');
-        content = content.replace(/#todoist/g, '').trim();
-        content = content.replace(/%%\[todoist_id::\s*[\w-]+\]%%/g, '').trim();
-        content = content.replace(/\[link\]\([^)]+\)/g, '').trim();
-        content = content.replace(/[🗓️📅📆🗓]\s*\d{4}-\d{2}-\d{2}/gu, '').trim();
-        content = content.replace(/\s!![1-4]\s/g, ' ').trim();
-        return content;
-    }
-
     private extractLabelsFromLine(line: string): string[] {
         const labels: string[] = [];
         const labelRegex = /#(\w+)/g;
@@ -602,7 +592,7 @@ export class DatabaseChecker {
 
     async generateReport(result: DatabaseCheckResult): Promise<string | undefined> {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const reportFilename = `database-check-${timestamp}.md`;
+        const reportFilename = `ultimate-todoist-sync-database-check-${timestamp}.md`;
 
         // Get statistics from issues
         const vaultTasksWithMapping = result.issues.filter(i => 
@@ -617,7 +607,7 @@ export class DatabaseChecker {
         const taskNotInVault = result.summary.taskNotInVault;
         const mappingOrphan = result.summary.mappingOrphan;
         const mappingFileNotFound = result.summary.mappingFileNotFound;
-        const mappingTaskNotInTodoist = result.summary.mappingTaskNotInTodoist;
+        const mappingTaskNotInTodoist = result.summary.mappingTaskNotNotInTodoist;
 
         let markdown = `# Database Check Report
 

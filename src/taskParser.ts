@@ -58,13 +58,17 @@ const REGEX = {
     PROJECT_NAME: /\[project::\s*(.*?)\]/,
     TASK_CONTENT: {
         REMOVE_PRIORITY: /\s!!([1-4])\s/,
-        REMOVE_TAGS: /(^|\s)(#[a-zA-Z\d\u4e00-\u9fa5-]+)/g,
+        // 移除所有 #标签，不要求前面有空格
+        REMOVE_TAGS: /#[\w\u4e00-\u9fa5-]+/g,
         REMOVE_SPACE: /^\s+|\s+$/g,
         REMOVE_DATE: new RegExp(`(${keywords.DUE_DATE})\\s?\\d{4}-\\d{2}-\\d{2}`),
         REMOVE_INLINE_METADATA: /%%\[\w+::\s*\w+\]%%/,
         REMOVE_CHECKBOX:  /^(-|\*)\s+\[(x|X| )\]\s/,
         REMOVE_CHECKBOX_WITH_INDENTATION: /^([ \t]*)?(-|\*)\s+\[(x|X| )\]\s/,
-        REMOVE_TODOIST_LINK: /\[link\]\(.*?\)/,
+        // 旧格式链接: [💩](https://todoist.com/showtask?id=123) - 使用 [^\]]* 避免匹配 checkbox [ ]
+        REMOVE_TODOIST_LINK_OLD: /\[([^\]]*)\]\(https?:\/\/todoist\.com\/showtask\?id=\S*\)/,
+        // 新格式链接: [💩](https://app.todoist.com/app/task/abc123)
+        REMOVE_TODOIST_LINK_NEW: /\[([^\]]*)\]\(https?:\/\/app\.todoist\.com\/app\/task\/\S*\)/,
     },
     ALL_TAGS: /#[\w\u4e00-\u9fa5-]+/g,
     TASK_CHECKBOX_CHECKED: /- \[(x|X)\] /,
@@ -277,7 +281,8 @@ export class TaskParser   {
   
     getTaskContentFromLineText(lineText:string) {
         const TaskContent = lineText.replace(REGEX.TASK_CONTENT.REMOVE_INLINE_METADATA,"")
-                                    .replace(REGEX.TASK_CONTENT.REMOVE_TODOIST_LINK,"")
+                                    .replace(REGEX.TASK_CONTENT.REMOVE_TODOIST_LINK_OLD,"")  // 旧格式: todoist.com/showtask?id=xxx
+                                    .replace(REGEX.TASK_CONTENT.REMOVE_TODOIST_LINK_NEW,"")  // 新格式: app.todoist.com/app/task/xxx
                                     .replace(REGEX.TASK_CONTENT.REMOVE_PRIORITY," ") //priority 前后必须都有空格，
                                     .replace(REGEX.TASK_CONTENT.REMOVE_TAGS,"")
                                     .replace(REGEX.TASK_CONTENT.REMOVE_DATE,"")
