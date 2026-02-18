@@ -31,6 +31,7 @@ export interface DatabaseCheckIssue {
         | 'new_task_not_synced'      // Vault 有但 Todoist 没有（新创建的任务尚未同步）
         | 'task_nonactive'           // Vault 已完成 + Todoist 不存在 + 已被标记为 nonActive（已知状态）
         | 'task_issue'               // Vault 未完成 + Todoist 不存在 + 已被标记为 issue（异常状态）
+        | 'unknown_issue'            // Vault 有但 mapping 和 Todoist 都没有（未知问题）
         | 'content_mismatch'         // 内容不一致
         | 'status_mismatch'          // 完成状态不一致
         | 'priority_mismatch'        // 优先级不一致
@@ -128,6 +129,7 @@ export interface DatabaseCheckResult {
         newTaskNotSynced: number;           // 新任务未同步
         taskNonActive: number;              // 已标记为 nonActive 的任务
         taskIssue: number;                  // 已标记为 issue 的任务
+        unknownIssue: number;               // 未知问题
         contentMismatch: number;             // 内容不一致
         statusMismatch: number;              // 状态不一致
         priorityMismatch: number;            // 优先级不一致
@@ -192,6 +194,7 @@ export class DatabaseChecker {
             newTaskNotSynced: 0,              // 新任务未同步
             taskNonActive: 0,                 // 已标记为 nonActive 的任务
             taskIssue: 0,                     // 已标记为 issue 的任务
+            unknownIssue: 0,                  // 未知问题
             contentMismatch: 0,                // 内容不一致
             statusMismatch: 0,                 // 状态不一致
             priorityMismatch: 0,              // 优先级不一致
@@ -352,6 +355,7 @@ export class DatabaseChecker {
             newTaskNotSynced: 0,
             taskNonActive: 0,
             taskIssue: 0,
+            unknownIssue: 0,
             contentMismatch: 0,
             statusMismatch: 0,
             priorityMismatch: 0,
@@ -364,288 +368,274 @@ export class DatabaseChecker {
         // 获取 Vault 中所有文件路径（用于验证 taskFileMapping）
         const vaultFiles = new Set(this.app.vault.getFiles().map(f => f.path));
 
-        // ====== Part 1: 检查 taskFileMapping 的有效性 ======
+        // ====== 第一步：Vault vs Mapping 对比（4 种组合）======
         
-        // 遍历 taskFileMapping 中的每条记录
-        for (const [taskId, mapping] of Object.entries(taskFileMapping)) {
-            // 检查文件是否存在
-            if (!vaultFiles.has(mapping.filePath)) {
-                issues.push({
-                    type: 'mapping_file_not_found',
-                    filePath: mapping.filePath,
-                    taskId,
-                    lineNumber: mapping.lineNumber,
-                    details: `Mapping references file "${mapping.filePath}" which does not exist in vault`
-                });
-                summary.mappingFileNotFound++;
-            }
-
-            // 检查任务是否存在于 Todoist
-            if (!todoistTasksMap.has(taskId)) {
-                issues.push({
-                    type: 'mapping_task_not_in_todoist',
-                    filePath: mapping.filePath,
-                    taskId,
-                    lineNumber: mapping.lineNumber,
-                    details: `Mapping task "${taskId}" does not exist in Todoist (deleted in Todoist or ID needs rebuild)`
-                });
-                summary.mappingTaskNotInTodoist++;
-            }
-        }
-
-        // ====== Part 2: 收集所有任务 ID ======
-        
-        // 合并三个数据源中的所有任务 ID
+        // 收集所有任务 ID（只从 Vault 和 Mapping）
         const allTaskIds = new Set<string>();
         for (const taskId of vaultTasksMap.keys()) allTaskIds.add(taskId);
-        for (const taskId of todoistTasksMap.keys()) allTaskIds.add(taskId);
         for (const taskId of Object.keys(taskFileMapping)) allTaskIds.add(taskId);
 
-        // ====== Part 3: 分析每个任务的组合情况 ======
-        
-        for (const taskId of allTaskIds) {
-            // 获取三个数据源中该任务的状态
-            const vaultTask = vaultTasksMap.get(taskId);
-            const todoistTask = todoistTasksMap.get(taskId);
-            const mapping = taskFileMapping[taskId];
+        // 第一步统计
+        let vaultWithMapping = 0;
+        let vaultWithoutMapping = 0;
+        let orphanMapping = 0;
+        let unknownIssue = 0;
 
-            // 判断任务在各个数据源中的存在状态
+        for (const taskId of allTaskIds) {
+            const vaultTask = vaultTasksMap.get(taskId);
+            const mapping = taskFileMapping[taskId];
+            
             const inVault = !!vaultTask;
-            const inTodoist = !!todoistTask;
             const inMapping = !!mapping;
 
-            // ============ 8 种组合情况 ============
+            // 组合 1: Vault ✅ + Mapping ✅ → 进入第二步与 Todoist 对比
+            if (inVault && inMapping) {
+                vaultWithMapping++;
+                const todoistTask = todoistTasksMap.get(taskId);
+                const inTodoist = !!todoistTask;
 
-            // ====== 情况 2: Vault ✓ + Todoist ✓ + Mapping ✗ ======
-            // 说明：任务在 Vault 和 Todoist 都存在，但 taskFileMapping 丢失
-            // 解决方案：需要重建 mapping
-            if (inVault && inTodoist && !inMapping) {
-                issues.push({
-                    type: 'vault_task_no_mapping',
-                    filePath: vaultTask!.filePath,
-                    taskId,
-                    lineNumber: vaultTask!.lineNumber,
-                    details: `Task exists in Vault and Todoist but no mapping in settings (settings lost or needs rebuild)`,
-                    obsidianContent: vaultTask!.content,
-                    todoistContent: todoistTask!.content,
-                    obsidianStatus: vaultTask!.isCompleted,
-                    todoistStatus: (todoistTask as any).checked || false
-                });
-                summary.vaultTaskNoMapping++;
-            }
-
-            // ====== 情况 3: Vault ✓ + Todoist ✗ + Mapping ✓ ======
-            // 说明：任务在 Vault 和 taskFileMapping 中存在，但在 Todoist 中不存在
-            // 可能原因：任务在 Todoist 端被删除，或者 legacy ID 需要重建
-            else if (inVault && !inTodoist && inMapping) {
-                const mappingStatus = mapping.status;
-                
-                // 根据 mapping 中的 status 字段判断具体类型
-                if (mappingStatus === 'nonActive') {
-                    // 已被 rebuildCache 标记为 nonActive（已知状态）
-                    issues.push({
-                        type: 'task_nonactive',
-                        filePath: vaultTask!.filePath,
-                        taskId,
-                        lineNumber: vaultTask!.lineNumber,
-                        details: `Task marked as nonActive (completed in Vault, not in Todoist)`,
-                        obsidianContent: vaultTask!.content,
-                        obsidianStatus: vaultTask!.isCompleted
-                    });
-                    summary.taskNonActive++;
-                } else if (mappingStatus === 'issue') {
-                    // 已被 rebuildCache 标记为 issue（异常状态）
-                    issues.push({
-                        type: 'task_issue',
-                        filePath: vaultTask!.filePath,
-                        taskId,
-                        lineNumber: vaultTask!.lineNumber,
-                        details: `Task marked as issue (incomplete in Vault, not in Todoist)`,
-                        obsidianContent: vaultTask!.content,
-                        obsidianStatus: vaultTask!.isCompleted
-                    });
-                    summary.taskIssue++;
-                } else {
-                    // status 为 'active' 或 undefined → 真正的问题
-                    issues.push({
-                        type: 'task_deleted_in_todoist',
-                        filePath: vaultTask!.filePath,
-                        taskId,
-                        lineNumber: vaultTask!.lineNumber,
-                        details: `Task exists in Vault and mapping but was deleted in Todoist (or needs rebuild)`,
-                        obsidianContent: vaultTask!.content,
-                        obsidianStatus: vaultTask!.isCompleted
-                    });
-                    summary.taskDeletedInTodoist++;
-                }
-            }
-
-            // ====== 情况 4: Vault ✓ + Todoist ✗ + Mapping ✗ ======
-            // 说明：任务在 Vault 中存在，但在 Todoist 和 taskFileMapping 中都不存在
-            // 可能原因：新创建的任务尚未同步到 Todoist
-            else if (inVault && !inTodoist && !inMapping) {
-                issues.push({
-                    type: 'new_task_not_synced',
-                    filePath: vaultTask!.filePath,
-                    taskId,
-                    lineNumber: vaultTask!.lineNumber,
-                    details: `New task in Vault not yet synced to Todoist`,
-                    obsidianContent: vaultTask!.content,
-                    obsidianStatus: vaultTask!.isCompleted
-                });
-                summary.newTaskNotSynced++;
-            }
-
-            // ====== 情况 5: Vault ✗ + Todoist ✓ + Mapping ✓ ======
-            // 说明：任务在 Todoist 和 taskFileMapping 中存在，但 Vault 文件丢失
-            // 可能原因：文件被删除或移动
-            else if (!inVault && inTodoist && inMapping) {
-                issues.push({
-                    type: 'task_not_in_vault',
-                    filePath: mapping.filePath,
-                    taskId,
-                    lineNumber: mapping.lineNumber,
-                    details: `Task exists in Todoist and mapping but Vault file is missing (file deleted or moved)`,
-                    todoistContent: todoistTask!.content,
-                    todoistStatus: (todoistTask as any).checked || false
-                });
-                summary.taskNotInVault++;
-            }
-
-            // ====== 情况 6: Vault ✗ + Todoist ✓ + Mapping ✗ ======
-            // 说明：任务只在 Todoist 中存在
-            // 可能原因：其他设备添加的任务（正常情况，不记录为问题）
-            else if (!inVault && inTodoist && !inMapping) {
-                // 这是正常情况 - 任务是从其他设备添加的
-                // 不记录为问题
-            }
-
-            // ====== 情况 7: Vault ✗ + Todoist ✗ + Mapping ✓ ======
-            // 说明：只有 taskFileMapping 存在，任务在 Vault 和 Todoist 都不存在
-            // 这是孤岛 mapping，需要清理
-            else if (!inVault && !inTodoist && inMapping) {
-                issues.push({
-                    type: 'mapping_orphan',
-                    filePath: mapping.filePath,
-                    taskId,
-                    lineNumber: mapping.lineNumber,
-                    details: `Mapping exists but task is deleted in both Vault and Todoist (orphan mapping)`,
-                    mappingLineNumber: mapping.lineNumber
-                });
-                summary.mappingOrphan++;
-            }
-
-            // ====== 情况 1: Vault ✓ + Todoist ✓ + Mapping ✓ ======
-            // 说明：三个数据源都存在，这是正常情况
-            // 需要进一步检查数据一致性
-            else if (inVault && inTodoist && inMapping) {
-                // ---- 检查行号一致性 ----
-                if (vaultTask!.lineNumber !== mapping.lineNumber) {
-                    issues.push({
-                        type: 'line_number_mismatch',
-                        filePath: vaultTask!.filePath,
-                        taskId,
-                        lineNumber: vaultTask!.lineNumber,
-                        obsidianLineNumber: vaultTask!.lineNumber,
-                        mappingLineNumber: mapping.lineNumber,
-                        details: `Line number mismatch: Vault line ${vaultTask!.lineNumber + 1}, Mapping line ${mapping.lineNumber + 1}`
-                    });
-                    summary.lineNumberMismatch++;
-                }
-
-                // ---- 检查内容一致性 ----
-                // 注意：这里直接比较可能有问题，因为 Vault 内容是处理过的
-                if (vaultTask!.content.trim() !== todoistTask!.content.trim()) {
-                    issues.push({
-                        type: 'content_mismatch',
-                        filePath: vaultTask!.filePath,
-                        taskId,
-                        lineNumber: vaultTask!.lineNumber,
-                        details: `Task content differs between Vault and Todoist`,
-                        obsidianContent: vaultTask!.content.substring(0, 100),
-                        todoistContent: todoistTask!.content.substring(0, 100)
-                    });
-                    summary.contentMismatch++;
-                }
-
-                // ---- 检查完成状态一致性 ----
-                if (vaultTask!.isCompleted !== (todoistTask as any).checked) {
-                    issues.push({
-                        type: 'status_mismatch',
-                        filePath: vaultTask!.filePath,
-                        taskId,
-                        lineNumber: vaultTask!.lineNumber,
-                        details: `Status mismatch: Vault is ${vaultTask!.isCompleted ? 'completed' : 'incomplete'}, Todoist is ${(todoistTask as any).checked ? 'completed' : 'incomplete'}`,
-                        obsidianStatus: vaultTask!.isCompleted,
-                    todoistStatus: (todoistTask as any).checked || false
-                    });
-                    console.log(vaultTask)
-                    console.log(todoistTask)
-                    summary.statusMismatch++;
-                }
-
-                // ---- 检查优先级一致性 ----
-                // 从 Vault 标签中推断优先级（p1=最高, p4=最低）
-                const vaultPriority = 5 - (vaultTask!.labels?.some(l => l.startsWith('p1')) ? 1 : 
-                                           vaultTask!.labels?.some(l => l.startsWith('p2')) ? 2 : 
-                                           vaultTask!.labels?.some(l => l.startsWith('p3')) ? 3 : 4) || 4;
-                if (vaultPriority !== todoistTask!.priority) {
-                    issues.push({
-                        type: 'priority_mismatch',
-                        filePath: vaultTask!.filePath,
-                        taskId,
-                        lineNumber: vaultTask!.lineNumber,
-                        details: `Priority mismatch: Vault is ${vaultPriority}, Todoist is ${todoistTask!.priority}`,
-                        obsidianPriority: vaultPriority,
-                        todoistPriority: todoistTask!.priority
-                    });
-                    console.log(vaultTask)
-                    console.log(todoistTask)
-                    summary.priorityMismatch++;
-                }
-
-                // ---- 检查标签一致性 ----
-                const obsidianLabels = vaultTask!.labels || [];
-                const todoistLabels = todoistTask!.labels || [];
-                // 比较标签差异
-                const labelDiff = obsidianLabels.filter(l => !todoistLabels.includes(l)).length > 0 ||
-                                 todoistLabels.filter(l => !obsidianLabels.includes(l)).length > 0;
-                if (labelDiff) {
-                    issues.push({
-                        type: 'label_mismatch',
-                        filePath: vaultTask!.filePath,
-                        taskId,
-                        lineNumber: vaultTask!.lineNumber,
-                        details: `Labels differ: Vault [${obsidianLabels.join(', ')}], Todoist [${todoistLabels.join(', ')}]`,
-                        obsidianLabels,
-                        todoistLabels
-                    });
-                    console.log(vaultTask)
-                    console.log(todoistTask)
-                    summary.labelMismatch++;
-                }
-
-                // ---- 检查项目一致性（可选）----
-                // 从 fileMetadata 中获取默认项目 ID
-                if (mapping && vaultTask!.filePath) {
-                    const fileMetadata = this.plugin.settings.fileMetadata?.[vaultTask!.filePath];
-                    const mappingProjectId = fileMetadata?.defaultProjectId;
-                    // 如果映射中指定了项目 ID，检查是否与 Todoist 一致
-                    if (mappingProjectId && mappingProjectId !== todoistTask!.projectId) {
+                if (inTodoist) {
+                    // 情况 1: Vault ✅ + Mapping ✅ + Todoist ✅ → 检查一致性
+                    // ---- 检查行号一致性 ----
+                    if (vaultTask!.lineNumber !== mapping.lineNumber) {
                         issues.push({
-                            type: 'project_mismatch',
+                            type: 'line_number_mismatch',
                             filePath: vaultTask!.filePath,
                             taskId,
                             lineNumber: vaultTask!.lineNumber,
-                            details: `Project differs: Mapping project is ${mappingProjectId}, Todoist is ${todoistTask!.projectId}`,
-                            obsidianProjectId: mappingProjectId,
-                            todoistProjectId: todoistTask!.projectId
+                            obsidianLineNumber: vaultTask!.lineNumber,
+                            mappingLineNumber: mapping.lineNumber,
+                            details: `Line number mismatch: Vault line ${vaultTask!.lineNumber + 1}, Mapping line ${mapping.lineNumber + 1}`
                         });
-                        console.log(vaultTask)
-                        console.log(todoistTask)
-                        summary.projectMismatch++;
+                        summary.lineNumberMismatch++;
+                    }
+
+                    // ---- 检查内容一致性 ----
+                    if (vaultTask!.content.trim() !== todoistTask!.content.trim()) {
+                        issues.push({
+                            type: 'content_mismatch',
+                            filePath: vaultTask!.filePath,
+                            taskId,
+                            lineNumber: vaultTask!.lineNumber,
+                            details: `Task content differs between Vault and Todoist`,
+                            obsidianContent: vaultTask!.content.substring(0, 100),
+                            todoistContent: todoistTask!.content.substring(0, 100)
+                        });
+                        summary.contentMismatch++;
+                    }
+
+                    // ---- 检查完成状态一致性 ----
+                    if (vaultTask!.isCompleted !== (todoistTask as any).checked) {
+                        issues.push({
+                            type: 'status_mismatch',
+                            filePath: vaultTask!.filePath,
+                            taskId,
+                            lineNumber: vaultTask!.lineNumber,
+                            details: `Status mismatch: Vault is ${vaultTask!.isCompleted ? 'completed' : 'incomplete'}, Todoist is ${(todoistTask as any).checked ? 'completed' : 'incomplete'}`,
+                            obsidianStatus: vaultTask!.isCompleted,
+                            todoistStatus: (todoistTask as any).checked || false
+                        });
+                        summary.statusMismatch++;
+                    }
+
+                    // ---- 检查优先级一致性 ----
+                    const vaultPriority = 5 - (vaultTask!.labels?.some(l => l.startsWith('p1')) ? 1 : 
+                                               vaultTask!.labels?.some(l => l.startsWith('p2')) ? 2 : 
+                                               vaultTask!.labels?.some(l => l.startsWith('p3')) ? 3 : 4) || 4;
+                    if (vaultPriority !== todoistTask!.priority) {
+                        issues.push({
+                            type: 'priority_mismatch',
+                            filePath: vaultTask!.filePath,
+                            taskId,
+                            lineNumber: vaultTask!.lineNumber,
+                            details: `Priority mismatch: Vault is ${vaultPriority}, Todoist is ${todoistTask!.priority}`,
+                            obsidianPriority: vaultPriority,
+                            todoistPriority: todoistTask!.priority
+                        });
+                        summary.priorityMismatch++;
+                    }
+
+                    // ---- 检查标签一致性 ----
+                    const obsidianLabels = vaultTask!.labels || [];
+                    const todoistLabels = todoistTask!.labels || [];
+                    const labelDiff = obsidianLabels.filter(l => !todoistLabels.includes(l)).length > 0 ||
+                                     todoistLabels.filter(l => !obsidianLabels.includes(l)).length > 0;
+                    if (labelDiff) {
+                        issues.push({
+                            type: 'label_mismatch',
+                            filePath: vaultTask!.filePath,
+                            taskId,
+                            lineNumber: vaultTask!.lineNumber,
+                            details: `Labels differ: Vault [${obsidianLabels.join(', ')}], Todoist [${todoistLabels.join(', ')}]`,
+                            obsidianLabels,
+                            todoistLabels
+                        });
+                        summary.labelMismatch++;
+                    }
+
+                    // ---- 检查项目一致性 ----
+                    if (mapping && vaultTask!.filePath) {
+                        const fileMetadata = this.plugin.settings.fileMetadata?.[vaultTask!.filePath];
+                        const mappingProjectId = fileMetadata?.defaultProjectId;
+                        if (mappingProjectId && mappingProjectId !== todoistTask!.projectId) {
+                            issues.push({
+                                type: 'project_mismatch',
+                                filePath: vaultTask!.filePath,
+                                taskId,
+                                lineNumber: vaultTask!.lineNumber,
+                                details: `Project differs: Mapping project is ${mappingProjectId}, Todoist is ${todoistTask!.projectId}`,
+                                obsidianProjectId: mappingProjectId,
+                                todoistProjectId: todoistTask!.projectId
+                            });
+                            summary.projectMismatch++;
+                        }
+                    }
+                } else {
+                    // 情况 2: Vault ✅ + Mapping ✅ + Todoist ❌
+                    // 检查 mapping.status → nonActive / issue / deleted
+                    const mappingStatus = mapping.status;
+                    if (mappingStatus === 'nonActive') {
+                        issues.push({
+                            type: 'task_nonactive',
+                            filePath: vaultTask!.filePath,
+                            taskId,
+                            lineNumber: vaultTask!.lineNumber,
+                            details: `Task marked as nonActive (completed in Vault, not in Todoist)`,
+                            obsidianContent: vaultTask!.content,
+                            obsidianStatus: vaultTask!.isCompleted
+                        });
+                        summary.taskNonActive++;
+                    } else if (mappingStatus === 'issue') {
+                        issues.push({
+                            type: 'task_issue',
+                            filePath: vaultTask!.filePath,
+                            taskId,
+                            lineNumber: vaultTask!.lineNumber,
+                            details: `Task marked as issue (incomplete in Vault, not in Todoist)`,
+                            obsidianContent: vaultTask!.content,
+                            obsidianStatus: vaultTask!.isCompleted
+                        });
+                        summary.taskIssue++;
+                    } else {
+                        issues.push({
+                            type: 'task_deleted_in_todoist',
+                            filePath: vaultTask!.filePath,
+                            taskId,
+                            lineNumber: vaultTask!.lineNumber,
+                            details: `Task exists in Vault and mapping but was deleted in Todoist (or needs rebuild)`,
+                            obsidianContent: vaultTask!.content,
+                            obsidianStatus: vaultTask!.isCompleted
+                        });
+                        summary.taskDeletedInTodoist++;
                     }
                 }
+            }
+            // 组合 2: Vault ✅ + Mapping ❌ → 进入第二步与 Todoist 对比
+            else if (inVault && !inMapping) {
+                vaultWithoutMapping++;
+                const todoistTask = todoistTasksMap.get(taskId);
+                const inTodoist = !!todoistTask;
+
+                if (inTodoist) {
+                    // 情况 3: Vault ✅ + Mapping ❌ + Todoist ✅ → 需要重建 mapping
+                    issues.push({
+                        type: 'vault_task_no_mapping',
+                        filePath: vaultTask!.filePath,
+                        taskId,
+                        lineNumber: vaultTask!.lineNumber,
+                        details: `Task exists in Vault and Todoist but no mapping in settings (needs rebuild)`,
+                        obsidianContent: vaultTask!.content,
+                        todoistContent: todoistTask!.content,
+                        obsidianStatus: vaultTask!.isCompleted,
+                        todoistStatus: (todoistTask as any).checked || false
+                    });
+                    summary.vaultTaskNoMapping++;
+                } else {
+                    // 情况 4: Vault ✅ + Mapping ❌ + Todoist ❌ → Unknown issue
+                    issues.push({
+                        type: 'unknown_issue',
+                        filePath: vaultTask!.filePath,
+                        taskId,
+                        lineNumber: vaultTask!.lineNumber,
+                        details: `Task exists in Vault but not in mapping or Todoist (unknown issue)`,
+                        obsidianContent: vaultTask!.content,
+                        obsidianStatus: vaultTask!.isCompleted
+                    });
+                    summary.unknownIssue++;
+                }
+            }
+            // 组合 3: Vault ❌ + Mapping ✅ → 检查文件是否存在
+            else if (!inVault && inMapping) {
+                if (vaultFiles.has(mapping.filePath)) {
+                    // 文件存在但任务不存在 → 孤立 mapping
+                    orphanMapping++;
+                    const todoistTask = todoistTasksMap.get(taskId);
+                    if (todoistTask) {
+                        // 情况 5: Vault ❌ + Mapping ✅ + Todoist ✅ → 文件丢失
+                        issues.push({
+                            type: 'task_not_in_vault',
+                            filePath: mapping.filePath,
+                            taskId,
+                            lineNumber: mapping.lineNumber,
+                            details: `Task exists in Todoist and mapping but Vault file is missing (file deleted or moved)`,
+                            todoistContent: todoistTask!.content,
+                            todoistStatus: (todoistTask as any).checked || false
+                        });
+                        summary.taskNotInVault++;
+                    } else {
+                        // 情况 6: Vault ❌ + Mapping ✅ + Todoist ❌ → 孤立 mapping
+                        issues.push({
+                            type: 'mapping_orphan',
+                            filePath: mapping.filePath,
+                            taskId,
+                            lineNumber: mapping.lineNumber,
+                            details: `Mapping exists but task is deleted in both Vault and Todoist (orphan mapping)`,
+                            mappingLineNumber: mapping.lineNumber
+                        });
+                        summary.mappingOrphan++;
+                    }
+                } else {
+                    // 文件不存在 → 文件丢失
+                    orphanMapping++;
+                    const todoistTask = todoistTasksMap.get(taskId);
+                    if (todoistTask) {
+                        // 情况 5: Vault ❌ + Mapping ✅ + Todoist ✅ → 文件丢失
+                        issues.push({
+                            type: 'task_not_in_vault',
+                            filePath: mapping.filePath,
+                            taskId,
+                            lineNumber: mapping.lineNumber,
+                            details: `Task exists in Todoist and mapping but Vault file is missing (file deleted or moved)`,
+                            todoistContent: todoistTask!.content,
+                            todoistStatus: (todoistTask as any).checked || false
+                        });
+                        summary.taskNotInVault++;
+                    } else {
+                        // 情况 6: Vault ❌ + Mapping ✅ + Todoist ❌ → 孤立 mapping
+                        issues.push({
+                            type: 'mapping_orphan',
+                            filePath: mapping.filePath,
+                            taskId,
+                            lineNumber: mapping.lineNumber,
+                            details: `Mapping exists but task is deleted in both Vault and Todoist (orphan mapping)`,
+                            mappingLineNumber: mapping.lineNumber
+                        });
+                        summary.mappingOrphan++;
+                    }
+                }
+            }
+            // 组合 4: Vault ❌ + Mapping ❌ → 理论上不应该发生
+            else {
+                unknownIssue++;
+                summary.unknownIssue++;
+            }
+        }
+
+        // ====== 第二步：处理只在 Todoist 中存在的任务 ======
+        // 情况 7: Vault ❌ + Mapping ❌ + Todoist ✅ → 其他设备添加的任务（正常）
+        for (const taskId of todoistTasksMap.keys()) {
+            if (!vaultTasksMap.has(taskId) && !taskFileMapping[taskId]) {
+                // 这是正常情况 - 任务是从其他设备添加的，不记录为问题
             }
         }
 
@@ -670,20 +660,48 @@ export class DatabaseChecker {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const reportFilename = `ultimate-todoist-sync-database-check-${timestamp}.md`;
 
-        // 从问题中提取统计数据
-        const vaultTasksWithMapping = result.issues.filter(i => 
-            (i.type === 'content_mismatch' || i.type === 'status_mismatch' || 
-             i.type === 'priority_mismatch' || i.type === 'label_mismatch' ||
-             i.type === 'project_mismatch' || i.type === 'line_number_mismatch')
-        ).length;
+        // 从 summary 中提取统计数据
+        const contentMismatch = result.summary.contentMismatch;
+        const statusMismatch = result.summary.statusMismatch;
+        const priorityMismatch = result.summary.priorityMismatch;
+        const labelMismatch = result.summary.labelMismatch;
+        const projectMismatch = result.summary.projectMismatch;
+        const lineNumberMismatch = result.summary.lineNumberMismatch;
+        const vaultWithMapping = contentMismatch + statusMismatch + priorityMismatch + labelMismatch + projectMismatch + lineNumberMismatch;
         
-        const vaultNoMapping = result.summary.vaultTaskNoMapping;
+        const vaultWithoutMapping = result.summary.vaultTaskNoMapping;
         const taskDeletedInTodoist = result.summary.taskDeletedInTodoist;
-        const newTaskNotSynced = result.summary.newTaskNotSynced;
+        const taskNonActive = result.summary.taskNonActive;
+        const taskIssue = result.summary.taskIssue;
+        const unknownIssue = result.summary.unknownIssue;
         const taskNotInVault = result.summary.taskNotInVault;
         const mappingOrphan = result.summary.mappingOrphan;
-        const mappingFileNotFound = result.summary.mappingFileNotFound;
-        const mappingTaskNotInTodoist = result.summary.mappingTaskNotInTodoist;
+
+        // 计算第一步的统计
+        const sumVaultWithMapping = contentMismatch + statusMismatch + priorityMismatch + labelMismatch + projectMismatch + lineNumberMismatch;
+        const sumVaultWithoutMapping = vaultWithoutMapping;
+        const sumOrphanMapping = taskNotInVault + mappingOrphan;
+        const sumUnknownIssue = unknownIssue;
+        const totalVaultMapping = sumVaultWithMapping + sumVaultWithoutMapping + sumOrphanMapping + sumUnknownIssue;
+
+        // 计算第二步 8 种情况的统计
+        const c1 = sumVaultWithMapping; // Vault ✅ + Mapping ✅ + Todoist ✅
+        const c2 = taskDeletedInTodoist + taskNonActive + taskIssue; // Vault ✅ + Mapping ✅ + Todoist ❌
+        const c3 = sumVaultWithoutMapping; // Vault ✅ + Mapping ❌ + Todoist ✅
+        const c4 = sumUnknownIssue; // Vault ✅ + Mapping ❌ + Todoist ❌
+        const c5 = taskNotInVault; // Vault ❌ + Mapping ✅ + Todoist ✅
+        const c6 = mappingOrphan; // Vault ❌ + Mapping ✅ + Todoist ❌
+        const c7 = 0; // Vault ❌ + Mapping ❌ + Todoist ✅
+        const c8 = 0; // Vault ❌ + Mapping ❌ + Todoist ❌
+
+        // 计算横向和纵向总计
+        const totalVaultYes = c1 + c2 + c3 + c4;
+        const totalVaultNo = c5 + c6 + c7 + c8;
+        const totalMappingYes = c1 + c2 + c5 + c6;
+        const totalMappingNo = c3 + c4 + c7 + c8;
+        const totalTodoistYes = c1 + c3 + c5 + c7;
+        const totalTodoistNo = c2 + c4 + c6 + c8;
+        const grandTotal = c1 + c2 + c3 + c4 + c5 + c6 + c7 + c8;
 
         // 生成 Markdown 报告内容
         let markdown = `# Database Check Report
@@ -698,18 +716,45 @@ Generated: ${new Date().toLocaleString()}
 
 ---
 
-## Data Sources Overview
+## Vault vs Mapping Summary
 
-| Combination | Vault | Todoist | Mapping | Count | Description |
-|-------------|-------|---------|---------|-------|-------------|
-| Normal | ✅ | ✅ | ✅ | ${vaultTasksWithMapping} | All present, check consistency |
-| Settings Lost | ✅ | ✅ | ❌ | ${vaultNoMapping} | Need rebuild mapping |
-| Deleted in Todoist | ✅ | ❌ | ✅ | ${taskDeletedInTodoist} | Task deleted in Todoist |
-| Not Synced | ✅ | ❌ | ❌ | ${newTaskNotSynced} | New task not yet synced |
-| File Missing | ❌ | ✅ | ✅ | ${taskNotInVault} | Vault file missing |
-| Orphan Mapping | ❌ | ❌ | ✅ | ${mappingOrphan} | Mapping orphan |
-| Mapping File Not Found | - | - | - | ${mappingFileNotFound} | Mapping file doesn't exist |
-| Mapping Task Not in Todoist | - | - | - | ${mappingTaskNotInTodoist} | Task deleted in Todoist |
+| Combination | Vault | Mapping | Count | Description |
+|------------|-------|---------|-------|-------------|
+| Normal | ✅ | ✅ | ${vaultWithMapping} | Check consistency with Todoist |
+| Need Rebuild | ✅ | ❌ | ${vaultWithoutMapping + taskDeletedInTodoist + taskNonActive + taskIssue + unknownIssue} | Need rebuild mapping |
+| Orphan Mapping | ❌ | ✅ | ${taskNotInVault + mappingOrphan} | File missing or task deleted |
+| Unknown | ❌ | ❌ | ${unknownIssue} | Unknown issue |
+| **Total** | | | **${totalVaultMapping}** | |
+
+---
+
+## 8 Cases Detail
+
+| # | Vault | Mapping | Todoist | Count | Description |
+|---|-------|---------|---------|-------|-------------|
+| 1 | ✅ | ✅ | ✅ | ${c1} | Consistency check |
+| 2 | ✅ | ✅ | ❌ | ${c2} | nonActive / issue / deleted |
+| 3 | ✅ | ❌ | ✅ | ${c3} | Need rebuild mapping |
+| 4 | ✅ | ❌ | ❌ | ${c4} | Unknown issue |
+| 5 | ❌ | ✅ | ✅ | ${c5} | File missing |
+| 6 | ❌ | ✅ | ❌ | ${c6} | Orphan mapping |
+| 7 | ❌ | ❌ | ✅ | ${c7} | Other device added (normal) |
+| 8 | ❌ | ❌ | ❌ | ${c8} | Impossible |
+| **Total** | | | | **${grandTotal}** | |
+
+### Cross Totals
+
+| | Vault ✅ | Vault ❌ | Total |
+|---|---------|---------|-------|
+| Mapping ✅ | ${c1 + c2} | ${c5 + c6} | ${totalMappingYes} |
+| Mapping ❌ | ${c3 + c4} | ${c7 + c8} | ${totalMappingNo} |
+| **Total** | ${totalVaultYes} | ${totalVaultNo} | **${grandTotal}** |
+
+| | Todoist ✅ | Todoist ❌ | Total |
+|---|---------|---------|-------|
+| Vault ✅ | ${c1 + c3} | ${c2 + c4} | ${totalVaultYes} |
+| Vault ❌ | ${c5 + c7} | ${c6 + c8} | ${totalVaultNo} |
+| **Total** | ${totalTodoistYes} | ${totalTodoistNo} | **${grandTotal}** |
 
 ---
 
@@ -731,13 +776,13 @@ Generated: ${new Date().toLocaleString()}
 
             // 问题类型标签映射
             const typeLabels: Record<string, string> = {
-                'mapping_file_not_found': 'Mapping File Not Found',
-                'mapping_task_not_in_todoist': 'Mapping Task Not in Todoist',
-                'mapping_orphan': 'Mapping Orphan',
-                'vault_task_no_mapping': 'Vault Task No Mapping (Settings Lost)',
-                'task_deleted_in_task_deleted_in_todoist': 'Task Deleted in Todoist',
-                'task_not_in_vault': 'Task Not in Vault (File Missing)',
-                'new_task_not_synced': 'New Task Not Synced',
+                'mapping_orphan': 'Orphan Mapping',
+                'vault_task_no_mapping': 'Need Rebuild Mapping',
+                'task_deleted_in_todoist': 'Task Deleted in Todoist',
+                'task_nonactive': 'NonActive Task',
+                'task_issue': 'Issue Task',
+                'unknown_issue': 'Unknown Issue',
+                'task_not_in_vault': 'File Missing',
                 'content_mismatch': 'Content Mismatch',
                 'status_mismatch': 'Status Mismatch',
                 'priority_mismatch': 'Priority Mismatch',
