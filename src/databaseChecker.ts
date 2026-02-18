@@ -29,6 +29,8 @@ export interface DatabaseCheckIssue {
         | 'task_deleted_in_todoist'  // Vault+Mapping 有，但 Todoist 没有（任务在 Todoist 端被删除）
         | 'task_not_in_vault'        // Todoist+Mapping 有，但 Vault 文件不存在
         | 'new_task_not_synced'      // Vault 有但 Todoist 没有（新创建的任务尚未同步）
+        | 'task_nonactive'           // Vault 已完成 + Todoist 不存在 + 已被标记为 nonActive（已知状态）
+        | 'task_issue'               // Vault 未完成 + Todoist 不存在 + 已被标记为 issue（异常状态）
         | 'content_mismatch'         // 内容不一致
         | 'status_mismatch'          // 完成状态不一致
         | 'priority_mismatch'        // 优先级不一致
@@ -124,6 +126,8 @@ export interface DatabaseCheckResult {
         taskDeletedInTodoist: number;       // 任务在 Todoist 端被删除
         taskNotInVault: number;             // Vault 文件丢失
         newTaskNotSynced: number;           // 新任务未同步
+        taskNonActive: number;              // 已标记为 nonActive 的任务
+        taskIssue: number;                  // 已标记为 issue 的任务
         contentMismatch: number;             // 内容不一致
         statusMismatch: number;              // 状态不一致
         priorityMismatch: number;            // 优先级不一致
@@ -186,6 +190,8 @@ export class DatabaseChecker {
             taskDeletedInTodoist: 0,          // 任务在 Todoist 被删除
             taskNotInVault: 0,                // Vault 文件丢失
             newTaskNotSynced: 0,              // 新任务未同步
+            taskNonActive: 0,                 // 已标记为 nonActive 的任务
+            taskIssue: 0,                     // 已标记为 issue 的任务
             contentMismatch: 0,                // 内容不一致
             statusMismatch: 0,                 // 状态不一致
             priorityMismatch: 0,              // 优先级不一致
@@ -205,8 +211,9 @@ export class DatabaseChecker {
             if (noticeCallback) {
                 noticeCallback('Step 1/4: Scanning vault files...');
             }
-            // 扫描 Vault 中的所有任务，建立 taskId -> VaultTask 的映射
-            const vaultTasksMap = await this.scanVaultTasks();
+            // 使用 fileOperation 的统一扫描方法
+            const { tasksWithId, tasksWithoutId } = await this.plugin.fileOperation.scanVaultTasks();
+            const vaultTasksMap = tasksWithId;
 
             // ====== Step 2: 获取 Todoist 任务 ======
             if (noticeCallback) {
@@ -220,8 +227,8 @@ export class DatabaseChecker {
                 // 重新获取 syncData
                 syncData = this.plugin.todoistSyncAPI.getSyncData();
             }
-            // 从 syncData 中解析出 Todoist 任务
-            const todoistTasksMap = this.getTodoistTasksFromSyncData(syncData);
+            // 使用 fileOperation 的方法从 syncData 中获取 Todoist 任务
+            const todoistTasksMap = this.plugin.fileOperation.getTodoistTasksFromSyncData(syncData);
 
             // ====== Step 3: 获取 taskFileMapping ======
             if (noticeCallback) {
@@ -241,6 +248,22 @@ export class DatabaseChecker {
                 todoistTasksMap,
                 taskFileMapping
             );
+            
+            // ====== Step 5: 处理无 todoist_id 的任务（新任务未同步）======
+            if (tasksWithoutId.length > 0) {
+                for (const newTask of tasksWithoutId) {
+                    issues.push({
+                        type: 'new_task_not_synced',
+                        filePath: newTask.filePath,
+                        taskId: undefined,
+                        lineNumber: newTask.lineNumber,
+                        details: `New task in Vault not yet synced to Todoist (no todoist_id)`,
+                        obsidianContent: newTask.content,
+                        obsidianStatus: newTask.isCompleted
+                    });
+                    summary.newTaskNotSynced++;
+                }
+            }
             
             // 将发现的问题添加到结果中
             issues.push(...result.issues);
@@ -286,122 +309,6 @@ export class DatabaseChecker {
     }
 
     /**
-     * 扫描 Vault 中的所有任务
-     * 
-     * 扫描逻辑：
-     * 1. 获取所有 .md 文件
-     * 2. 遍历每个文件的每一行
-     * 3. 查找包含 #todoist 标签的行
-     * 4. 提取 todoist_id 元数据作为任务 ID
-     * 5. 使用 taskParser 提取任务内容
-     * 
-     * @returns Map<string, VaultTask> - taskId 到 VaultTask 的映射
-     */
-    async scanVaultTasks(): Promise<Map<string, VaultTask>> {
-        // 创建 taskId -> VaultTask 的映射
-        const vaultTasksMap = new Map<string, VaultTask>();
-        
-        // 获取所有 Markdown 文件
-        const files = this.app.vault.getFiles().filter(f => f.extension === 'md');
-
-        // 遍历每个文件
-        for (const file of files) {
-            try {
-                // 读取文件内容
-                const content = await this.app.vault.cachedRead(file);
-                // 按行分割
-                const lines = content.split('\n');
-
-                // 遍历每一行
-                for (let i = 0; i < lines.length; i++) {
-                    const line = lines[i];
-                    
-                    // 检查是否包含 #todoist 标签
-                    if (line.includes('#todoist')) {
-                        // 使用正则提取 todoist_id 元数据
-                        const match = line.match(/%%\[todoist_id::\s*([\w-]+)\]%%/);
-                        
-                        // 如果找到 todoist_id
-                        if (match && match[1]) {
-                            const taskId = match[1];  // 提取任务 ID
-                            
-                            // 使用 taskParser 提取任务内容（去除元数据、链接、标签等）
-                            const taskContent = this.plugin.taskParser.getTaskContentFromLineText(line);
-                            
-                            // 检查任务是否已完成（[x] 表示已完成）
-                            const isCompleted = /\[x\]/i.test(line);
-                            
-                            // 提取标签（#tag 格式）
-                            const labels = this.extractLabelsFromLine(line);
-
-                            // 如果 taskId 已存在，跳过（避免重复）
-                            if (vaultTasksMap.has(taskId)) {
-                                continue;
-                            }
-
-                            // 将任务添加到映射中
-                            vaultTasksMap.set(taskId, {
-                                taskId,
-                                content: taskContent,
-                                isCompleted,
-                                filePath: file.path,
-                                lineNumber: i,
-                                labels
-                            });
-                        }
-                    }
-                }
-            } catch (error) {
-                // 读取文件失败，记录错误
-                console.error(`Error reading file ${file.path}:`, error);
-            }
-        }
-
-        return vaultTasksMap;
-    }
-
-
-    
-
-    /**
-     * 从 syncData 中获取 Todoist 任务
-     * 
-     * 此方法是 checkDatabase 的主要数据来源
-     * 相比 fetchTodoistTasks 直接使用本地缓存，性能更好
-     * 
-     * @param syncData - Todoist Sync API 返回的原始数据
-     * @returns Map<string, TodoistTask> - taskId 到 TodoistTask 的映射
-     */
-    getTodoistTasksFromSyncData(syncData: Record<string, any> | null): Map<string, TodoistTask> {
-        const todoistTasksMap = new Map<string, TodoistTask>();
-        
-        // 检查 syncData 是否有效
-        if (!syncData || !syncData.items) {
-            return todoistTasksMap;
-        }
-        
-        // 遍历 syncData 中的所有任务
-        for (const task of syncData.items) {
-            if (!task) continue;
-            const taskAny = task as any;
-            
-            // 将任务添加到映射
-            todoistTasksMap.set(task.id, {
-                taskId: task.id,
-                content: task.content || '',
-                // 判断完成状态
-                checked: (taskAny as any).checked || false,
-                dueDate: task.due?.date,
-                priority: task.priority || 4,
-                projectId: task.projectId || '',
-                labels: task.labels || []
-            });
-        }
-
-        return todoistTasksMap;
-    }
-
-    /**
      * 比较三个数据源，找出所有不一致问题
      * 
      * 三个数据源：
@@ -429,7 +336,7 @@ export class DatabaseChecker {
     async compareThreeSources(
         vaultTasksMap: Map<string, VaultTask>,
         todoistTasksMap: Map<string, TodoistTask>,
-        taskFileMapping: Record<string, { filePath: string; lineNumber: number }>
+        taskFileMapping: Record<string, { filePath: string; lineNumber: number; status?: string; syncEnabled?: boolean }>
     ): Promise<{ issues: DatabaseCheckIssue[], summary: DatabaseCheckResult['summary'] }> {
         // 初始化问题列表
         const issues: DatabaseCheckIssue[] = [];
@@ -443,6 +350,8 @@ export class DatabaseChecker {
             taskDeletedInTodoist: 0,
             taskNotInVault: 0,
             newTaskNotSynced: 0,
+            taskNonActive: 0,
+            taskIssue: 0,
             contentMismatch: 0,
             statusMismatch: 0,
             priorityMismatch: 0,
@@ -529,16 +438,46 @@ export class DatabaseChecker {
             // 说明：任务在 Vault 和 taskFileMapping 中存在，但在 Todoist 中不存在
             // 可能原因：任务在 Todoist 端被删除，或者 legacy ID 需要重建
             else if (inVault && !inTodoist && inMapping) {
-                issues.push({
-                    type: 'task_deleted_in_todoist',
-                    filePath: vaultTask!.filePath,
-                    taskId,
-                    lineNumber: vaultTask!.lineNumber,
-                    details: `Task exists in Vault and mapping but was deleted in Todoist (or needs rebuild)`,
-                    obsidianContent: vaultTask!.content,
-                    obsidianStatus: vaultTask!.isCompleted
-                });
-                summary.taskDeletedInTodoist++;
+                const mappingStatus = mapping.status;
+                
+                // 根据 mapping 中的 status 字段判断具体类型
+                if (mappingStatus === 'nonActive') {
+                    // 已被 rebuildCache 标记为 nonActive（已知状态）
+                    issues.push({
+                        type: 'task_nonactive',
+                        filePath: vaultTask!.filePath,
+                        taskId,
+                        lineNumber: vaultTask!.lineNumber,
+                        details: `Task marked as nonActive (completed in Vault, not in Todoist)`,
+                        obsidianContent: vaultTask!.content,
+                        obsidianStatus: vaultTask!.isCompleted
+                    });
+                    summary.taskNonActive++;
+                } else if (mappingStatus === 'issue') {
+                    // 已被 rebuildCache 标记为 issue（异常状态）
+                    issues.push({
+                        type: 'task_issue',
+                        filePath: vaultTask!.filePath,
+                        taskId,
+                        lineNumber: vaultTask!.lineNumber,
+                        details: `Task marked as issue (incomplete in Vault, not in Todoist)`,
+                        obsidianContent: vaultTask!.content,
+                        obsidianStatus: vaultTask!.isCompleted
+                    });
+                    summary.taskIssue++;
+                } else {
+                    // status 为 'active' 或 undefined → 真正的问题
+                    issues.push({
+                        type: 'task_deleted_in_todoist',
+                        filePath: vaultTask!.filePath,
+                        taskId,
+                        lineNumber: vaultTask!.lineNumber,
+                        details: `Task exists in Vault and mapping but was deleted in Todoist (or needs rebuild)`,
+                        obsidianContent: vaultTask!.content,
+                        obsidianStatus: vaultTask!.isCompleted
+                    });
+                    summary.taskDeletedInTodoist++;
+                }
             }
 
             // ====== 情况 4: Vault ✓ + Todoist ✗ + Mapping ✗ ======
@@ -711,30 +650,6 @@ export class DatabaseChecker {
         }
 
         return { issues, summary };
-    }
-
-    /**
-     * 从任务行中提取标签
-     * 
-     * 提取逻辑：
-     * 使用正则匹配所有 #tag 格式的标签
-     * 排除 #todoist 标签（这是同步标记，不是用户标签）
-     * 
-     * @param line - 任务行文本
-     * @returns string[] - 标签数组（不含 # 前缀）
-     */
-    private extractLabelsFromLine(line: string): string[] {
-        const labels: string[] = [];
-        // 匹配 # 后面跟着字母、数字、下划线、连字符或中文
-        const labelRegex = /#[\w\u4e00-\u9fa5-]+/g;
-        let match;
-        
-        // 遍历所有匹配的标签
-        while ((match = labelRegex.exec(line)) !== null) {
-            // 添加标签（不含 # 前缀）
-            labels.push(match[0].substring(1));
-        }
-        return labels;
     }
 
     /**

@@ -6,15 +6,26 @@
  * 【模块职责】
  * 本模块负责管理 Obsidian 与 Todoist 之间的任务缓存数据，包括：
  * 1. fileMetadata - 每个文件的元数据（包含该文件的 Todoist 任务列表）
- * 2. taskFileMapping - 任务ID到文件路径的映射（taskId -> {filePath, lineNumber}）
+ * 2. taskFileMapping - 任务ID到文件路径的映射（taskId -> {filePath, lineNumber, status, syncEnabled}）
  * 3. rebuildCache - 重建缓存的核心方法，用于扫描 Vault 并与 Todoist 同步
  * 
  * 【数据结构】
  * - fileMetadata: { [filepath]: { todoistTasks: string[], todoistCount: number, defaultProjectId?: string } }
  *   存储每个 markdown 文件的 Todoist 任务列表
  * 
- * - taskFileMapping: { [taskId]: { filePath: string, lineNumber: number } }
- *   存储每个任务ID对应的文件位置，用于双向同步定位
+ * - taskFileMapping: { [taskId]: { 
+ *     filePath: string, 
+ *     lineNumber: number, 
+ *     status?: 'active' | 'nonActive' | 'conflicted' | 'issue',
+ *     syncEnabled?: boolean 
+ *   } }
+ *   存储每个任务ID对应的文件位置和同步状态，用于双向同步定位
+ * 
+ * 【status 字段说明】
+ * - 'active': 正常任务，syncEnabled=true
+ * - 'nonActive': Vault 已完成但 Todoist 不存在（任务可能被删除），syncEnabled=false
+ * - 'conflicted': 内容或状态冲突，syncEnabled=false
+ * - 'issue': Vault 未完成但 Todoist 不存在（异常状态），syncEnabled=false
  * 
  * 【重建缓存流程】
  * Step 1: 清空 taskFileMapping（保留 fileMetadata）
@@ -335,9 +346,15 @@ export class CacheOperation   {
     // 
     // 【taskFileMapping 数据结构】
     // {
-    //   "taskId123": { filePath: "folder/file.md", lineNumber: 5 },
-    //   "taskId456": { filePath: "folder/file2.md", lineNumber: 10 }
+    //   "taskId123": { filePath: "folder/file.md", lineNumber: 5, status: 'active', syncEnabled: true },
+    //   "taskId456": { filePath: "folder/file2.md", lineNumber: 10, status: 'conflicted', syncEnabled: false }
     // }
+    //
+    // 【status 字段说明】
+    // - 'active': 正常任务，syncEnabled=true
+    // - 'nonActive': Vault 已完成但 Todoist 不存在（任务被删除），syncEnabled=false
+    // - 'conflicted': 内容或状态冲突，syncEnabled=false
+    // - 'issue': Vault 未完成但 Todoist 不存在（异常），syncEnabled=false
     // 
     // 【作用】
     // - 存储每个 Todoist 任务 ID 对应的 Obsidian 文件位置
@@ -349,9 +366,9 @@ export class CacheOperation   {
     /**
      * 获取指定任务 ID 的文件映射
      * @param taskId - Todoist 任务 ID
-     * @returns 文件路径和行号，如果不存在则返回 null
+     * @returns 文件路径、行号、状态和同步开关，如果不存在则返回 null
      */
-    getTaskFileMapping(taskId: string): { filePath: string; lineNumber: number } | null {
+    getTaskFileMapping(taskId: string): { filePath: string; lineNumber: number; status?: string; syncEnabled?: boolean } | null {
         return this.plugin.settings.taskFileMapping[taskId] ?? null;
     }
 
@@ -360,9 +377,11 @@ export class CacheOperation   {
      * @param taskId - Todoist 任务 ID
      * @param filePath - Obsidian 文件路径
      * @param lineNumber - 任务所在行号
+     * @param status - 任务状态（'active' | 'nonActive' | 'conflicted' | 'issue'），默认 'active'
+     * @param syncEnabled - 是否启用同步，默认 true
      */
-    setTaskFileMapping(taskId: string, filePath: string, lineNumber: number): void {
-        this.plugin.settings.taskFileMapping[taskId] = { filePath, lineNumber };
+    setTaskFileMapping(taskId: string, filePath: string, lineNumber: number, status: 'active' | 'nonActive' | 'conflicted' | 'issue' = 'active', syncEnabled: boolean = true): void {
+        this.plugin.settings.taskFileMapping[taskId] = { filePath, lineNumber, status, syncEnabled };
     }
 
     /**
@@ -760,47 +779,34 @@ export class CacheOperation   {
                 console.log('Scanning vault for tasks...');
             }
             
-            const files = this.app.vault.getFiles()
-                .filter(f => f.extension === 'md');
+            // 使用 fileOperation 的统一扫描方法
+            const { tasksWithId, tasksWithoutId } = await this.plugin.fileOperation.scanVaultTasks();
             
-            // fileTaskMap: Map<filePath, tasks[]>
+            // 转换为 fileTaskMap 格式: Map<filePath, tasks[]>
             const fileTaskMap: Map<string, { taskId: string; lineNumber: number; content: string; isCompleted: boolean }[]> = new Map();
             
-            for (const file of files) {
-                try {
-                    // 读取文件内容
-                    const content = await this.app.vault.cachedRead(file);
-                    const lines = content.split('\n');
-                    
-                    // 遍历每一行
-                    for (let i = 0; i < lines.length; i++) {
-                        const line = lines[i];
-                        // 检查是否包含 #todoist 标签
-                        if (line.includes('#todoist')) {
-                            // 提取 todoist_id: %%[todoist_id:: xxx]%%
-                            const match = line.match(/%%\[todoist_id::\s*(\w+)\]%%/);
-                            if (match && match[1]) {
-                                const taskId = match[1];
-                                // 使用 taskParser 提取任务内容（去除 checkbox、metadata、link 等）
-                                const taskContent = this.plugin.taskParser.getTaskContentFromLineText(line);
-                                // 检查完成状态 - [x] = 已完成, [ ] = 未完成
-                                const isCompleted = /\[x\]/i.test(line);
-                                
-                                // 添加到 fileTaskMap
-                                if (!fileTaskMap.has(file.path)) {
-                                    fileTaskMap.set(file.path, []);
-                                }
-                                fileTaskMap.get(file.path)!.push({
-                                    taskId,
-                                    lineNumber: i,
-                                    content: taskContent,
-                                    isCompleted
-                                });
-                            }
-                        }
-                    }
-                } catch (error) {
-                    console.error(`Error reading file ${file.path}:`, error);
+            for (const [taskId, task] of tasksWithId.entries()) {
+                if (!fileTaskMap.has(task.filePath)) {
+                    fileTaskMap.set(task.filePath, []);
+                }
+                fileTaskMap.get(task.filePath)!.push({
+                    taskId,
+                    lineNumber: task.lineNumber,
+                    content: task.content,
+                    isCompleted: task.isCompleted
+                });
+            }
+            
+            // 记录无 ID 的任务（新任务未同步）
+            if (tasksWithoutId.length > 0) {
+                console.log(`[rebuildCache] Found ${tasksWithoutId.length} tasks without todoist_id (new tasks not synced)`);
+                for (const task of tasksWithoutId) {
+                    this.plugin.logOperation?.log(
+                        'CACHE_TASK_NON_ID',
+                        `Task without todoist_id found: ${task.content.substring(0, 50)}`,
+                        task.filePath,
+                        undefined
+                    );
                 }
             }
 

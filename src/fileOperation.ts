@@ -1,6 +1,34 @@
 import { App} from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../main";
 import { LogAction } from './logOperation';
+
+export interface VaultTask {
+    taskId: string;
+    content: string;
+    isCompleted: boolean;
+    filePath: string;
+    lineNumber: number;
+    labels: string[];
+}
+
+export interface VaultTaskWithoutId {
+    content: string;
+    isCompleted: boolean;
+    filePath: string;
+    lineNumber: number;
+    labels: string[];
+}
+
+export interface TodoistTask {
+    taskId: string;
+    content: string;
+    checked: boolean;
+    dueDate?: string;
+    priority: number;
+    projectId: string;
+    labels: string[];
+}
+
 export class FileOperation   {
 	app:App;
     plugin: UltimateTodoistSyncForObsidian;
@@ -566,7 +594,131 @@ export class FileOperation   {
         }
     }
 
+    /**
+     * 扫描 Vault 中的所有 Todoist 任务
+     * 
+     * 扫描逻辑：
+     * 1. 获取所有 .md 文件
+     * 2. 遍历每个文件的每一行
+     * 3. 查找包含 #todoist 标签的行
+     * 4. 提取 todoist_id 元数据作为任务 ID
+     * 5. 使用 taskParser 提取任务内容
+     * 
+     * @returns {
+     *   tasksWithId: Map<string, VaultTask>,      // 有 todoist_id 的任务
+     *   tasksWithoutId: VaultTaskWithoutId[]      // 无 todoist_id 的任务（新任务未同步）
+     * }
+     */
+    async scanVaultTasks(): Promise<{
+        tasksWithId: Map<string, VaultTask>;
+        tasksWithoutId: VaultTaskWithoutId[];
+    }> {
+        const tasksWithId = new Map<string, VaultTask>();
+        const tasksWithoutId: VaultTaskWithoutId[] = [];
+        
+        const files = this.app.vault.getFiles().filter(f => f.extension === 'md');
 
+        for (const file of files) {
+            try {
+                const content = await this.app.vault.cachedRead(file);
+                const lines = content.split('\n');
+
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i];
+                    
+                    if (!line.includes('#todoist')) {
+                        continue;
+                    }
+                    
+                    const match = line.match(/%%\[todoist_id::\s*([\w-]+)\]%%/);
+                    const taskContent = this.plugin.taskParser.getTaskContentFromLineText(line);
+                    const isCompleted = /\[x\]/i.test(line);
+                    const labels = this.extractLabelsFromLine(line);
+                    
+                    if (match && match[1]) {
+                        const taskId = match[1];
+                        
+                        if (tasksWithId.has(taskId)) {
+                            continue;
+                        }
+
+                        tasksWithId.set(taskId, {
+                            taskId,
+                            content: taskContent,
+                            isCompleted,
+                            filePath: file.path,
+                            lineNumber: i,
+                            labels
+                        });
+                    } else {
+                        tasksWithoutId.push({
+                            content: taskContent,
+                            isCompleted,
+                            filePath: file.path,
+                            lineNumber: i,
+                            labels
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error(`Error reading file ${file.path}:`, error);
+            }
+        }
+
+        return { tasksWithId, tasksWithoutId };
+    }
+
+    /**
+     * 从 syncData 中获取 Todoist 任务
+     * 
+     * @param syncData - Todoist Sync API 返回的数据
+     * @returns Map<taskId, TodoistTask>
+     */
+    getTodoistTasksFromSyncData(syncData: Record<string, any> | null): Map<string, TodoistTask> {
+        const todoistTasksMap = new Map<string, TodoistTask>();
+        
+        if (!syncData || !syncData.items) {
+            return todoistTasksMap;
+        }
+        
+        for (const task of syncData.items) {
+            if (!task) continue;
+            const taskAny = task as any;
+            
+            todoistTasksMap.set(task.id, {
+                taskId: task.id,
+                content: task.content || '',
+                checked: taskAny.checked || false,
+                dueDate: task.due?.date,
+                priority: task.priority || 4,
+                projectId: task.projectId || '',
+                labels: task.labels || []
+            });
+        }
+
+        return todoistTasksMap;
+    }
+
+    /**
+     * 从行文本中提取标签
+     * 
+     * @param line - 行文本
+     * @returns 标签数组
+     */
+    private extractLabelsFromLine(line: string): string[] {
+        const labels: string[] = [];
+        const regex = /(^|\s)(#[a-zA-Z\d\u4e00-\u9fa5-]+)/g;
+        let match;
+        
+        while ((match = regex.exec(line)) !== null) {
+            const label = match[2];
+            if (label !== '#todoist') {
+                labels.push(label);
+            }
+        }
+        
+        return labels;
+    }
 
 
 }
