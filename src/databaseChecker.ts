@@ -667,7 +667,6 @@ export class DatabaseChecker {
         const labelMismatch = result.summary.labelMismatch;
         const projectMismatch = result.summary.projectMismatch;
         const lineNumberMismatch = result.summary.lineNumberMismatch;
-        const vaultWithMapping = contentMismatch + statusMismatch + priorityMismatch + labelMismatch + projectMismatch + lineNumberMismatch;
         
         const vaultWithoutMapping = result.summary.vaultTaskNoMapping;
         const taskDeletedInTodoist = result.summary.taskDeletedInTodoist;
@@ -677,7 +676,7 @@ export class DatabaseChecker {
         const taskNotInVault = result.summary.taskNotInVault;
         const mappingOrphan = result.summary.mappingOrphan;
 
-        // 计算第一步的统计
+        // 计算第一步的统计 (Vault vs Mapping 4种组合)
         const sumVaultWithMapping = contentMismatch + statusMismatch + priorityMismatch + labelMismatch + projectMismatch + lineNumberMismatch;
         const sumVaultWithoutMapping = vaultWithoutMapping;
         const sumOrphanMapping = taskNotInVault + mappingOrphan;
@@ -720,10 +719,10 @@ Generated: ${new Date().toLocaleString()}
 
 | Combination | Vault | Mapping | Count | Description |
 |------------|-------|---------|-------|-------------|
-| Normal | ✅ | ✅ | ${vaultWithMapping} | Check consistency with Todoist |
-| Need Rebuild | ✅ | ❌ | ${vaultWithoutMapping + taskDeletedInTodoist + taskNonActive + taskIssue + unknownIssue} | Need rebuild mapping |
-| Orphan Mapping | ❌ | ✅ | ${taskNotInVault + mappingOrphan} | File missing or task deleted |
-| Unknown | ❌ | ❌ | ${unknownIssue} | Unknown issue |
+| Normal | ✅ | ✅ | ${sumVaultWithMapping} | Check consistency with Todoist |
+| Need Rebuild | ✅ | ❌ | ${sumVaultWithoutMapping} | Need rebuild mapping |
+| Orphan Mapping | ❌ | ✅ | ${sumOrphanMapping} | File missing or task deleted |
+| Unknown | ❌ | ❌ | ${sumUnknownIssue} | Unknown issue |
 | **Total** | | | **${totalVaultMapping}** | |
 
 ---
