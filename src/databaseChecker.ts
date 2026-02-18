@@ -456,8 +456,9 @@ export class DatabaseChecker {
                     }
 
                     // ---- 检查标签一致性 ----
-                    const obsidianLabels = vaultTask!.labels || [];
-                    const todoistLabels = todoistTask!.labels || [];
+                    // 过滤掉 #todoist 标签（同步标记，不是用户标签）
+                    const obsidianLabels = (vaultTask!.labels || []).filter(l => l !== 'todoist');
+                    const todoistLabels = (todoistTask!.labels || []).filter(l => l !== 'todoist');
                     const labelDiff = obsidianLabels.filter(l => !todoistLabels.includes(l)).length > 0 ||
                                      todoistLabels.filter(l => !obsidianLabels.includes(l)).length > 0;
                     if (labelDiff) {
