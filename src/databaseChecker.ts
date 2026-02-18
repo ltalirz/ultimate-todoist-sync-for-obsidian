@@ -456,11 +456,8 @@ export class DatabaseChecker {
                     }
 
                     // ---- 检查标签一致性 ----
-                    // 过滤掉 #todoist 标签（同步标记，不是用户标签）
-                    // 移除 obsidianLabels 中的 # 前缀，以便与 Todoist 标签比较
-                    const obsidianLabels = (vaultTask!.labels || [])
-                        .filter(l => l !== 'todoist' && l !== '#todoist')
-                        .map(l => l.startsWith('#') ? l.substring(1) : l);
+                    // vaultTask.labels 现在已经不带 # 前缀（由 fileOperation.extractLabelsFromLine 处理）
+                    const obsidianLabels = (vaultTask!.labels || []).filter(l => l !== 'todoist');
                     const todoistLabels = (todoistTask!.labels || []).filter(l => l !== 'todoist');
                     const labelDiff = obsidianLabels.filter(l => !todoistLabels.includes(l)).length > 0 ||
                                      todoistLabels.filter(l => !obsidianLabels.includes(l)).length > 0;
@@ -470,7 +467,7 @@ export class DatabaseChecker {
                             filePath: vaultTask!.filePath,
                             taskId,
                             lineNumber: vaultTask!.lineNumber,
-                            details: `Labels differ: Vault [#${obsidianLabels.join(', #')}], Todoist [${todoistLabels.join(', ')}]`,
+                            details: `Labels differ: Vault [#${obsidianLabels.join(', #')}], Todoist [#${todoistLabels.join(', #')}]`,
                             obsidianLabels,
                             todoistLabels
                         });

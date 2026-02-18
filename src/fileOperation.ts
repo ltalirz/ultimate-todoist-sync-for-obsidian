@@ -703,21 +703,11 @@ export class FileOperation   {
      * 从行文本中提取标签
      * 
      * @param line - 行文本
-     * @returns 标签数组
+     * @returns 标签数组（不带 # 前缀）
      */
     private extractLabelsFromLine(line: string): string[] {
-        const labels: string[] = [];
-        const regex = /(^|\s)(#[a-zA-Z\d\u4e00-\u9fa5-]+)/g;
-        let match;
-        
-        while ((match = regex.exec(line)) !== null) {
-            const label = match[2];
-            if (label !== '#todoist') {
-                labels.push(label);
-            }
-        }
-        
-        return labels;
+        return this.plugin.taskParser.getAllTagsFromLineText(line)
+            .filter(l => l !== 'todoist');
     }
 
 
