@@ -421,41 +421,7 @@ export class DatabaseChecker {
         return cacheTasksMap;
     }
 
-    /**
-     * 从 Todoist API 获取活动任务
-     * 
-     * 注意：此方法目前未被 checkDatabase 使用
-     * checkDatabase 直接使用 syncData 中的任务数据
-     * 
-     * @returns Map<string, TodoistTask> - taskId 到 TodoistTask 的映射
-     */
-    async fetchTodoistTasks(): Promise<Map<string, TodoistTask>> {
-        const todoistTasksMap = new Map<string, TodoistTask>();
-        // 调用 Todoist API 获取活动任务
-        const todoistTasks = await this.plugin.todoistSyncAPI.GetActiveTasks({});
-        
-        if (!todoistTasks) {
-            return todoistTasksMap;
-        }
-        
-        // 遍历每个任务
-        for (const task of todoistTasks) {
-            if (!task) continue;
-            const taskAny = task as any;
-            todoistTasksMap.set(task.id, {
-                taskId: task.id,
-                content: task.content || '',
-                // 判断完成状态：优先使用 isCompleted，否则检查 completedAt
-                isCompleted: taskAny.isCompleted || taskAny.completedAt !== null || false,
-                dueDate: task.due?.date,
-                priority: task.priority || 4,
-                projectId: task.projectId || '',
-                labels: []
-            });
-        }
-
-        return todoistTasksMap;
-    }
+    
 
     /**
      * 从 syncData 中获取 Todoist 任务
