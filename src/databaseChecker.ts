@@ -1,175 +1,271 @@
+/**
+ * DatabaseChecker - 数据库一致性检查模块
+ * 
+ * 功能：检查 Vault、Todoist 和 taskFileMapping 三个数据源之间的一致性
+ * 
+ * 数据流：
+ * 1. scanVaultTasks() - 扫描 Vault 中的所有任务
+ * 2. getTodoistTasksFromSyncData() - 从 Todoist Sync API 获取任务
+ * 3. compareThreeSources() - 比对三个数据源，找出不一致问题
+ * 4. generateReport() - 生成 Markdown 格式的检查报告
+ */
+
 import { App } from 'obsidian';
 import UltimateTodoistSyncForObsidian from '../main';
 
+/**
+ * 数据库检查问题类型定义
+ * 用于描述检测到的各种数据不一致问题
+ */
 export interface DatabaseCheckIssue {
     type: 
-        // taskFileMapping 相关问题
-        | 'mapping_file_not_found'    // taskFileMapping 中的文件不存在
-        | 'mapping_task_not_in_todoist'  // taskFileMapping 中的 taskId 在 Todoist 不存在
-        | 'mapping_orphan'           // taskFileMapping 孤岛 (Todoist和Vault都没有)
-        | 'vault_task_no_mapping'    // Vault 有任务但 taskFileMapping 没有
-        // 数据一致性问题
-        | 'task_deleted_in_todoist'  // Vault+Mapping 有，但 Todoist 没有
-        | 'task_not_in_vault'        // Todoist 有，但 Vault 没有对应文件
-        | 'new_task_not_synced'      // Vault 有但 Todoist 没有 (新任务)
+        // ===== taskFileMapping 相关问题 =====
+        | 'mapping_file_not_found'    // taskFileMapping 中记录的文件在 Vault 中不存在
+        | 'mapping_task_not_in_todoist'  // taskFileMapping 中的 taskId 在 Todoist 中不存在（任务已删除或需要重建）
+        | 'mapping_orphan'           // taskFileMapping 孤岛 - Todoist 和 Vault 都没有，只有 mapping 记录
+        | 'vault_task_no_mapping'    // Vault 有任务但 taskFileMapping 没有记录（设置丢失）
+        
+        // ===== 数据一致性问题 =====
+        | 'task_deleted_in_todoist'  // Vault+Mapping 有，但 Todoist 没有（任务在 Todoist 端被删除）
+        | 'task_not_in_vault'        // Todoist+Mapping 有，但 Vault 文件不存在
+        | 'new_task_not_synced'      // Vault 有但 Todoist 没有（新创建的任务尚未同步）
         | 'content_mismatch'         // 内容不一致
         | 'status_mismatch'          // 完成状态不一致
         | 'priority_mismatch'        // 优先级不一致
         | 'label_mismatch'          // 标签不一致
         | 'project_mismatch'         // 项目不一致
         | 'line_number_mismatch'     // 行号不一致
-        | 'duplicate_task';          // 重复任务
-    filePath?: string;
-    taskId?: string;
-    details: string;
-    taskContent?: string;
-    obsidianContent?: string;
-    todoistContent?: string;
-    obsidianStatus?: boolean;
-    todoistStatus?: boolean;
-    dueDate?: string;
-    priority?: number;
-    obsidianPriority?: number;
-    todoistPriority?: number;
-    projectId?: string;
-    obsidianProjectId?: string;
-    todoistProjectId?: string;
-    projectName?: string;
-    lineNumber?: number;
-    obsidianLineNumber?: number;
-    mappingLineNumber?: number;
-    labels?: string[];
-    obsidianLabels?: string[];
-    todoistLabels?: string[];
+        | 'duplicate_task';          // 重复任务（同一文件多行同一任务）
+    
+    // 基本信息
+    filePath?: string;              // 文件路径
+    taskId?: string;                // 任务 ID
+    details: string;                 // 问题详情描述
+    lineNumber?: number;            // 行号（0-indexed）
+    
+    // 任务内容相关
+    taskContent?: string;           // 任务内容（通用）
+    obsidianContent?: string;       // Obsidian/Vault 中的任务内容
+    todoistContent?: string;        // Todoist 中的任务内容
+    
+    // 状态相关
+    obsidianStatus?: boolean;       // Obsidian 中的完成状态
+    todoistStatus?: boolean;        // Todoist 中的完成状态
+    
+    // 日期相关
+    dueDate?: string;               // 截止日期
+    
+    // 优先级相关
+    priority?: number;              // 优先级（通用）
+    obsidianPriority?: number;      // Obsidian 中的优先级
+    todoistPriority?: number;      // Todoist 中的优先级
+    
+    // 项目相关
+    projectId?: string;             // 项目 ID（通用）
+    obsidianProjectId?: string;    // Obsidian 中的项目 ID
+    todoistProjectId?: string;     // Todoist 中的项目 ID
+    projectName?: string;           // 项目名称
+    
+    // 行号相关
+    obsidianLineNumber?: number;   // Obsidian 中的行号
+    mappingLineNumber?: number;    // taskFileMapping 中记录的行号
+    
+    // 标签相关
+    labels?: string[];              // 标签（通用）
+    obsidianLabels?: string[];     // Obsidian 中的标签
+    todoistLabels?: string[];      // Todoist 中的标签
 }
 
+/**
+ * Vault 任务数据结构
+ * 表示从 Obsidian Vault 中扫描到的任务
+ */
 export interface VaultTask {
-    taskId: string;
-    content: string;
-    isCompleted: boolean;
-    filePath: string;
-    lineNumber: number;
-    labels: string[];
+    taskId: string;                 // 任务 ID（来自 todoist_id 元数据）
+    content: string;                // 任务内容（已去除元数据）
+    isCompleted: boolean;           // 是否已完成
+    filePath: string;              // 任务所在文件路径
+    lineNumber: number;            // 任务所在行号（0-indexed）
+    labels: string[];              // 任务标签（#tag 格式）
 }
 
+/**
+ * 缓存任务数据结构
+ * 表示从本地缓存中读取的任务（结合 syncData 和 taskFileMapping）
+ */
 export interface CacheTask {
-    taskId: string;
-    content: string;
-    isCompleted: boolean;
-    path: string;
-    dueDate?: string;
-    priority: number;
-    projectId: string;
-    labels: string[];
+    taskId: string;                 // 任务 ID
+    content: string;                // 任务内容
+    isCompleted: boolean;           // 是否已完成
+    path: string;                  // 任务所在文件路径
+    dueDate?: string;              // 截止日期
+    priority: number;               // 优先级 (1-4, 1 最高)
+    projectId: string;              // 项目 ID
+    labels: string[];              // 标签数组
 }
 
+/**
+ * Todoist 任务数据结构
+ * 表示从 Todoist API 获取的任务
+ */
 export interface TodoistTask {
-    taskId: string;
-    content: string;
-    isCompleted: boolean;
-    dueDate?: string;
-    priority: number;
-    projectId: string;
-    labels: string[];
+    taskId: string;                 // 任务 ID
+    content: string;                // 任务内容
+    isCompleted: boolean;           // 是否已完成
+    dueDate?: string;              // 截止日期
+    priority: number;               // 优先级 (1-4, 1 最高)
+    projectId: string;              // 项目 ID
+    labels: string[];              // 标签数组
 }
 
+/**
+ * 数据库检查结果
+ * 包含检查是否成功、问题数量、问题列表和统计摘要
+ */
 export interface DatabaseCheckResult {
-    success: boolean;
-    totalIssues: number;
-    issues: DatabaseCheckIssue[];
-    summary: {
+    success: boolean;               // 检查是否通过（无问题）
+    totalIssues: number;            // 问题总数
+    issues: DatabaseCheckIssue[];   // 问题列表
+    summary: {                      // 统计摘要
         // taskFileMapping 相关
-        mappingFileNotFound: number;
-        mappingTaskNotInTodoist: number;
-        mappingOrphan: number;
-        vaultTaskNoMapping: number;
+        mappingFileNotFound: number;        // taskFileMapping 中的文件不存在
+        mappingTaskNotInTodoist: number;   // taskFileMapping 中的任务在 Todoist 不存在
+        mappingOrphan: number;              // 孤岛 mapping
+        vaultTaskNoMapping: number;         // Vault 任务没有 mapping
+        
         // 数据一致性
-        taskDeletedInTodoist: number;
-        taskNotInVault: number;
-        newTaskNotSynced: number;
-        contentMismatch: number;
-        statusMismatch: number;
-        priorityMismatch: number;
-        labelMismatch: number;
-        projectMismatch: number;
-        lineNumberMismatch: number;
-        duplicateTask: number;
+        taskDeletedInTodoist: number;       // 任务在 Todoist 端被删除
+        taskNotInVault: number;             // Vault 文件丢失
+        newTaskNotSynced: number;           // 新任务未同步
+        contentMismatch: number;             // 内容不一致
+        statusMismatch: number;              // 状态不一致
+        priorityMismatch: number;            // 优先级不一致
+        labelMismatch: number;               // 标签不一致
+        projectMismatch: number;            // 项目不一致
+        lineNumberMismatch: number;         // 行号不一致
+        duplicateTask: number;              // 重复任务
     };
-    reportPath?: string;
+    reportPath?: string;             // 生成的报告文件路径
 }
 
+/**
+ * DatabaseChecker 类
+ * 
+ * 主要功能：
+ * 1. 扫描 Vault 中的任务
+ * 2. 从 Todoist 获取任务数据
+ * 3. 比对三个数据源（Vault、Todoist、taskFileMapping）
+ * 4. 生成详细的检查报告
+ */
 export class DatabaseChecker {
+    // Obsidian App 实例
     app: App;
+    // 插件主实例
     plugin: UltimateTodoistSyncForObsidian;
 
+    /**
+     * 构造函数
+     * @param app - Obsidian App 实例
+     * @param plugin - 插件主实例
+     */
     constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
         this.app = app;
         this.plugin = plugin;
     }
 
+    /**
+     * 主检查方法 - 执行完整的数据库一致性检查
+     * 
+     * 执行流程：
+     * 1. 扫描 Vault 中的所有任务
+     * 2. 从 Todoist Sync API 获取任务
+     * 3. 加载 taskFileMapping
+     * 4. 比对三个数据源
+     * 5. 生成检查报告
+     * 
+     * @param noticeCallback - 可选的进度回调函数
+     * @returns DatabaseCheckResult - 检查结果
+     */
     async checkDatabase(noticeCallback?: (message: string) => void): Promise<DatabaseCheckResult> {
+        // 初始化问题列表
         const issues: DatabaseCheckIssue[] = [];
+        
+        // 初始化统计摘要（各类型问题计数）
         const summary = {
-            mappingFileNotFound: 0,
-            mappingTaskNotInTodoist: 0,
-            mappingOrphan: 0,
-            vaultTaskNoMapping: 0,
-            taskDeletedInTodoist: 0,
-            taskNotInVault: 0,
-            newTaskNotSynced: 0,
-            contentMismatch: 0,
-            statusMismatch: 0,
-            priorityMismatch: 0,
-            labelMismatch: 0,
-            projectMismatch: 0,
-            lineNumberMismatch: 0,
-            duplicateTask: 0
+            mappingFileNotFound: 0,           // taskFileMapping 文件不存在
+            mappingTaskNotInTodoist: 0,       // taskFileMapping 任务在 Todoist 不存在
+            mappingOrphan: 0,                 // 孤岛 mapping
+            vaultTaskNoMapping: 0,            // Vault 任务无 mapping
+            taskDeletedInTodoist: 0,          // 任务在 Todoist 被删除
+            taskNotInVault: 0,                // Vault 文件丢失
+            newTaskNotSynced: 0,              // 新任务未同步
+            contentMismatch: 0,                // 内容不一致
+            statusMismatch: 0,                 // 状态不一致
+            priorityMismatch: 0,              // 优先级不一致
+            labelMismatch: 0,                 // 标签不一致
+            projectMismatch: 0,               // 项目不一致
+            lineNumberMismatch: 0,            // 行号不一致
+            duplicateTask: 0                  // 重复任务
         };
 
+        // 发送开始检查的通知
         if (noticeCallback) {
             noticeCallback('Starting data consistency check...');
         }
 
         try {
-            // Step 1: Scan Vault tasks
+            // ====== Step 1: 扫描 Vault 任务 ======
             if (noticeCallback) {
                 noticeCallback('Step 1/4: Scanning vault files...');
             }
+            // 扫描 Vault 中的所有任务，建立 taskId -> VaultTask 的映射
             const vaultTasksMap = await this.scanVaultTasks();
 
-            // Step 2: Get Todoist tasks from syncData
+            // ====== Step 2: 获取 Todoist 任务 ======
             if (noticeCallback) {
                 noticeCallback('Step 2/4: Loading Todoist data from syncData...');
             }
+            // 获取 syncData（如果未加载则先初始化）
             let syncData = this.plugin.todoistSyncAPI.getSyncData();
             if (!syncData) {
+                // 如果 syncData 为空，初始化同步
                 await this.plugin.todoistSyncAPI.initializeSync();
+                // 重新获取 syncData
                 syncData = this.plugin.todoistSyncAPI.getSyncData();
             }
+            // 从 syncData 中解析出 Todoist 任务
             const todoistTasksMap = this.getTodoistTasksFromSyncData(syncData);
 
-            // Step 3: Get taskFileMapping
+            // ====== Step 3: 获取 taskFileMapping ======
             if (noticeCallback) {
                 noticeCallback('Step 3/4: Loading taskFileMapping...');
             }
+            // 从设置中获取 taskFileMapping（任务 ID -> 文件路径和行号的映射）
             const taskFileMapping = this.plugin.settings.taskFileMapping || {};
 
-            // Step 4: Analyze differences
+            // ====== Step 4: 分析差异 ======
             if (noticeCallback) {
                 noticeCallback('Step 4/4: Analyzing differences...');
             }
 
+            // 比对三个数据源，找出所有不一致问题
             const result = await this.compareThreeSources(
                 vaultTasksMap,
                 todoistTasksMap,
                 taskFileMapping
             );
+            
+            // 将发现的问题添加到结果中
             issues.push(...result.issues);
+            // 合并统计摘要
             Object.assign(summary, result.summary);
 
+            // 计算问题总数
             const totalIssues = Object.values(summary).reduce((a, b) => a + b, 0);
+            // 记录日志
             this.plugin.logOperation?.log('DATABASE_CHECKED', `Database check completed: ${totalIssues} issues found`);
 
+            // ====== 生成报告 ======
             const reportPath = await this.generateReport({
                 success: totalIssues === 0,
                 totalIssues,
@@ -177,6 +273,7 @@ export class DatabaseChecker {
                 summary
             });
 
+            // 返回检查结果
             return {
                 success: totalIssues === 0,
                 totalIssues,
@@ -185,7 +282,9 @@ export class DatabaseChecker {
                 reportPath
             };
         } catch (error) {
+            // 检查失败，记录错误日志
             this.plugin.logOperation?.log('DATABASE_CHECK', `Database check failed: ${(error as Error).message}`);
+            // 返回失败结果
             return {
                 success: false,
                 totalIssues: 0,
@@ -199,29 +298,61 @@ export class DatabaseChecker {
         }
     }
 
+    /**
+     * 扫描 Vault 中的所有任务
+     * 
+     * 扫描逻辑：
+     * 1. 获取所有 .md 文件
+     * 2. 遍历每个文件的每一行
+     * 3. 查找包含 #todoist 标签的行
+     * 4. 提取 todoist_id 元数据作为任务 ID
+     * 5. 使用 taskParser 提取任务内容
+     * 
+     * @returns Map<string, VaultTask> - taskId 到 VaultTask 的映射
+     */
     async scanVaultTasks(): Promise<Map<string, VaultTask>> {
+        // 创建 taskId -> VaultTask 的映射
         const vaultTasksMap = new Map<string, VaultTask>();
+        
+        // 获取所有 Markdown 文件
         const files = this.app.vault.getFiles().filter(f => f.extension === 'md');
 
+        // 遍历每个文件
         for (const file of files) {
             try {
+                // 读取文件内容
                 const content = await this.app.vault.cachedRead(file);
+                // 按行分割
                 const lines = content.split('\n');
 
+                // 遍历每一行
                 for (let i = 0; i < lines.length; i++) {
                     const line = lines[i];
+                    
+                    // 检查是否包含 #todoist 标签
                     if (line.includes('#todoist')) {
+                        // 使用正则提取 todoist_id 元数据
                         const match = line.match(/%%\[todoist_id::\s*([\w-]+)\]%%/);
+                        
+                        // 如果找到 todoist_id
                         if (match && match[1]) {
-                            const taskId = match[1];
+                            const taskId = match[1];  // 提取任务 ID
+                            
+                            // 使用 taskParser 提取任务内容（去除元数据、链接、标签等）
                             const taskContent = this.plugin.taskParser.getTaskContentFromLineText(line);
+                            
+                            // 检查任务是否已完成（[x] 表示已完成）
                             const isCompleted = /\[x\]/i.test(line);
+                            
+                            // 提取标签（#tag 格式）
                             const labels = this.extractLabelsFromLine(line);
 
+                            // 如果 taskId 已存在，跳过（避免重复）
                             if (vaultTasksMap.has(taskId)) {
                                 continue;
                             }
 
+                            // 将任务添加到映射中
                             vaultTasksMap.set(taskId, {
                                 taskId,
                                 content: taskContent,
@@ -234,6 +365,7 @@ export class DatabaseChecker {
                     }
                 }
             } catch (error) {
+                // 读取文件失败，记录错误
                 console.error(`Error reading file ${file.path}:`, error);
             }
         }
@@ -241,24 +373,39 @@ export class DatabaseChecker {
         return vaultTasksMap;
     }
 
+    /**
+     * 从本地缓存加载任务（结合 syncData 和 taskFileMapping）
+     * 
+     * 注意：此方法目前未被 checkDatabase 使用
+     * 仅保留作为备用方法
+     * 
+     * @returns Map<string, CacheTask> - taskId 到 CacheTask 的映射
+     */
     loadCacheTasks(): Map<string, CacheTask> {
+        // 创建 taskId -> CacheTask 的映射
         const cacheTasksMap = new Map<string, CacheTask>();
         
-        // Ensure syncData is loaded
+        // 确保 syncData 已加载
         let syncData = this.plugin.todoistSyncAPI.getSyncData();
         if (!syncData) {
             console.warn('[DatabaseChecker] syncData not loaded, attempting to load...');
-            // Can't await here, return empty map
+            // 无法 await，返回空映射
             return cacheTasksMap;
         }
         
+        // 获取 taskFileMapping
         const taskFileMapping = this.plugin.settings.taskFileMapping || {};
+        // 从 syncData 获取任务列表
         const items = syncData.items || [];
         
+        // 遍历每个任务
         for (const task of items) {
             if (!task) continue;
+            // 查找任务的 mapping 记录
             const mapping = taskFileMapping[task.id];
             if (!mapping) continue;
+            
+            // 将任务添加到缓存映射
             cacheTasksMap.set(task.id, {
                 taskId: task.id,
                 content: task.content,
@@ -274,20 +421,31 @@ export class DatabaseChecker {
         return cacheTasksMap;
     }
 
+    /**
+     * 从 Todoist API 获取活动任务
+     * 
+     * 注意：此方法目前未被 checkDatabase 使用
+     * checkDatabase 直接使用 syncData 中的任务数据
+     * 
+     * @returns Map<string, TodoistTask> - taskId 到 TodoistTask 的映射
+     */
     async fetchTodoistTasks(): Promise<Map<string, TodoistTask>> {
         const todoistTasksMap = new Map<string, TodoistTask>();
+        // 调用 Todoist API 获取活动任务
         const todoistTasks = await this.plugin.todoistSyncAPI.GetActiveTasks({});
         
         if (!todoistTasks) {
             return todoistTasksMap;
         }
         
+        // 遍历每个任务
         for (const task of todoistTasks) {
             if (!task) continue;
             const taskAny = task as any;
             todoistTasksMap.set(task.id, {
                 taskId: task.id,
                 content: task.content || '',
+                // 判断完成状态：优先使用 isCompleted，否则检查 completedAt
                 isCompleted: taskAny.isCompleted || taskAny.completedAt !== null || false,
                 dueDate: task.due?.date,
                 priority: task.priority || 4,
@@ -299,18 +457,33 @@ export class DatabaseChecker {
         return todoistTasksMap;
     }
 
+    /**
+     * 从 syncData 中获取 Todoist 任务
+     * 
+     * 此方法是 checkDatabase 的主要数据来源
+     * 相比 fetchTodoistTasks 直接使用本地缓存，性能更好
+     * 
+     * @param syncData - Todoist Sync API 返回的原始数据
+     * @returns Map<string, TodoistTask> - taskId 到 TodoistTask 的映射
+     */
     getTodoistTasksFromSyncData(syncData: Record<string, any> | null): Map<string, TodoistTask> {
         const todoistTasksMap = new Map<string, TodoistTask>();
+        
+        // 检查 syncData 是否有效
         if (!syncData || !syncData.items) {
             return todoistTasksMap;
         }
         
+        // 遍历 syncData 中的所有任务
         for (const task of syncData.items) {
             if (!task) continue;
             const taskAny = task as any;
+            
+            // 将任务添加到映射
             todoistTasksMap.set(task.id, {
                 taskId: task.id,
                 content: task.content || '',
+                // 判断完成状态
                 isCompleted: taskAny.isCompleted || taskAny.completedAt !== null || false,
                 dueDate: task.due?.date,
                 priority: task.priority || 4,
@@ -322,12 +495,40 @@ export class DatabaseChecker {
         return todoistTasksMap;
     }
 
+    /**
+     * 比较三个数据源，找出所有不一致问题
+     * 
+     * 三个数据源：
+     * 1. vaultTasksMap - Vault 中扫描到的任务
+     * 2. todoistTasksMap - Todoist 中的任务
+     * 3. taskFileMapping - 任务 ID 到文件路径的映射
+     * 
+     * 8 种组合情况：
+     * | 情况 | Vault | Todoist | Mapping | 说明 |
+     * |------|-------|---------|---------|------|
+     * | 1    | ✓     | ✓       | ✓       | 全部存在，检查一致性 |
+     * | 2    | ✓     | ✓       | ✗       | mapping 丢失 |
+     * | 3    | ✓     | ✗       | ✓       | 任务在 Todoist 被删除 |
+     * | 4    | ✓     | ✗       | ✗       | 新任务未同步 |
+     * | 5    | ✗     | ✓       | ✓       | Vault 文件丢失 |
+     * | 6    | ✗     | ✓       | ✗       | 其他设备添加的任务（正常）|
+     * | 7    | ✗     | ✗       | ✓       | mapping 孤岛 |
+     * | 8    | ✗     | ✗       | ✗       | 不可能情况 |
+     * 
+     * @param vaultTasksMap - Vault 任务映射
+     * @param todoistTasksMap - Todoist 任务映射
+     * @param taskFileMapping - taskFileMapping 映射
+     * @returns 问题和统计摘要
+     */
     async compareThreeSources(
         vaultTasksMap: Map<string, VaultTask>,
         todoistTasksMap: Map<string, TodoistTask>,
         taskFileMapping: Record<string, { filePath: string; lineNumber: number }>
     ): Promise<{ issues: DatabaseCheckIssue[], summary: DatabaseCheckResult['summary'] }> {
+        // 初始化问题列表
         const issues: DatabaseCheckIssue[] = [];
+        
+        // 初始化统计摘要
         const summary = {
             mappingFileNotFound: 0,
             mappingTaskNotInTodoist: 0,
@@ -345,12 +546,14 @@ export class DatabaseChecker {
             duplicateTask: 0
         };
 
-        // Get all files in vault for path validation
+        // 获取 Vault 中所有文件路径（用于验证 taskFileMapping）
         const vaultFiles = new Set(this.app.vault.getFiles().map(f => f.path));
 
-        // Check taskFileMapping validity
+        // ====== Part 1: 检查 taskFileMapping 的有效性 ======
+        
+        // 遍历 taskFileMapping 中的每条记录
         for (const [taskId, mapping] of Object.entries(taskFileMapping)) {
-            // Check if file exists
+            // 检查文件是否存在
             if (!vaultFiles.has(mapping.filePath)) {
                 issues.push({
                     type: 'mapping_file_not_found',
@@ -362,7 +565,7 @@ export class DatabaseChecker {
                 summary.mappingFileNotFound++;
             }
 
-            // Check if task exists in Todoist
+            // 检查任务是否存在于 Todoist
             if (!todoistTasksMap.has(taskId)) {
                 issues.push({
                     type: 'mapping_task_not_in_todoist',
@@ -375,25 +578,32 @@ export class DatabaseChecker {
             }
         }
 
-        // Collect all task IDs
+        // ====== Part 2: 收集所有任务 ID ======
+        
+        // 合并三个数据源中的所有任务 ID
         const allTaskIds = new Set<string>();
         for (const taskId of vaultTasksMap.keys()) allTaskIds.add(taskId);
         for (const taskId of todoistTasksMap.keys()) allTaskIds.add(taskId);
         for (const taskId of Object.keys(taskFileMapping)) allTaskIds.add(taskId);
 
+        // ====== Part 3: 分析每个任务的组合情况 ======
+        
         for (const taskId of allTaskIds) {
+            // 获取三个数据源中该任务的状态
             const vaultTask = vaultTasksMap.get(taskId);
             const todoistTask = todoistTasksMap.get(taskId);
             const mapping = taskFileMapping[taskId];
 
+            // 判断任务在各个数据源中的存在状态
             const inVault = !!vaultTask;
             const inTodoist = !!todoistTask;
             const inMapping = !!mapping;
 
             // ============ 8 种组合情况 ============
 
-            // 情况2: Vault ✓ + Todoist ✓ + Mapping ✗
-            // settings丢失，需要重建mapping
+            // ====== 情况 2: Vault ✓ + Todoist ✓ + Mapping ✗ ======
+            // 说明：任务在 Vault 和 Todoist 都存在，但 taskFileMapping 丢失
+            // 解决方案：需要重建 mapping
             if (inVault && inTodoist && !inMapping) {
                 issues.push({
                     type: 'vault_task_no_mapping',
@@ -409,8 +619,9 @@ export class DatabaseChecker {
                 summary.vaultTaskNoMapping++;
             }
 
-            // 情况3: Vault ✓ + Todoist ✗ + Mapping ✓
-            // Todoist端删除任务
+            // ====== 情况 3: Vault ✓ + Todoist ✗ + Mapping ✓ ======
+            // 说明：任务在 Vault 和 taskFileMapping 中存在，但在 Todoist 中不存在
+            // 可能原因：任务在 Todoist 端被删除，或者 legacy ID 需要重建
             else if (inVault && !inTodoist && inMapping) {
                 issues.push({
                     type: 'task_deleted_in_todoist',
@@ -424,8 +635,9 @@ export class DatabaseChecker {
                 summary.taskDeletedInTodoist++;
             }
 
-            // 情况4: Vault ✓ + Todoist ✗ + Mapping ✗
-            // 新任务未同步
+            // ====== 情况 4: Vault ✓ + Todoist ✗ + Mapping ✗ ======
+            // 说明：任务在 Vault 中存在，但在 Todoist 和 taskFileMapping 中都不存在
+            // 可能原因：新创建的任务尚未同步到 Todoist
             else if (inVault && !inTodoist && !inMapping) {
                 issues.push({
                     type: 'new_task_not_synced',
@@ -439,8 +651,9 @@ export class DatabaseChecker {
                 summary.newTaskNotSynced++;
             }
 
-            // 情况5: Vault ✗ + Todoist ✓ + Mapping ✓
-            // Vault文件丢失
+            // ====== 情况 5: Vault ✗ + Todoist ✓ + Mapping ✓ ======
+            // 说明：任务在 Todoist 和 taskFileMapping 中存在，但 Vault 文件丢失
+            // 可能原因：文件被删除或移动
             else if (!inVault && inTodoist && inMapping) {
                 issues.push({
                     type: 'task_not_in_vault',
@@ -454,15 +667,17 @@ export class DatabaseChecker {
                 summary.taskNotInVault++;
             }
 
-            // 情况6: Vault ✗ + Todoist ✓ + Mapping ✗
-            // 其他设备添加的任务
+            // ====== 情况 6: Vault ✗ + Todoist ✓ + Mapping ✗ ======
+            // 说明：任务只在 Todoist 中存在
+            // 可能原因：其他设备添加的任务（正常情况，不记录为问题）
             else if (!inVault && inTodoist && !inMapping) {
-                // This is normal - task was added from another device
-                // No issue, just informational
+                // 这是正常情况 - 任务是从其他设备添加的
+                // 不记录为问题
             }
 
-            // 情况7: Vault ✗ + Todoist ✗ + Mapping ✓
-            // mapping孤岛
+            // ====== 情况 7: Vault ✗ + Todoist ✗ + Mapping ✓ ======
+            // 说明：只有 taskFileMapping 存在，任务在 Vault 和 Todoist 都不存在
+            // 这是孤岛 mapping，需要清理
             else if (!inVault && !inTodoist && inMapping) {
                 issues.push({
                     type: 'mapping_orphan',
@@ -475,10 +690,11 @@ export class DatabaseChecker {
                 summary.mappingOrphan++;
             }
 
-            // 情况1: Vault ✓ + Todoist ✓ + Mapping ✓
-            // 全部正常，检查数据一致性
+            // ====== 情况 1: Vault ✓ + Todoist ✓ + Mapping ✓ ======
+            // 说明：三个数据源都存在，这是正常情况
+            // 需要进一步检查数据一致性
             else if (inVault && inTodoist && inMapping) {
-                // Check line number
+                // ---- 检查行号一致性 ----
                 if (vaultTask!.lineNumber !== mapping.lineNumber) {
                     issues.push({
                         type: 'line_number_mismatch',
@@ -492,7 +708,8 @@ export class DatabaseChecker {
                     summary.lineNumberMismatch++;
                 }
 
-                // Check content
+                // ---- 检查内容一致性 ----
+                // 注意：这里直接比较可能有问题，因为 Vault 内容是处理过的
                 if (vaultTask!.content.trim() !== todoistTask!.content.trim()) {
                     issues.push({
                         type: 'content_mismatch',
@@ -506,7 +723,7 @@ export class DatabaseChecker {
                     summary.contentMismatch++;
                 }
 
-                // Check status
+                // ---- 检查完成状态一致性 ----
                 if (vaultTask!.isCompleted !== todoistTask!.isCompleted) {
                     issues.push({
                         type: 'status_mismatch',
@@ -520,7 +737,8 @@ export class DatabaseChecker {
                     summary.statusMismatch++;
                 }
 
-                // Check priority
+                // ---- 检查优先级一致性 ----
+                // 从 Vault 标签中推断优先级（p1=最高, p4=最低）
                 const vaultPriority = 5 - (vaultTask!.labels?.some(l => l.startsWith('p1')) ? 1 : 
                                            vaultTask!.labels?.some(l => l.startsWith('p2')) ? 2 : 
                                            vaultTask!.labels?.some(l => l.startsWith('p3')) ? 3 : 4) || 4;
@@ -537,9 +755,10 @@ export class DatabaseChecker {
                     summary.priorityMismatch++;
                 }
 
-                // Check labels
+                // ---- 检查标签一致性 ----
                 const obsidianLabels = vaultTask!.labels || [];
                 const todoistLabels = todoistTask!.labels || [];
+                // 比较标签差异
                 const labelDiff = obsidianLabels.filter(l => !todoistLabels.includes(l)).length > 0 ||
                                  todoistLabels.filter(l => !obsidianLabels.includes(l)).length > 0;
                 if (labelDiff) {
@@ -555,10 +774,12 @@ export class DatabaseChecker {
                     summary.labelMismatch++;
                 }
 
-                // Check project (optional - might not be needed if using default project)
+                // ---- 检查项目一致性（可选）----
+                // 从 fileMetadata 中获取默认项目 ID
                 if (mapping && vaultTask!.filePath) {
                     const fileMetadata = this.plugin.settings.fileMetadata?.[vaultTask!.filePath];
                     const mappingProjectId = fileMetadata?.defaultProjectId;
+                    // 如果映射中指定了项目 ID，检查是否与 Todoist 一致
                     if (mappingProjectId && mappingProjectId !== todoistTask!.projectId) {
                         issues.push({
                             type: 'project_mismatch',
@@ -578,23 +799,52 @@ export class DatabaseChecker {
         return { issues, summary };
     }
 
+    /**
+     * 从任务行中提取标签
+     * 
+     * 提取逻辑：
+     * 使用正则匹配所有 #tag 格式的标签
+     * 排除 #todoist 标签（这是同步标记，不是用户标签）
+     * 
+     * @param line - 任务行文本
+     * @returns string[] - 标签数组（不含 # 前缀）
+     */
     private extractLabelsFromLine(line: string): string[] {
         const labels: string[] = [];
+        // 匹配 # 后面跟着字母、数字、下划线或连字符
         const labelRegex = /#(\w+)/g;
         let match;
+        
+        // 遍历所有匹配的标签
         while ((match = labelRegex.exec(line)) !== null) {
+            // 排除 #todoist（这是同步标记）
             if (match[1] !== 'todoist') {
+                // 添加标签（不含 # 前缀）
                 labels.push(match[1]);
             }
         }
         return labels;
     }
 
+    /**
+     * 生成数据库检查报告
+     * 
+     * 报告格式：Markdown
+     * 包含内容：
+     * 1. 检查状态摘要
+     * 2. 数据源概览表格
+     * 3. 各类问题的详细列表
+     * 4. 内容/状态/优先级/标签/行号等详细对比信息
+     * 
+     * @param result - 数据库检查结果
+     * @returns string | undefined - 报告文件路径，失败时返回 undefined
+     */
     async generateReport(result: DatabaseCheckResult): Promise<string | undefined> {
+        // 生成时间戳作为文件名的一部分
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const reportFilename = `ultimate-todoist-sync-database-check-${timestamp}.md`;
 
-        // Get statistics from issues
+        // 从问题中提取统计数据
         const vaultTasksWithMapping = result.issues.filter(i => 
             (i.type === 'content_mismatch' || i.type === 'status_mismatch' || 
              i.type === 'priority_mismatch' || i.type === 'label_mismatch' ||
@@ -607,8 +857,9 @@ export class DatabaseChecker {
         const taskNotInVault = result.summary.taskNotInVault;
         const mappingOrphan = result.summary.mappingOrphan;
         const mappingFileNotFound = result.summary.mappingFileNotFound;
-        const mappingTaskNotInTodoist = result.summary.mappingTaskNotNotInTodoist;
+        const mappingTaskNotInTodoist = result.summary.mappingTaskNotInTodoist;
 
+        // 生成 Markdown 报告内容
         let markdown = `# Database Check Report
 
 Generated: ${new Date().toLocaleString()}
@@ -639,10 +890,11 @@ Generated: ${new Date().toLocaleString()}
 ## Detailed Issues
 
 `;
+        // 如果没有问题
         if (result.issues.length === 0) {
             markdown += '*No issues found. Database is healthy.*\n';
         } else {
-            // Group issues by type
+            // 按问题类型分组
             const groupedByType = new Map<string, DatabaseCheckIssue[]>();
             for (const issue of result.issues) {
                 if (!groupedByType.has(issue.type)) {
@@ -651,6 +903,7 @@ Generated: ${new Date().toLocaleString()}
                 groupedByType.get(issue.type)!.push(issue);
             }
 
+            // 问题类型标签映射
             const typeLabels: Record<string, string> = {
                 'mapping_file_not_found': 'Mapping File Not Found',
                 'mapping_task_not_in_todoist': 'Mapping Task Not in Todoist',
@@ -668,6 +921,7 @@ Generated: ${new Date().toLocaleString()}
                 'duplicate_task': 'Duplicate Task'
             };
 
+            // 优先级标签映射
             const priorityLabels: Record<number, string> = {
                 1: 'P1 (Low)',
                 2: 'P2 (Medium)',
@@ -675,21 +929,26 @@ Generated: ${new Date().toLocaleString()}
                 4: 'P4 (Urgent)'
             };
 
-            // Output each issue type with details
+            // 输出每种问题类型
             for (const [type, issues] of groupedByType) {
                 const label = typeLabels[type] || type;
                 markdown += `### ${label} (${issues.length})\n\n`;
 
-                // Create table for this issue type
+                // 创建该问题类型的表格
                 markdown += `| # | Task ID | Content | File | Line | Status | Details |\n`;
                 markdown += `|---|---------|---------|------|------|--------|---------|\n`;
                 
+                // 遍历每个问题
                 for (let i = 0; i < issues.length; i++) {
                     const issue = issues[i];
+                    // 截取任务内容
                     const taskContent = issue.taskContent?.substring(0, 30) || issue.obsidianContent?.substring(0, 30) || '-';
+                    // 提取文件名
                     const filePath = issue.filePath ? issue.filePath.split('/').pop() : '-';
+                    // 行号格式化
                     const lineNum = issue.lineNumber !== undefined ? String(issue.lineNumber + 1) : '-';
                     
+                    // 状态列
                     let statusCol = '';
                     if (issue.obsidianStatus !== undefined && issue.todoistStatus !== undefined) {
                         const obs = issue.obsidianStatus ? '✅' : '⬜';
@@ -709,7 +968,7 @@ Generated: ${new Date().toLocaleString()}
                 }
                 markdown += '\n';
 
-                // Add detailed comparison for mismatch types
+                // 为内容不一致问题添加详细对比
                 if (type === 'content_mismatch') {
                     markdown += `#### Content Details\n\n`;
                     for (let i = 0; i < Math.min(issues.length, 10); i++) {
@@ -728,6 +987,7 @@ Generated: ${new Date().toLocaleString()}
                     }
                 }
 
+                // 为状态不一致问题添加详细对比
                 if (type === 'status_mismatch') {
                     markdown += `#### Status Details\n\n`;
                     for (let i = 0; i < Math.min(issues.length, 10); i++) {
@@ -742,6 +1002,7 @@ Generated: ${new Date().toLocaleString()}
                     markdown += '\n';
                 }
 
+                // 为优先级不一致问题添加详细对比
                 if (type === 'priority_mismatch') {
                     markdown += `#### Priority Details\n\n`;
                     for (let i = 0; i < Math.min(issues.length, 10); i++) {
@@ -756,6 +1017,7 @@ Generated: ${new Date().toLocaleString()}
                     markdown += '\n';
                 }
 
+                // 为标签不一致问题添加详细对比
                 if (type === 'label_mismatch') {
                     markdown += `#### Label Details\n\n`;
                     for (let i = 0; i < Math.min(issues.length, 10); i++) {
@@ -770,6 +1032,7 @@ Generated: ${new Date().toLocaleString()}
                     markdown += '\n';
                 }
 
+                // 为行号不一致问题添加详细对比
                 if (type === 'line_number_mismatch') {
                     markdown += `#### Line Number Details\n\n`;
                     for (let i = 0; i < Math.min(issues.length, 10); i++) {
@@ -790,7 +1053,7 @@ Generated: ${new Date().toLocaleString()}
 `;
 
         try {
-            // Create report in vault root
+            // 在 Vault 根目录创建报告文件
             const reportPath = reportFilename;
             await this.app.vault.create(reportPath, markdown);
 
