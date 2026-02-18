@@ -52,7 +52,7 @@ const REGEX = {
     TODOIST_TAG: new RegExp(`^[\\s]*[-] \\[[x ]\\] [\\s\\S]*${keywords.TODOIST_TAG}[\\s\\S]*$`, "i"),
     TODOIST_ID: /\[todoist_id::\s*\w+\]/,
     TODOIST_ID_NUM:/\[todoist_id::\s*(\S+)\]/,
-    TODOIST_LINK:/\[link\]\(.*?\)/,
+    TODOIST_LINK:/\[link\]\(https?:\/\/[^)]*todoist\.com[^)]*\)/,
     DUE_DATE_WITH_EMOJ: new RegExp(`(${keywords.DUE_DATE})\\s?\\d{4}-\\d{2}-\\d{2}`),
     DUE_DATE : new RegExp(`(?:${keywords.DUE_DATE})\\s?(\\d{4}-\\d{2}-\\d{2})`),
     PROJECT_NAME: /\[project::\s*(.*?)\]/,
