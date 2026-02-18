@@ -22,7 +22,7 @@ export interface UltimateTodoistSyncSettings {
 		[taskId: string]: {
 			filePath: string;
 			lineNumber: number;
-			status?: 'active' | 'nonActive' | 'conflicted';
+			status?: 'active' | 'nonActive' | 'conflicted' | 'issue';
 			syncEnabled?: boolean;
 		};
 	};

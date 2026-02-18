@@ -939,10 +939,15 @@ export class CacheOperation   {
                                 };
                                 this.plugin.logOperation?.log('CACHE_TASK_NONACTIVE', `Task ${taskInfo.taskId} marked as nonActive (completed in Vault, not in Todoist)`, filePath, taskInfo.taskId);
                             } else {
-                                // 未完成 + 找不到 → 记录为无效
-                                console.log(`Task ${taskId} (original: ${taskInfo.taskId}) not found in Todoist, will be removed...`);
-                                invalidTaskIds.push(taskInfo.taskId);
-                                this.plugin.logOperation?.log('CACHE_TASK_DELETED', `Task ${taskInfo.taskId} not found in Todoist during rebuild`, filePath, taskInfo.taskId);
+                                // 未完成 + 找不到 → 标记为 issue
+                                console.log(`[rebuildCache] Task ${taskInfo.taskId} is incomplete in Vault but not found in Todoist, marking as issue...`);
+                                this.plugin.settings.taskFileMapping[taskInfo.taskId] = {
+                                    filePath: filePath,
+                                    lineNumber: taskInfo.lineNumber,
+                                    status: 'issue',
+                                    syncEnabled: false
+                                };
+                                this.plugin.logOperation?.log('CACHE_TASK_ISSUE', `Task ${taskInfo.taskId} marked as issue (incomplete in Vault, not in Todoist)`, filePath, taskInfo.taskId);
                             }
                             // 跳过此任务
                             continue;
