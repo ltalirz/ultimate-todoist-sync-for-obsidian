@@ -958,13 +958,15 @@ export class CacheOperation   {
                         const mappingTaskId = idMapping[taskInfo.taskId] || taskInfo.taskId;
                         
                         // 检查完成状态
-                        const todoistIsCompleted = task.isCompleted || false;
+                        const todoistIsCompleted = (task as any).checked || false;
                         const obsidianIsCompleted = taskInfo.isCompleted;
                         
                         // 检测内容冲突
                         const contentConflict = obsidianContent.trim() !== todoistContent.trim();
                         // 检测状态冲突
                         const statusConflict = obsidianIsCompleted !== todoistIsCompleted;
+                        console.log(task)
+                        console.log(taskInfo)
                         
                         // 如果有冲突，添加到冲突列表
                         if (contentConflict || statusConflict) {

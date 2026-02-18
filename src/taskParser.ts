@@ -346,7 +346,7 @@ export class TaskParser   {
     //task status compare
     taskStatusCompare(lineTask:Object,todoistTask:Object) {
         //status 是否修改
-        const statusModified = (lineTask.isCompleted === todoistTask.isCompleted)
+        const statusModified = (lineTask.isCompleted === (todoistTask as any).checked)
         //console.log(lineTask)
         //console.log(todoistTask)
         return(statusModified)

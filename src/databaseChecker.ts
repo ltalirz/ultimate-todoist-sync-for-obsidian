@@ -409,7 +409,7 @@ export class DatabaseChecker {
             cacheTasksMap.set(task.id, {
                 taskId: task.id,
                 content: task.content,
-                isCompleted: task.isCompleted || false,
+                isCompleted: (task as any).checked || false,
                 path: mapping.filePath,
                 dueDate: task.due?.date,
                 priority: task.priority || 4,
@@ -450,7 +450,7 @@ export class DatabaseChecker {
                 taskId: task.id,
                 content: task.content || '',
                 // 判断完成状态
-                isCompleted: taskAny.isCompleted || taskAny.completedAt !== null || false,
+                isCompleted: (taskAny as any).checked || taskAny.completedAt !== null || false,
                 dueDate: task.due?.date,
                 priority: task.priority || 4,
                 projectId: task.projectId || '',
@@ -580,7 +580,7 @@ export class DatabaseChecker {
                     obsidianContent: vaultTask!.content,
                     todoistContent: todoistTask!.content,
                     obsidianStatus: vaultTask!.isCompleted,
-                    todoistStatus: todoistTask!.isCompleted
+                    todoistStatus: (todoistTask as any).checked || false
                 });
                 summary.vaultTaskNoMapping++;
             }
@@ -690,15 +690,15 @@ export class DatabaseChecker {
                 }
 
                 // ---- 检查完成状态一致性 ----
-                if (vaultTask!.isCompleted !== todoistTask!.isCompleted) {
+                if (vaultTask!.isCompleted !== (todoistTask as any).checked) {
                     issues.push({
                         type: 'status_mismatch',
                         filePath: vaultTask!.filePath,
                         taskId,
                         lineNumber: vaultTask!.lineNumber,
-                        details: `Status mismatch: Vault is ${vaultTask!.isCompleted ? 'completed' : 'incomplete'}, Todoist is ${todoistTask!.isCompleted ? 'completed' : 'incomplete'}`,
+                        details: `Status mismatch: Vault is ${vaultTask!.isCompleted ? 'completed' : 'incomplete'}, Todoist is ${(todoistTask as any).checked ? 'completed' : 'incomplete'}`,
                         obsidianStatus: vaultTask!.isCompleted,
-                        todoistStatus: todoistTask!.isCompleted
+                    todoistStatus: (todoistTask as any).checked || false
                     });
                     summary.statusMismatch++;
                 }
