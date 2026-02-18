@@ -997,42 +997,24 @@ export class CacheOperation   {
             }
 
             // ==========================================================================================
-            // Step 5: 解决冲突
+            // Step 5: 记录冲突（暂不处理）
             // ==========================================================================================
             // 
             // 【说明】
-            // 如果检测到冲突，弹出对话框让用户选择解决方式
-            // 
-            // 【解决选项】
-            // - obsidian: 用 Obsidian 内容覆盖 Todoist
-            // - todoist: 用 Todoist 内容覆盖 Obsidian
-            // - skip: 跳过，不做任何修改
-            // 
-            // 【ConflictResolutionModal】
-            // 显示冲突列表，让用户逐一选择解决方式
-            // 用户选择后，调用 resolveConflicts 执行实际的更新操作
+            // 冲突检测逻辑较复杂，需要考虑太多情况，暂不自动处理
+            // 只记录冲突信息，留待后续完善
             // 
             // ==========================================================================================
 
-            // Step 5: Resolve conflicts
+            // Step 5: Record conflicts (not processed yet)
             if (conflicts.length > 0) {
-                if (noticeCallback) {
-                    noticeCallback(`Found ${conflicts.length} conflicts. Please resolve in dialog...`);
+                console.log(`[rebuildCache] Found ${conflicts.length} conflicts (not processed yet):`);
+                for (const conflict of conflicts) {
+                    console.log(`  - Task ${conflict.taskId} in ${conflict.filePath}:${conflict.lineNumber}`);
+                    console.log(`    Obsidian: "${conflict.obsidianContent}"`);
+                    console.log(`    Todoist: "${conflict.todoistContent}"`);
                 }
-                
-                // 弹出冲突解决对话框
-                await new Promise<void>((resolve) => {
-                    new ConflictResolutionModal(
-                        this.app,
-                        this.plugin,
-                        conflicts,
-                        async (resolutions) => {
-                            // 执行冲突解决
-                            await this.resolveConflicts(resolutions, conflicts);
-                            resolve();
-                        }
-                    );
-                });
+                this.plugin.logOperation?.log('CACHE_REBUILT', `Found ${conflicts.length} conflicts during rebuild`);
             }
             
             // ==========================================================================================
@@ -1050,7 +1032,7 @@ export class CacheOperation   {
             
             // 构建结果消息
             const invalidMsg = invalidTaskIds.length > 0 ? ` (${invalidTaskIds.length} tasks not found in Todoist removed)` : '';
-            const conflictMsg = conflicts.length > 0 ? ` (${conflicts.length} conflicts resolved)` : '';
+            const conflictMsg = conflicts.length > 0 ? ` (${conflicts.length} conflicts found, not processed)` : '';
             const convertedMsg = convertedCount > 0 ? ` (${convertedCount} legacy IDs converted)` : '';
             const message = `Cache rebuilt! ${processedCount} tasks processed.${convertedMsg}${invalidMsg}${conflictMsg}`;
             this.plugin.logOperation?.log('CACHE_REBUILT', `Cache rebuilt successfully! ${processedCount} tasks processed.${convertedMsg}${invalidMsg}${conflictMsg}`);
