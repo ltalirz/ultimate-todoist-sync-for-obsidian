@@ -1056,50 +1056,7 @@ export class CacheOperation   {
     }
 
     // ==========================================================================================
-    // extractTaskContent - 提取任务内容（辅助方法）
-    // ==========================================================================================
-    // 
-    // 【功能】
-    // 从任务行中提取纯文本内容，去除各种标记
-    // 
-    // 【处理步骤】
-    // 1. 去掉 checkbox 标记 [- ] 或 [x]
-    // 2. 去掉 #todoist 标签
-    // 3. 去掉 todoist_id 元数据 %%[todoist_id:: xxx]%%
-    // 4. 去掉 link [link](url)
-    // 5. 去掉日期 🗓️📅📆🗓 2024-01-01
-    // 6. 去掉优先级 !!1 !!2 !!3 !!4
-    // 
-    // 【注意】
-    // 此方法是 private，只在类内部使用
-    // 
-    // ==========================================================================================
-
-    /**
-     * 从任务行中提取纯文本内容
-     * @param line - 任务行文本
-     * @returns 提取后的纯文本内容
-     */
-    private extractTaskContent(line: string): string {
-        // 去掉 checkbox 标记 [- ] 或 [x]
-        let content = line.replace(/^(\s*)([-*])\s+\[(x|X| )\]\s*/, '');
-        // 去掉 #todoist 标签
-        content = content.replace(/#todoist/g, '').trim();
-        // 去掉 todoist_id 元数据
-        content = content.replace(/%%\[todoist_id::\s*\w+\]%%/g, '').trim();
-        // 去掉 link
-        content = content.replace(/\[link\]\([^)]+\)/g, '').trim();
-        // 去掉日期
-        // eslint-disable-next-line no-misleading-character-class
-        content = content.replace(/[🗓️📅📆🗓]\s*\d{4}-\d{2}-\d{2}/gu, '').trim();
-        // 去掉优先级 !!1 !!2 !!3 !!4
-        content = content.replace(/\s!![1-4]\s/g, ' ').trim();
-        
-        return content;
-    }
-
-    // ==========================================================================================
-    // resolveConflicts - 解决冲突（辅助方法）
+    // resolveConflicts - 解决冲突（辅助方法，暂未使用）
     // ==========================================================================================
     // 
     // 【功能】
@@ -1145,7 +1102,7 @@ export class CacheOperation   {
                         
                         // 找到对应行并替换内容
                         if (lines[conflict.lineNumber]) {
-                            const oldContent = this.extractTaskContent(lines[conflict.lineNumber]);
+                            const oldContent = this.plugin.taskParser.getTaskContentFromLineText(lines[conflict.lineNumber]);
                             lines[conflict.lineNumber] = lines[conflict.lineNumber].replace(
                                 oldContent,
                                 conflict.todoistContent
