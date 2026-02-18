@@ -865,9 +865,16 @@ export class CacheOperation   {
                 }
                 // 调用 todoistSyncAPI 的 convertLegacyIds 方法
                 // 该方法通过任务内容匹配来找到对应的新 ID
-                idMapping = await this.plugin.todoistSyncAPI.convertLegacyIds(tasksNeedConversion);
-                convertedCount = Object.keys(idMapping).length;
-                console.log(`[rebuildCache] Converted ${convertedCount} legacy IDs`);
+                try {
+                    idMapping = await this.plugin.todoistSyncAPI.convertLegacyIds(tasksNeedConversion);
+                    convertedCount = Object.keys(idMapping).length;
+                    console.log(`[rebuildCache] Converted ${convertedCount} legacy IDs`);
+                } catch (error) {
+                    console.error(`[rebuildCache] Legacy ID conversion failed: ${(error as Error).message}`);
+                    console.log('[rebuildCache] Will continue without converting legacy IDs');
+                    // 继续执行，不使用转换后的 ID
+                    idMapping = {};
+                }
             }
 
             // ==========================================================================================
