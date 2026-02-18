@@ -89,20 +89,7 @@ export interface VaultTask {
     labels: string[];              // 任务标签（#tag 格式）
 }
 
-/**
- * 缓存任务数据结构
- * 表示从本地缓存中读取的任务（结合 syncData 和 taskFileMapping）
- */
-export interface CacheTask {
-    taskId: string;                 // 任务 ID
-    content: string;                // 任务内容
-    isCompleted: boolean;           // 是否已完成
-    path: string;                  // 任务所在文件路径
-    dueDate?: string;              // 截止日期
-    priority: number;               // 优先级 (1-4, 1 最高)
-    projectId: string;              // 项目 ID
-    labels: string[];              // 标签数组
-}
+
 
 /**
  * Todoist 任务数据结构
@@ -111,7 +98,7 @@ export interface CacheTask {
 export interface TodoistTask {
     taskId: string;                 // 任务 ID
     content: string;                // 任务内容
-    isCompleted: boolean;           // 是否已完成
+    checked: boolean;           // 是否已完成
     dueDate?: string;              // 截止日期
     priority: number;               // 优先级 (1-4, 1 最高)
     projectId: string;              // 项目 ID
@@ -373,53 +360,6 @@ export class DatabaseChecker {
         return vaultTasksMap;
     }
 
-    /**
-     * 从本地缓存加载任务（结合 syncData 和 taskFileMapping）
-     * 
-     * 注意：此方法目前未被 checkDatabase 使用
-     * 仅保留作为备用方法
-     * 
-     * @returns Map<string, CacheTask> - taskId 到 CacheTask 的映射
-     */
-    loadCacheTasks(): Map<string, CacheTask> {
-        // 创建 taskId -> CacheTask 的映射
-        const cacheTasksMap = new Map<string, CacheTask>();
-        
-        // 确保 syncData 已加载
-        let syncData = this.plugin.todoistSyncAPI.getSyncData();
-        if (!syncData) {
-            console.warn('[DatabaseChecker] syncData not loaded, attempting to load...');
-            // 无法 await，返回空映射
-            return cacheTasksMap;
-        }
-        
-        // 获取 taskFileMapping
-        const taskFileMapping = this.plugin.settings.taskFileMapping || {};
-        // 从 syncData 获取任务列表
-        const items = syncData.items || [];
-        
-        // 遍历每个任务
-        for (const task of items) {
-            if (!task) continue;
-            // 查找任务的 mapping 记录
-            const mapping = taskFileMapping[task.id];
-            if (!mapping) continue;
-            
-            // 将任务添加到缓存映射
-            cacheTasksMap.set(task.id, {
-                taskId: task.id,
-                content: task.content,
-                isCompleted: (task as any).checked || false,
-                path: mapping.filePath,
-                dueDate: task.due?.date,
-                priority: task.priority || 4,
-                projectId: task.projectId || '',
-                labels: task.labels || []
-            });
-        }
-
-        return cacheTasksMap;
-    }
 
     
 
@@ -450,7 +390,7 @@ export class DatabaseChecker {
                 taskId: task.id,
                 content: task.content || '',
                 // 判断完成状态
-                isCompleted: (taskAny as any).checked || taskAny.completedAt !== null || false,
+                checked: (taskAny as any).checked || taskAny.completedAt !== null || false,
                 dueDate: task.due?.date,
                 priority: task.priority || 4,
                 projectId: task.projectId || '',
@@ -628,7 +568,7 @@ export class DatabaseChecker {
                     lineNumber: mapping.lineNumber,
                     details: `Task exists in Todoist and mapping but Vault file is missing (file deleted or moved)`,
                     todoistContent: todoistTask!.content,
-                    todoistStatus: todoistTask!.isCompleted
+                    todoistStatus: (todoistTask as any).checked || false
                 });
                 summary.taskNotInVault++;
             }

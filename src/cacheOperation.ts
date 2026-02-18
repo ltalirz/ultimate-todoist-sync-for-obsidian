@@ -965,6 +965,8 @@ export class CacheOperation   {
                         const contentConflict = obsidianContent.trim() !== todoistContent.trim();
                         // 检测状态冲突
                         const statusConflict = obsidianIsCompleted !== todoistIsCompleted;
+                        console.log(obsidianIsCompleted)
+                        console.log(todoistIsCompleted)
                         console.log(task)
                         console.log(taskInfo)
                         
