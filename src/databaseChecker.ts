@@ -390,7 +390,7 @@ export class DatabaseChecker {
                 taskId: task.id,
                 content: task.content || '',
                 // 判断完成状态
-                checked: (taskAny as any).checked || taskAny.completedAt !== null || false,
+                checked: (taskAny as any).checked || false,
                 dueDate: task.due?.date,
                 priority: task.priority || 4,
                 projectId: task.projectId || '',
@@ -640,6 +640,8 @@ export class DatabaseChecker {
                         obsidianStatus: vaultTask!.isCompleted,
                     todoistStatus: (todoistTask as any).checked || false
                     });
+                    console.log(vaultTask)
+                    console.log(todoistTask)
                     summary.statusMismatch++;
                 }
 
@@ -658,6 +660,8 @@ export class DatabaseChecker {
                         obsidianPriority: vaultPriority,
                         todoistPriority: todoistTask!.priority
                     });
+                    console.log(vaultTask)
+                    console.log(todoistTask)
                     summary.priorityMismatch++;
                 }
 
@@ -677,6 +681,8 @@ export class DatabaseChecker {
                         obsidianLabels,
                         todoistLabels
                     });
+                    console.log(vaultTask)
+                    console.log(todoistTask)
                     summary.labelMismatch++;
                 }
 
@@ -696,6 +702,8 @@ export class DatabaseChecker {
                             obsidianProjectId: mappingProjectId,
                             todoistProjectId: todoistTask!.projectId
                         });
+                        console.log(vaultTask)
+                        console.log(todoistTask)
                         summary.projectMismatch++;
                     }
                 }
@@ -717,17 +725,14 @@ export class DatabaseChecker {
      */
     private extractLabelsFromLine(line: string): string[] {
         const labels: string[] = [];
-        // 匹配 # 后面跟着字母、数字、下划线或连字符
-        const labelRegex = /#(\w+)/g;
+        // 匹配 # 后面跟着字母、数字、下划线、连字符或中文
+        const labelRegex = /#[\w\u4e00-\u9fa5-]+/g;
         let match;
         
         // 遍历所有匹配的标签
         while ((match = labelRegex.exec(line)) !== null) {
-            // 排除 #todoist（这是同步标记）
-            if (match[1] !== 'todoist') {
-                // 添加标签（不含 # 前缀）
-                labels.push(match[1]);
-            }
+            // 添加标签（不含 # 前缀）
+            labels.push(match[0].substring(1));
         }
         return labels;
     }
