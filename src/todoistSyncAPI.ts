@@ -894,10 +894,8 @@ export class TodoistSyncAPI   {
         }
         
         if (matches.length > 1) {
-          throw new Error(
-            `[convertLegacyIds] Multiple matches found for "${taskInfo.content}" in ${taskInfo.filePath}:${taskInfo.lineNumber}. ` +
-            `Found ${matches.length} tasks with same content. Please resolve manually.`
-          );
+          console.warn(`[convertLegacyIds] Multiple matches found for "${taskInfo.content}" in ${taskInfo.filePath}:${taskInfo.lineNumber}, skipping...`);
+          continue;
         }
         
         mapping[taskInfo.taskId] = matches[0].id;
