@@ -139,6 +139,12 @@ export interface DatabaseCheckResult {
         duplicateTask: number;              // 重复任务
     };
     reportPath?: string;             // 生成的报告文件路径
+    step1Stats?: {                  // 第一步 Vault vs Mapping 组合统计
+        vaultWithMapping: number;
+        vaultWithoutMapping: number;
+        orphanMapping: number;
+        unknownIssue: number;
+    };
 }
 
 /**
@@ -251,6 +257,14 @@ export class DatabaseChecker {
                 todoistTasksMap,
                 taskFileMapping
             );
+
+            // 第一步 Vault vs Mapping 组合统计
+            const step1Stats = {
+                vaultWithMapping: result.vaultWithMappingCount,
+                vaultWithoutMapping: result.vaultWithoutMappingCount,
+                orphanMapping: result.orphanMappingCount,
+                unknownIssue: result.unknownIssueCount
+            };
             
             // ====== Step 5: 处理无 todoist_id 的任务（新任务未同步）======
             if (tasksWithoutId.length > 0) {
@@ -283,7 +297,8 @@ export class DatabaseChecker {
                 success: totalIssues === 0,
                 totalIssues,
                 issues,
-                summary
+                summary,
+                step1Stats
             });
 
             // 返回检查结果
@@ -340,7 +355,14 @@ export class DatabaseChecker {
         vaultTasksMap: Map<string, VaultTask>,
         todoistTasksMap: Map<string, TodoistTask>,
         taskFileMapping: Record<string, { filePath: string; lineNumber: number; status?: string; syncEnabled?: boolean }>
-    ): Promise<{ issues: DatabaseCheckIssue[], summary: DatabaseCheckResult['summary'] }> {
+    ): Promise<{ 
+        issues: DatabaseCheckIssue[], 
+        summary: DatabaseCheckResult['summary'],
+        vaultWithMappingCount: number,
+        vaultWithoutMappingCount: number,
+        orphanMappingCount: number,
+        unknownIssueCount: number
+    }> {
         // 初始化问题列表
         const issues: DatabaseCheckIssue[] = [];
         
@@ -640,7 +662,16 @@ export class DatabaseChecker {
             }
         }
 
-        return { issues, summary };
+        // 返回问题和统计摘要，以及第一步 Vault vs Mapping 的组合统计
+        return { 
+            issues, 
+            summary,
+            // 第一步 Vault vs Mapping 的组合统计
+            vaultWithMappingCount: vaultWithMapping,
+            vaultWithoutMappingCount: vaultWithoutMapping,
+            orphanMappingCount: orphanMapping,
+            unknownIssueCount: unknownIssue
+        };
     }
 
     /**
@@ -661,31 +692,36 @@ export class DatabaseChecker {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const reportFilename = `ultimate-todoist-sync-database-check-${timestamp}.md`;
 
-        // 从 summary 中提取统计数据
-        const contentMismatch = result.summary.contentMismatch;
-        const statusMismatch = result.summary.statusMismatch;
-        const priorityMismatch = result.summary.priorityMismatch;
-        const labelMismatch = result.summary.labelMismatch;
-        const projectMismatch = result.summary.projectMismatch;
-        const lineNumberMismatch = result.summary.lineNumberMismatch;
-        
-        const vaultWithoutMapping = result.summary.vaultTaskNoMapping;
+        // 从 result 中获取第一步 Vault vs Mapping 组合统计
+        const step1 = result.step1Stats || {
+            vaultWithMapping: 0,
+            vaultWithoutMapping: 0,
+            orphanMapping: 0,
+            unknownIssue: 0
+        };
+
+        // 从 summary 中提取第二步 8 种情况的统计
         const taskDeletedInTodoist = result.summary.taskDeletedInTodoist;
         const taskNonActive = result.summary.taskNonActive;
         const taskIssue = result.summary.taskIssue;
-        const unknownIssue = result.summary.unknownIssue;
         const taskNotInVault = result.summary.taskNotInVault;
         const mappingOrphan = result.summary.mappingOrphan;
 
-        // 计算第一步的统计 (Vault vs Mapping 4种组合)
-        const sumVaultWithMapping = contentMismatch + statusMismatch + priorityMismatch + labelMismatch + projectMismatch + lineNumberMismatch;
-        const sumVaultWithoutMapping = vaultWithoutMapping;
-        const sumOrphanMapping = taskNotInVault + mappingOrphan;
-        const sumUnknownIssue = unknownIssue;
+        // 使用第一步的统计
+        const sumVaultWithMapping = step1.vaultWithMapping;
+        const sumVaultWithoutMapping = step1.vaultWithoutMapping;
+        const sumOrphanMapping = step1.orphanMapping;
+        const sumUnknownIssue = step1.unknownIssue;
         const totalVaultMapping = sumVaultWithMapping + sumVaultWithoutMapping + sumOrphanMapping + sumUnknownIssue;
 
         // 计算第二步 8 种情况的统计
-        const c1 = sumVaultWithMapping; // Vault ✅ + Mapping ✅ + Todoist ✅
+        // 情况 1: Vault ✅ + Mapping ✅ + Todoist ✅ = 全部 Vault+Mapping 任务 - 有问题的任务
+        const totalVaultWithMappingTasks = step1.vaultWithMapping;
+        const issuesInVaultWithMapping = result.summary.contentMismatch + result.summary.statusMismatch + 
+            result.summary.priorityMismatch + result.summary.labelMismatch + 
+            result.summary.projectMismatch + result.summary.lineNumberMismatch;
+        const c1 = totalVaultWithMappingTasks - issuesInVaultWithMapping; // 一致的任务
+        
         const c2 = taskDeletedInTodoist + taskNonActive + taskIssue; // Vault ✅ + Mapping ✅ + Todoist ❌
         const c3 = sumVaultWithoutMapping; // Vault ✅ + Mapping ❌ + Todoist ✅
         const c4 = sumUnknownIssue; // Vault ✅ + Mapping ❌ + Todoist ❌
