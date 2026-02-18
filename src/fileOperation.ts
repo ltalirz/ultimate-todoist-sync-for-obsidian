@@ -508,6 +508,7 @@ export class FileOperation   {
             const file = this.app.vault.getAbstractFileByPath(filePath);
             if (!file) {
                 console.error(`[updateTaskIdInVault] File not found: ${filePath}`);
+                console.log(filePath)
                 return;
             }
             

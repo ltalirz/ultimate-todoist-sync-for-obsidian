@@ -933,7 +933,7 @@ export class CacheOperation   {
                         if (idMapping[taskInfo.taskId]) {
                             // 调用 fileOperation 更新 Vault 文件中的 ID
                             await this.plugin.fileOperation.updateTaskIdInVault(
-                                taskInfo.filePath,
+                                filePath,
                                 taskInfo.lineNumber,
                                 taskInfo.taskId,
                                 taskId
@@ -941,7 +941,7 @@ export class CacheOperation   {
                             
                             // 使用新 ID 更新 taskFileMapping
                             this.plugin.settings.taskFileMapping[taskId] = {
-                                filePath: taskInfo.filePath,
+                                filePath: filePath,
                                 lineNumber: taskInfo.lineNumber
                             };
                             // 删除旧的映射
