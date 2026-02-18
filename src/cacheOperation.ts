@@ -927,11 +927,23 @@ export class CacheOperation   {
                         
                         // 情况1: 任务在 Todoist 中不存在（即使转换后也找不到）
                         if (!task) {
-                            console.log(`Task ${taskId} (original: ${taskInfo.taskId}) not found in Todoist, will be removed...`);
-                            // 记录无效 ID
-                            invalidTaskIds.push(taskInfo.taskId);
-                            // 记录日志
-                            this.plugin.logOperation?.log('CACHE_TASK_DELETED', `Task ${taskInfo.taskId} not found in Todoist during rebuild`, filePath, taskInfo.taskId);
+                            // 检查 Vault 中任务是否已完成
+                            if (taskInfo.isCompleted) {
+                                // 已完成 + 找不到 → 标记为 nonActive
+                                console.log(`[rebuildCache] Task ${taskInfo.taskId} is completed in Vault but not found in Todoist, marking as nonActive...`);
+                                this.plugin.settings.taskFileMapping[taskInfo.taskId] = {
+                                    filePath: filePath,
+                                    lineNumber: taskInfo.lineNumber,
+                                    status: 'nonActive',
+                                    syncEnabled: false
+                                };
+                                this.plugin.logOperation?.log('CACHE_TASK_NONACTIVE', `Task ${taskInfo.taskId} marked as nonActive (completed in Vault, not in Todoist)`, filePath, taskInfo.taskId);
+                            } else {
+                                // 未完成 + 找不到 → 记录为无效
+                                console.log(`Task ${taskId} (original: ${taskInfo.taskId}) not found in Todoist, will be removed...`);
+                                invalidTaskIds.push(taskInfo.taskId);
+                                this.plugin.logOperation?.log('CACHE_TASK_DELETED', `Task ${taskInfo.taskId} not found in Todoist during rebuild`, filePath, taskInfo.taskId);
+                            }
                             // 跳过此任务
                             continue;
                         }
@@ -977,7 +989,7 @@ export class CacheOperation   {
                         console.log(task)
                         console.log(taskInfo)
                         
-                        // 如果有冲突，添加到冲突列表
+                        // 如果有冲突，添加到冲突列表，并标记为 conflicted
                         if (contentConflict || statusConflict) {
                             conflicts.push({
                                 taskId: mappingTaskId,
@@ -986,13 +998,24 @@ export class CacheOperation   {
                                 todoistContent: todoistContent,
                                 lineNumber: taskInfo.lineNumber
                             });
+                            // 标记为 conflicted，关闭同步
+                            this.plugin.settings.taskFileMapping[mappingTaskId] = {
+                                filePath: filePath,
+                                lineNumber: taskInfo.lineNumber,
+                                status: 'conflicted',
+                                syncEnabled: false
+                            };
+                            // TODO: 以后完善冲突解决逻辑
+                            this.plugin.logOperation?.log('CACHE_TASK_CONFLICTED', `Task ${mappingTaskId} marked as conflicted (content or status mismatch)`, filePath, mappingTaskId);
+                        } else {
+                            // 正常任务，标记为 active，开启同步
+                            this.plugin.settings.taskFileMapping[mappingTaskId] = {
+                                filePath: filePath,
+                                lineNumber: taskInfo.lineNumber,
+                                status: 'active',
+                                syncEnabled: true
+                            };
                         }
-                        
-                        // 保存到 taskFileMapping（使用转换后的 ID）
-                        this.plugin.settings.taskFileMapping[mappingTaskId] = {
-                            filePath: filePath,
-                            lineNumber: taskInfo.lineNumber
-                        };
                         
                         processedCount++;
                         

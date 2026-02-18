@@ -22,6 +22,8 @@ export interface UltimateTodoistSyncSettings {
 		[taskId: string]: {
 			filePath: string;
 			lineNumber: number;
+			status?: 'active' | 'nonActive' | 'conflicted';
+			syncEnabled?: boolean;
 		};
 	};
 	enableFullVaultSync: boolean;
