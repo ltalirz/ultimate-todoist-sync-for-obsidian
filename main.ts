@@ -797,14 +797,21 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			// Sleep for 5 seconds
 			await new Promise(resolve => setTimeout(resolve, 5000));
 
-			const filesToSync = this.settings.fileMetadata;
+			// 从 taskFileMapping 推导需要同步的文件列表
+			const filesToSyncSet = new Set<string>();
+			const taskFileMapping = this.settings.taskFileMapping;
+			for (const taskId in taskFileMapping) {
+				filesToSyncSet.add(taskFileMapping[taskId].filePath);
+			}
+			const filesToSync = Array.from(filesToSyncSet);
+			
 			if(this.settings.debugMode){
-				console.log(filesToSync)
+				console.log('Files to sync:', filesToSync)
 			}
 
-			for (let fileKey in filesToSync) {
+			for (const fileKey of filesToSync) {
 				if(this.settings.debugMode){
-					console.log(fileKey)
+					console.log('Syncing file:', fileKey)
 				}
 
 				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
