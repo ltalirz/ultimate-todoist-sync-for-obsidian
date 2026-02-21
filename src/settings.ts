@@ -39,13 +39,6 @@ export interface UltimateTodoistSyncSettings {
     }>;
     logFileEnabled: boolean;
     logRetentionDays: number;
-    todayLogs: Array<{
-        timestamp: number;
-        action: LogAction;
-        details: string;
-        filePath?: string;
-        taskId?: string;
-    }>;
     maxBackupsPerFile: number;
     storageDirectory: string;
     lastStorageDirectory: string | null;
@@ -75,7 +68,6 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
     logs: [],
     logFileEnabled: true,
     logRetentionDays: 365,
-    todayLogs: [],
     maxBackupsPerFile: 100,
     storageDirectory: 'ultimate-todoist-sync',
     lastStorageDirectory: null,

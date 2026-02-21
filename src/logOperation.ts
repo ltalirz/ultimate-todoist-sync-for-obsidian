@@ -67,6 +67,8 @@ export class LogOperation {
     private currentDate = '';
     private todayLogs: LogEntry[] = [];
     private lastCleanupDate = '';
+    private logBuffer: LogEntry[] = [];
+    private readonly BATCH_SIZE = 20;
 
     constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
         this.app = app;
@@ -83,10 +85,10 @@ export class LogOperation {
             this.migrateLegacyLogs();
         }
         
-        this.todayLogs = this.plugin.settings.todayLogs || [];
+        this.todayLogs = [];
         
         if (this.plugin.settings.debugMode) {
-            console.log(`[LogOperation] Initialized with ${this.todayLogs.length} today's logs`);
+            console.log(`[LogOperation] Initialized with empty today's logs (stored in JSON files)`);
         }
     }
 
@@ -131,10 +133,12 @@ export class LogOperation {
         };
 
         this.todayLogs.push(logEntry);
-        this.plugin.settings.todayLogs = this.todayLogs;
 
         if (this.plugin.settings.logFileEnabled) {
-            this.appendToLogFile(logEntry);
+            this.logBuffer.push(logEntry);
+            if (this.logBuffer.length >= this.BATCH_SIZE) {
+                this.flushLogBuffer();
+            }
         }
 
         this.cleanOldLogsIfNeeded();
@@ -147,7 +151,6 @@ export class LogOperation {
     private handleDateChange(newDate: string): void {
         this.todayLogs = [];
         this.currentDate = newDate;
-        this.plugin.settings.todayLogs = [];
         
         if (this.plugin.settings.debugMode) {
             console.log(`[LogOperation] Date changed to ${newDate}, buffer cleared`);
@@ -166,6 +169,49 @@ export class LogOperation {
             await this.plugin.storagePathManager.appendJsonToFile(logPath, entry);
         } catch (error) {
             console.error('[LogOperation] Failed to append log to file:', error);
+        }
+    }
+
+    private async flushLogBuffer(): Promise<void> {
+        if (this.logBuffer.length === 0) {
+            return;
+        }
+
+        if (!this.plugin.storagePathManager) {
+            console.warn('[LogOperation] StoragePathManager not initialized');
+            this.logBuffer = [];
+            return;
+        }
+
+        try {
+            await this.plugin.storagePathManager.ensureAllDirs();
+            const logPath = await this.plugin.storagePathManager.getTodayLogPath();
+            
+            const adapter = this.plugin.app.vault.adapter;
+            let data: LogEntry[] = [];
+            
+            const exists = await adapter.exists(logPath);
+            if (exists) {
+                const content = await adapter.read(logPath);
+                try {
+                    data = JSON.parse(content);
+                    if (!Array.isArray(data)) {
+                        data = [];
+                    }
+                } catch {
+                    data = [];
+                }
+            }
+            
+            data.push(...this.logBuffer);
+            await adapter.write(logPath, JSON.stringify(data, null, 2));
+            this.logBuffer = [];
+            
+            if (this.plugin.settings.debugMode) {
+                console.log(`[LogOperation] Flushed ${this.logBuffer.length} logs to file`);
+            }
+        } catch (error) {
+            console.error('[LogOperation] Failed to flush log buffer:', error);
         }
     }
 
@@ -295,8 +341,7 @@ export class LogOperation {
 
     clearLogs(): void {
         this.todayLogs = [];
-        this.plugin.settings.todayLogs = [];
-        this.plugin.saveSettings();
+        this.flushLogBuffer();
     }
 
     async exportLogsToFile(): Promise<string | null> {

@@ -257,7 +257,6 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				
 				await this.todoistSync.fullTextNewTaskCheck(filepath)
 				this.syncLock = false;
-				this.logOperation?.log('FILE_MODIFIED', `File modified: ${filepath}`, filepath);
 			} catch(error) {
 				console.error(`An error occurred while modifying the file: ${error.message}`);
 				this.syncLock = false
