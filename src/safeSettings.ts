@@ -3,18 +3,23 @@ import UltimateTodoistSyncForObsidian from "../main";
 
 export class SafeSettings {
     private plugin: UltimateTodoistSyncForObsidian;
+    private lastBackupTime = 0;
+    private static readonly BACKUP_THROTTLE_MS = 5 * 60 * 1000;
 
     constructor(plugin: UltimateTodoistSyncForObsidian) {
         this.plugin = plugin;
     }
 
+    private async throttledBackup(): Promise<void> {
+        if (!this.plugin.settingsBackup) return;
+        const now = Date.now();
+        if (now - this.lastBackupTime < SafeSettings.BACKUP_THROTTLE_MS) return;
+        await this.plugin.settingsBackup.backup();
+        this.lastBackupTime = now;
+    }
+
     async update(changes: Partial<typeof this.plugin.settings>, shouldSave = false): Promise<void> {
-        // 防御性检查：确保 settingsBackup 存在
-        if (!this.plugin.settingsBackup) {
-            console.warn('[SafeSettings] settingsBackup not initialized, applying changes without backup');
-        } else {
-            await this.plugin.settingsBackup.backup();
-        }
+        await this.throttledBackup();
 
         try {
             Object.assign(this.plugin.settings, changes);
@@ -24,7 +29,6 @@ export class SafeSettings {
             }
         } catch (error) {
             console.error('[SafeSettings] Update failed:', error);
-            // 尝试恢复（如果 settingsBackup 存在）
             if (this.plugin.settingsBackup) {
                 await this.plugin.settingsBackup.restore();
             }
@@ -33,9 +37,7 @@ export class SafeSettings {
     }
 
     async reset(): Promise<void> {
-        if (!this.plugin.settingsBackup) {
-            console.warn('[SafeSettings] settingsBackup not initialized, resetting without backup');
-        } else {
+        if (this.plugin.settingsBackup) {
             await this.plugin.settingsBackup.backup();
         }
 

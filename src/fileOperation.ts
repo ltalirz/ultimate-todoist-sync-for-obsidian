@@ -709,7 +709,8 @@ export class FileOperation   {
         const tasksWithId = new Map<string, VaultTask>();
         const tasksWithoutId: VaultTaskWithoutId[] = [];
         
-        const files = this.app.vault.getFiles().filter(f => f.extension === 'md');
+        const storageDir = this.plugin.settings?.storageDirectory || 'ultimate-todoist-sync';
+        const files = this.app.vault.getFiles().filter(f => f.extension === 'md' && !f.path.startsWith(storageDir + '/') && !f.path.startsWith('.'));
 
         for (const file of files) {
             try {
@@ -781,10 +782,10 @@ export class FileOperation   {
             todoistTasksMap.set(task.id, {
                 taskId: task.id,
                 content: task.content || '',
-                checked: taskAny.checked || false,
+                checked: !!taskAny.checked,
                 dueDate: task.due?.date,
-                priority: task.priority || 4,
-                projectId: task.projectId || '',
+                priority: task.priority || 1,
+                projectId: taskAny.project_id || '',
                 labels: task.labels || []
             });
         }

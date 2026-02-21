@@ -20,7 +20,6 @@ export interface UltimateTodoistSyncSettings {
         };
     };
     enableFullVaultSync: boolean;
-    statistics: Record<string, any>;
     debugMode: boolean;
     useAppURI: boolean;
     syncEnabled: boolean;
@@ -29,7 +28,6 @@ export interface UltimateTodoistSyncSettings {
     lastDatabaseCheckPassed: boolean;
     lastDatabaseCheckTime: number | null;
     syncDataCache: Record<string, any> | null;
-    deviceIdGenerated: boolean;
     enableLog: boolean;
     logFileEnabled: boolean;
     maxLogFileSize: number;
@@ -49,7 +47,6 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
     fileMetadata: {},
     taskFileMapping: {},
     enableFullVaultSync: false,
-    statistics: {},
     debugMode: false,
     useAppURI: true,
     syncEnabled: false,
@@ -58,7 +55,6 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
     lastDatabaseCheckPassed: false,
     lastDatabaseCheckTime: null,
     syncDataCache: null,
-    deviceIdGenerated: false,
     enableLog: true,
     logFileEnabled: true,
     maxLogFileSize: 1024 * 1024,

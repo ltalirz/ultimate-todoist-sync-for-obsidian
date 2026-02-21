@@ -347,6 +347,8 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 					new Notice('Settings recovered from backup');
 					const recoveredData = await this.loadData();
 					this.settings = Object.assign({}, DEFAULT_SETTINGS, recoveredData);
+					this.stripGhostFields();
+					this.sanitizeTaskFileMapping();
 					return true;
 				}
 
@@ -358,11 +360,46 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			}
 
 			this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+			this.stripGhostFields();
+			this.sanitizeTaskFileMapping();
 			return true;
 		} catch (error) {
 			console.error('[Settings] Failed to load data:', error);
 			this.settings = Object.assign({}, DEFAULT_SETTINGS);
 			return true;
+		}
+	}
+
+	private stripGhostFields(): void {
+		const GHOST_FIELDS = ['todayLogs', 'todoistTasksData', 'syncToken', 'logs', 'logRetentionDays', 'statistics', 'deviceIdGenerated'];
+		const settings = this.settings as unknown as Record<string, unknown>;
+		let stripped = 0;
+		for (const field of GHOST_FIELDS) {
+			if (field in settings) {
+				delete settings[field];
+				stripped++;
+			}
+		}
+		if (stripped > 0) {
+			console.log(`[Settings] Stripped ${stripped} ghost field(s) from loaded data`);
+		}
+	}
+
+	private sanitizeTaskFileMapping(): void {
+		const mapping = this.settings.taskFileMapping;
+		if (!mapping) return;
+		let fixed = 0;
+		for (const [taskId, entry] of Object.entries(mapping)) {
+			if (typeof entry.lineNumber !== 'number') {
+				console.warn(`[Settings] taskFileMapping[${taskId}].lineNumber is "${entry.lineNumber}" (${typeof entry.lineNumber}), resetting to 0`);
+				entry.lineNumber = 0;
+				entry.status = 'issue';
+				entry.syncEnabled = false;
+				fixed++;
+			}
+		}
+		if (fixed > 0) {
+			console.log(`[Settings] Sanitized ${fixed} corrupted taskFileMapping entry(s)`);
 		}
 	}
 
@@ -543,8 +580,8 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		new Notice(`Ultimate Todoist Sync loaded successfully.`)
 		this.logOperation?.log('PLUGIN_INITIALIZED', 'Plugin initialized successfully');
 
-		// Run database check on startup
-		await this.runStartupDatabaseCheck();
+		// Run database check on startup (non-blocking)
+		this.runStartupDatabaseCheck();
 		
 		return true
 		
@@ -623,7 +660,6 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 					console.error('[Plugin] Incremental sync after cache load failed:', err);
 				});
 			}
-			await this.safeSettings?.update({ deviceIdGenerated: true }, true);
 		} catch (error) {
 			console.error('[Plugin] Failed to initialize sync:', error);
 		}

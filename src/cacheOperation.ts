@@ -43,114 +43,9 @@
  * ==========================================================================================
  */
 
-import { App} from 'obsidian';
+import { App, TFile} from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../main";
-import { TaskConflict, ConflictResolutionModal } from './conflictModal';
-
-/**
- * ==========================================================================================
- * 接口定义 - 数据库检查结果类型
- * ==========================================================================================
- * 
- * 【DatabaseCheckIssue】
- * 数据库检查问题类型，包含以下几种：
- * - task_deleted_in_todoist: 任务在 Todoist 端被删除
- * - missing_in_cache: 缓存中缺少任务
- * - new_task_not_synced: 新任务未同步
- * - file_reference_missing: 文件引用丢失
- * - orphaned_in_cache: 缓存中存在孤立任务
- * - task_not_in_vault: 任务在 Vault 中不存在
- * - content_mismatch: 内容不匹配
- * - cache_content_outdated: 缓存内容过时
- * - status_mismatch: 状态不匹配
- * - cache_status_outdated: 缓存状态过时
- * - duedate_mismatch: 截止日期不匹配
- * - duplicate_task: 重复任务
- * - priority_mismatch: 优先级不匹配
- * - label_mismatch: 标签不匹配
- * - project_mismatch: 项目不匹配
- * - empty_metadata: 空元数据
- * 
- * 【DatabaseCheckResult】
- * 数据库检查结果，包含：
- * - success: 检查是否成功
- * - totalIssues: 问题总数
- * - issues: 问题列表
- * - summary: 各类问题的统计
- * - reportPath: 报告文件路径
- * 
- * ==========================================================================================
- */
-
-interface Due {
-    date?: string;
-    [key: string]: any;
-}
-
-export interface DatabaseCheckIssue {
-    type: 
-        | 'task_deleted_in_todoist'
-        | 'missing_in_cache'
-        | 'new_task_not_synced'
-        | 'file_reference_missing'
-        | 'orphaned_in_cache'
-        | 'task_not_in_vault'
-        | 'content_mismatch'
-        | 'cache_content_outdated'
-        | 'status_mismatch'
-        | 'cache_status_outdated'
-        | 'duedate_mismatch'
-        | 'duplicate_task'
-        | 'priority_mismatch'
-        | 'label_mismatch'
-        | 'project_mismatch'
-        | 'empty_metadata';
-    filePath?: string;
-    taskId?: string;
-    details: string;
-    taskContent?: string;
-    obsidianContent?: string;
-    todoistContent?: string;
-    cacheContent?: string;
-    obsidianStatus?: boolean;
-    todoistStatus?: boolean;
-    cacheStatus?: boolean;
-    dueDate?: string;
-    cacheDueDate?: string;
-    priority?: number;
-    cachePriority?: number;
-    projectId?: string;
-    cacheProjectId?: string;
-    projectName?: string;
-    lineNumber?: number;
-    labels?: string[];
-    cacheLabels?: string[];
-}
-
-export interface DatabaseCheckResult {
-    success: boolean;
-    totalIssues: number;
-    issues: DatabaseCheckIssue[];
-    summary: {
-        taskDeletedInTodoist: number;
-        missingInCache: number;
-        newTaskNotSynced: number;
-        fileReferenceMissing: number;
-        orphanedInCache: number;
-        taskNotInVault: number;
-        contentMismatch: number;
-        cacheContentOutdated: number;
-        statusMismatch: number;
-        cacheStatusOutdated: number;
-        duedateMismatch: number;
-        duplicateTask: number;
-        priorityMismatch: number;
-        labelMismatch: number;
-        projectMismatch: number;
-        emptyMetadata: number;
-    };
-    reportPath?: string;
-}
+import { TaskConflict, ConflictResolution, ConflictResolutionModal } from './conflictModal';
 
 /**
  * ==========================================================================================
@@ -583,7 +478,7 @@ export class CacheOperation   {
     appendTaskToCache(_task: any): void {}
     loadTaskFromCacheyID(_taskId: string): any { return null; }
     updateTaskToCacheByID(_task: any): void {}
-    modifyTaskToCacheByID(_taskId: string, _params: { content?: string, due?: Due }): void {}
+    modifyTaskToCacheByID(_taskId: string, _params: { content?: string, due?: any }): void {}
     reopenTaskToCacheByID(_taskId: string): void {}
     closeTaskToCacheByID(_taskId: string): void {}
     deleteTaskFromCache(_taskId: string): void {}
@@ -747,9 +642,10 @@ export class CacheOperation   {
                 console.log('Ensuring sync data is loaded...');
             }
             
-            const syncData = this.plugin.todoistSyncAPI.getSyncData();
+            let syncData = this.plugin.todoistSyncAPI.getSyncData();
             if (!syncData) {
                 await this.plugin.todoistSyncAPI.initializeSync();
+                syncData = this.plugin.todoistSyncAPI.getSyncData();
             }
 
             // ==========================================================================================
@@ -913,125 +809,75 @@ export class CacheOperation   {
                 console.log('Processing tasks and detecting conflicts...');
             }
             
-            // 收集冲突任务
+            const syncItemsMap = new Map<string, any>();
+            for (const item of (syncData?.items || [])) {
+                if (item?.id) syncItemsMap.set(item.id, item);
+            }
+            
+            const nextMapping: Record<string, { filePath: string; lineNumber: number; status?: 'active' | 'nonActive' | 'conflicted' | 'issue'; syncEnabled?: boolean }> = {};
             const conflicts: TaskConflict[] = [];
             let processedCount = 0;
             const totalTasks = Array.from(fileTaskMap.values())
                 .reduce((sum, tasks) => sum + tasks.length, 0);
-            
-            // 记录无效的任务 ID（不在 Todoist 中）
             const invalidTaskIds: string[] = [];
             
-            // 遍历每个文件的每个任务
             for (const [filePath, fileTasks] of fileTaskMap.entries()) {
                 for (const taskInfo of fileTasks) {
                     try {
-                        // 使用转换后的 ID（如果有的话），否则使用原始 ID
                         const taskId = idMapping[taskInfo.taskId] || taskInfo.taskId;
+                        const task = syncItemsMap.get(taskId);
                         
-                        // 从 syncData 中获取任务（使用可能转换后的 ID）
-                        const task = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
-                        
-                        // 情况1: 任务在 Todoist 中不存在（即使转换后也找不到）
                         if (!task) {
-                            // 检查 Vault 中任务是否已完成
-                            if (taskInfo.isCompleted) {
-                                // 已完成 + 找不到 → 标记为 nonActive
-                                console.log(`[rebuildCache] Task ${taskInfo.taskId} is completed in Vault but not found in Todoist, marking as nonActive...`);
-                                this.plugin.settings.taskFileMapping[taskInfo.taskId] = {
-                                    filePath: filePath,
-                                    lineNumber: taskInfo.lineNumber,
-                                    status: 'nonActive',
-                                    syncEnabled: false
-                                };
-                                this.plugin.logOperation?.log('CACHE_TASK_NONACTIVE', `Task ${taskInfo.taskId} marked as nonActive (completed in Vault, not in Todoist)`, filePath, taskInfo.taskId);
-                            } else {
-                                // 未完成 + 找不到 → 标记为 issue
-                                console.log(`[rebuildCache] Task ${taskInfo.taskId} is incomplete in Vault but not found in Todoist, marking as issue...`);
-                                this.plugin.settings.taskFileMapping[taskInfo.taskId] = {
-                                    filePath: filePath,
-                                    lineNumber: taskInfo.lineNumber,
-                                    status: 'issue',
-                                    syncEnabled: false
-                                };
-                                this.plugin.logOperation?.log('CACHE_TASK_ISSUE', `Task ${taskInfo.taskId} marked as issue (incomplete in Vault, not in Todoist)`, filePath, taskInfo.taskId);
-                            }
-                            // 跳过此任务
+                            const status = taskInfo.isCompleted ? 'nonActive' : 'issue';
+                            nextMapping[taskInfo.taskId] = {
+                                filePath, lineNumber: taskInfo.lineNumber,
+                                status, syncEnabled: false
+                            };
+                            this.plugin.logOperation?.log(
+                                taskInfo.isCompleted ? 'CACHE_TASK_NONACTIVE' : 'CACHE_TASK_ISSUE',
+                                `Task ${taskInfo.taskId} marked as ${status}`,
+                                filePath, taskInfo.taskId
+                            );
                             continue;
                         }
                         
-                        // 情况2: 如果 ID 被转换了，更新 Vault 文件和 taskFileMapping
                         if (idMapping[taskInfo.taskId]) {
-                            // 调用 fileOperation 更新 Vault 文件中的 ID
                             await this.plugin.fileOperation.updateTaskIdInVault(
-                                filePath,
-                                taskInfo.lineNumber,
-                                taskInfo.taskId,
-                                taskId
+                                filePath, taskInfo.lineNumber,
+                                taskInfo.taskId, taskId
                             );
-                            
-                            // 使用新 ID 更新 taskFileMapping
-                            this.plugin.settings.taskFileMapping[taskId] = {
-                                filePath: filePath,
-                                lineNumber: taskInfo.lineNumber
-                            };
-                            // 删除旧的映射
-                            delete this.plugin.settings.taskFileMapping[taskInfo.taskId];
-                            
                             console.log(`[rebuildCache] Updated mapping: ${taskInfo.taskId} -> ${taskId}`);
                         }
                         
-                        // 对比任务内容
+                        const mappingTaskId = idMapping[taskInfo.taskId] || taskInfo.taskId;
                         const todoistContent = task.content || '';
                         const obsidianContent = taskInfo.content;
-                        
-                        // 使用转换后的 ID 用于映射
-                        const mappingTaskId = idMapping[taskInfo.taskId] || taskInfo.taskId;
-                        
-                        // 检查完成状态
-                        const todoistIsCompleted = (task as any).checked || false;
+                        const todoistIsCompleted = !!(task as any).checked;
                         const obsidianIsCompleted = taskInfo.isCompleted;
                         
-                        // 检测内容冲突
                         const contentConflict = obsidianContent.trim() !== todoistContent.trim();
-                        // 检测状态冲突
                         const statusConflict = obsidianIsCompleted !== todoistIsCompleted;
-                        console.log(obsidianIsCompleted)
-                        console.log(todoistIsCompleted)
-                        console.log(task)
-                        console.log(taskInfo)
                         
-                        // 如果有冲突，添加到冲突列表，并标记为 conflicted
                         if (contentConflict || statusConflict) {
                             conflicts.push({
-                                taskId: mappingTaskId,
-                                filePath: filePath,
-                                obsidianContent: obsidianContent,
-                                todoistContent: todoistContent,
+                                taskId: mappingTaskId, filePath,
+                                obsidianContent, todoistContent,
                                 lineNumber: taskInfo.lineNumber
                             });
-                            // 标记为 conflicted，关闭同步
-                            this.plugin.settings.taskFileMapping[mappingTaskId] = {
-                                filePath: filePath,
-                                lineNumber: taskInfo.lineNumber,
-                                status: 'conflicted',
-                                syncEnabled: false
+                            nextMapping[mappingTaskId] = {
+                                filePath, lineNumber: taskInfo.lineNumber,
+                                status: 'conflicted', syncEnabled: false
                             };
-                            // TODO: 以后完善冲突解决逻辑
-                            this.plugin.logOperation?.log('CACHE_TASK_CONFLICTED', `Task ${mappingTaskId} marked as conflicted (content or status mismatch)`, filePath, mappingTaskId);
+                            this.plugin.logOperation?.log('CACHE_TASK_CONFLICTED', `Task ${mappingTaskId} marked as conflicted`, filePath, mappingTaskId);
                         } else {
-                            // 正常任务，标记为 active，开启同步
-                            this.plugin.settings.taskFileMapping[mappingTaskId] = {
-                                filePath: filePath,
-                                lineNumber: taskInfo.lineNumber,
-                                status: 'active',
-                                syncEnabled: true
+                            nextMapping[mappingTaskId] = {
+                                filePath, lineNumber: taskInfo.lineNumber,
+                                status: 'active', syncEnabled: true
                             };
                         }
                         
                         processedCount++;
                         
-                        // 每处理 10 个任务更新一次 UI
                         if (noticeCallback && processedCount % 10 === 0) {
                             noticeCallback(`Processing ${processedCount}/${totalTasks}...`);
                         }
@@ -1074,7 +920,7 @@ export class CacheOperation   {
             // ==========================================================================================
             
             // Step 6: Save settings
-            await this.plugin.saveSettings();
+            await this.plugin.safeSettings?.update({ taskFileMapping: nextMapping }, true);
             
             // 构建结果消息
             const invalidMsg = invalidTaskIds.length > 0 ? ` (${invalidTaskIds.length} tasks not found in Todoist removed)` : '';
@@ -1142,7 +988,7 @@ export class CacheOperation   {
                 // 用 Todoist 内容更新 Obsidian 文件
                 try {
                     const file = this.app.vault.getAbstractFileByPath(conflict.filePath);
-                    if (file) {
+                    if (file instanceof TFile) {
                         const content = await this.app.vault.read(file);
                         const lines = content.split('\n');
                         
