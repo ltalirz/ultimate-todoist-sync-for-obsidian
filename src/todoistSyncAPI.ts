@@ -543,9 +543,8 @@ export class TodoistSyncAPI   {
     });
   }
 
-  // Generate temp_id for commands
   private generateTempId(): string {
-    return 'temp_' + Date.now() + '_' + Math.random().toString(36).substring(2, 15);
+    return this.generateUUID();
   }
 
   // Execute Sync API commands
@@ -580,6 +579,15 @@ export class TodoistSyncAPI   {
         throw new Error(`Failed to execute commands: ${response.status} - ${response.text}`);
       }
       const data = response.json;
+
+		if (data?.sync_status) {
+			for (const [uuid, status] of Object.entries(data.sync_status)) {
+				if (status !== 'ok' && typeof status === 'object' && status !== null) {
+					const err = status as { error?: string; error_code?: number; error_tag?: string };
+					console.error(`[TodoistSyncAPI] Command ${uuid} failed:`, err);
+				}
+			}
+		}
 
 		this.rateLimitState.partialSyncCount++;
 
@@ -616,7 +624,12 @@ export class TodoistSyncAPI   {
     if (result && result.temp_id_mapping && result.temp_id_mapping[tempId]) {
       return { id: result.temp_id_mapping[tempId] };
     }
-    throw new Error('Failed to add task: no response');
+    const cmdStatus = result?.sync_status?.[command.uuid];
+    if (cmdStatus && cmdStatus !== 'ok') {
+      const err = cmdStatus as { error?: string; error_code?: number };
+      throw new Error(`Failed to add task: ${err.error || JSON.stringify(cmdStatus)}`);
+    }
+    throw new Error(`Failed to add task: no temp_id_mapping in response. Response: ${JSON.stringify(result)}`);
   }
 
   // Update task using Sync API
@@ -680,8 +693,11 @@ export class TodoistSyncAPI   {
   }): Promise<{ id: string }> {
     const args: any = {
       content: task.content,
-      project_id: task.projectId
     };
+
+    if (task.projectId) {
+      args.project_id = task.projectId;
+    }
 
     if (task.parentId) {
       args.parent_id = task.parentId;
