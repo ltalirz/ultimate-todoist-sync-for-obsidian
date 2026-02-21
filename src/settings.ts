@@ -2,647 +2,551 @@ import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../main";
 import { LogAction } from './logOperation';
 
-interface MyProject {
-	id: string;
-	name: string;
-  }
-
-
 export interface UltimateTodoistSyncSettings {
-    initialized:boolean;
-	//mySetting: string;
-	//todoistTasksFilePath: string;
-	todoistAPIToken: string;
-	apiInitialized:boolean;
-	defaultProjectName: string;
-	defaultProjectId:string;
-	automaticSynchronizationInterval:Number;
-	fileMetadata:any;
-	taskFileMapping: {
-		[taskId: string]: {
-			filePath: string;
-			lineNumber: number;
-			status?: 'active' | 'nonActive' | 'conflicted' | 'issue';
-			syncEnabled?: boolean;
-		};
-	};
-	enableFullVaultSync: boolean;
-	statistics: any;
-	debugMode:boolean;
-	useAppURI:boolean;
-	// Sync control
-	syncEnabled: boolean;
-	obsidianToTodoistEnabled: boolean;
-	todoistToObsidianEnabled: boolean;
-	lastDatabaseCheckPassed: boolean;
-	lastDatabaseCheckTime: number | null;
-	// Full sync data cache (raw API response)
-	syncDataCache: Record<string, any> | null;
-	// Device ID generated flag (for display only)
-	deviceIdGenerated: boolean;
-	// Log settings
-	enableLog:boolean;
-	// Legacy logs array (deprecated - kept for backward compatibility during migration)
-	logs:Array<{
-		timestamp:number;
-		action:LogAction;
-		details:string;
-		filePath?:string;
-		taskId?:string;
-	}>;
-	// New log file settings
-	logFileEnabled: boolean;
-	logRetentionDays: number;
-	// Memory buffer for today's logs
-	todayLogs: Array<{
-		timestamp:number;
-		action:LogAction;
-		details:string;
-		filePath?:string;
-		taskId?:string;
-	}>;
-	// Backup settings
-	maxBackupsPerFile: number;
+    initialized: boolean;
+    todoistAPIToken: string;
+    apiInitialized: boolean;
+    defaultProjectName: string;
+    defaultProjectId: string;
+    automaticSynchronizationInterval: number;
+    fileMetadata: Record<string, any>;
+    taskFileMapping: {
+        [taskId: string]: {
+            filePath: string;
+            lineNumber: number;
+            status?: 'active' | 'nonActive' | 'conflicted' | 'issue';
+            syncEnabled?: boolean;
+        };
+    };
+    enableFullVaultSync: boolean;
+    statistics: Record<string, any>;
+    debugMode: boolean;
+    useAppURI: boolean;
+    syncEnabled: boolean;
+    obsidianToTodoistEnabled: boolean;
+    todoistToObsidianEnabled: boolean;
+    lastDatabaseCheckPassed: boolean;
+    lastDatabaseCheckTime: number | null;
+    syncDataCache: Record<string, any> | null;
+    deviceIdGenerated: boolean;
+    enableLog: boolean;
+    logs: Array<{
+        timestamp: number;
+        action: LogAction;
+        details: string;
+        filePath?: string;
+        taskId?: string;
+    }>;
+    logFileEnabled: boolean;
+    logRetentionDays: number;
+    todayLogs: Array<{
+        timestamp: number;
+        action: LogAction;
+        details: string;
+        filePath?: string;
+        taskId?: string;
+    }>;
+    maxBackupsPerFile: number;
 }
-
 
 export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
-	initialized: false,
-	apiInitialized:false,
-	todoistAPIToken: '',
-	defaultProjectName:"Inbox",
-	defaultProjectId:"",
-	automaticSynchronizationInterval: 300,
-	fileMetadata:{},
-	taskFileMapping: {},
-	enableFullVaultSync:false,
-	statistics:{},
-	debugMode:false,
-	useAppURI:true,
-	syncEnabled: false,
-	obsidianToTodoistEnabled: true,
-	todoistToObsidianEnabled: false,
-	lastDatabaseCheckPassed: false,
-	lastDatabaseCheckTime: null,
-	syncDataCache: null,
-	deviceIdGenerated: false,
-	enableLog:true,
-	logs:[],
-	logFileEnabled: true,
-	logRetentionDays: 365,
-	todayLogs: [],
-	maxBackupsPerFile: 100,
+    initialized: false,
+    apiInitialized: false,
+    todoistAPIToken: '',
+    defaultProjectName: "Inbox",
+    defaultProjectId: "",
+    automaticSynchronizationInterval: 300,
+    fileMetadata: {},
+    taskFileMapping: {},
+    enableFullVaultSync: false,
+    statistics: {},
+    debugMode: false,
+    useAppURI: true,
+    syncEnabled: false,
+    obsidianToTodoistEnabled: true,
+    todoistToObsidianEnabled: false,
+    lastDatabaseCheckPassed: false,
+    lastDatabaseCheckTime: null,
+    syncDataCache: null,
+    deviceIdGenerated: false,
+    enableLog: true,
+    logs: [],
+    logFileEnabled: true,
+    logRetentionDays: 365,
+    todayLogs: [],
+    maxBackupsPerFile: 100,
 }
-
-
-
-
 
 export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
-	plugin: UltimateTodoistSyncForObsidian;
+    plugin: UltimateTodoistSyncForObsidian;
 
-	constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
+    constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
+        super(app, plugin);
+        this.plugin = plugin;
+    }
 
-	display(): void {
-		const { containerEl } = this;
+    display(): void {
+        const { containerEl } = this;
 
-		containerEl.empty();
+        containerEl.empty();
 
-		containerEl.createEl('h2', { text: 'Settings for Ultimate Todoist Sync for Obsidian.' });
+        containerEl.createEl('h2', { text: 'Ultimate Todoist Sync Settings' });
 
-		const myProjectsOptions: Record<string, string> = {};	  
+        // ============================================
+        // API Configuration Section
+        // ============================================
+        containerEl.createEl('h3', { text: 'API Configuration' });
 
-		new Setting(containerEl)
-			.setName('Todoist API')
-			.setDesc('Please enter todoist api token and click the paper airplane button to submit.')
-			.addText((text) =>
-				text
-					.setPlaceholder('Enter your API')
-					.setValue(this.plugin.settings.todoistAPIToken)
-					.onChange(async (value) => {
-						this.plugin.settings.todoistAPIToken = value;
-						this.plugin.settings.apiInitialized = false;
-						//
-					})
-	
-			)
-			.addExtraButton((button) => {
-				button.setIcon('send')
-					.onClick(async () => {
-							await this.plugin.modifyTodoistAPI(this.plugin.settings.todoistAPIToken)
-							this.display()
-							
-						})
-					
-					
-			})
+        new Setting(containerEl)
+            .setName('Todoist API Token')
+            .setDesc('Enter your Todoist API token and click the send button to connect.')
+            .addText((text) =>
+                text
+                    .setPlaceholder('Enter your API token')
+                    .setValue(this.plugin.settings.todoistAPIToken)
+                    .onChange(async (value) => {
+                        this.plugin.settings.todoistAPIToken = value;
+                        this.plugin.settings.apiInitialized = false;
+                    })
+            )
+            .addExtraButton((button) => {
+                button.setIcon('send')
+                    .onClick(async () => {
+                        await this.plugin.modifyTodoistAPI(this.plugin.settings.todoistAPIToken)
+                        this.display()
+                    })
+            });
 
-			
+        // ============================================
+        // Sync Settings Section
+        // ============================================
+        containerEl.createEl('h3', { text: 'Sync Settings' });
 
+        new Setting(containerEl)
+            .setName('Automatic Sync Interval')
+            .setDesc('Time in seconds between automatic syncs. Default: 300 (5 minutes). Minimum: 20 seconds.')
+            .addText((text) =>
+                text
+                    .setPlaceholder('300')
+                    .setValue(this.plugin.settings.automaticSynchronizationInterval.toString())
+                    .onChange(async (value) => {
+                        const intervalNum = Number(value)
+                        if (isNaN(intervalNum)) {
+                            new Notice(`Please enter a valid number.`)
+                            return
+                        }
+                        if (intervalNum < 20) {
+                            new Notice(`Minimum interval is 20 seconds.`)
+                            return
+                        }
+                        if (!Number.isInteger(intervalNum)) {
+                            new Notice('Please enter an integer.');
+                            return;
+                        }
+                        this.plugin.settings.automaticSynchronizationInterval = intervalNum;
+                        this.plugin.saveSettings()
+                        new Notice('Sync interval updated.');
+                    })
+            );
 
-		new Setting(containerEl)
-		.setName('Automatic Sync Interval Time')
-		.setDesc('Please specify the desired interval time, with seconds as the default unit. The default setting is 300 seconds, which corresponds to syncing once every 5 minutes. You can customize it, but it cannot be lower than 20 seconds.')
-		.addText((text) =>
-			text
-				.setPlaceholder('Sync interval')
-				.setValue(this.plugin.settings.automaticSynchronizationInterval.toString())
-				.onChange(async (value) => {
-					const intervalNum = Number(value)
-					if(isNaN(intervalNum)){
-						new Notice(`Wrong type,please enter a number.`)
-						return
-					}
-					if(intervalNum < 20 ){
-						new Notice(`The synchronization interval time cannot be less than 20 seconds.`)
-						return
-					}
-					if (!Number.isInteger(intervalNum)) {
-						new Notice('The synchronization interval must be an integer.');
-						return;
-					}
-					this.plugin.settings.automaticSynchronizationInterval = intervalNum;
-					this.plugin.saveSettings()
-					new Notice('Settings have been updated.');
-					//
-				})
+        const myProjectsOptions: Record<string, string> = {};
 
-		)
+        new Setting(containerEl)
+            .setName('Default Project')
+            .setDesc('New tasks will be created in this project.')
+            .addDropdown(component =>
+                component
+                    .addOption(this.plugin.settings.defaultProjectId, this.plugin.settings.defaultProjectName)
+                    .addOptions(myProjectsOptions)
+                    .onChange((value) => {
+                        this.plugin.settings.defaultProjectId = value
+                        const project = this.plugin.todoistSyncAPI?.getSyncData()?.projects?.find((p: any) => p.id === value);
+                        this.plugin.settings.defaultProjectName = project?.name || value;
+                        this.plugin.saveSettings()
+                    })
+            );
 
+        new Setting(containerEl)
+            .setName('Full Vault Sync')
+            .setDesc('Sync all tasks in vault, not just those with #todoist tag.')
+            .addToggle(component =>
+                component
+                    .setValue(this.plugin.settings.enableFullVaultSync)
+                    .onChange((value) => {
+                        this.plugin.settings.enableFullVaultSync = value
+                        this.plugin.saveSettings()
+                        new Notice(`Full vault sync ${value ? 'enabled' : 'disabled'}.`)
+                    })
+            );
 
-		/*
-		new Setting(containerEl)
-			.setName('The default project for new tasks')
-			.setDesc('New tasks are automatically synced to the Inbox. You can modify the project here.')
-			.addText((text) =>
-				text
-					.setPlaceholder('Enter default project name:')
-					.setValue(this.plugin.settings.defaultProjectName)
-					.onChange(async (value) => {
-						try{
-							//this.plugin.cacheOperation.saveProjectsToCache()
-							const newProjectId = this.plugin.cacheOperation.getProjectIdByNameFromCache(value)
-							if(!newProjectId){
-								new Notice(`This project seems to not exist.`)
-								return
-							}
-						}catch(error){
-							new Notice(`Invalid project name `)
-							return
-						}
-						this.plugin.settings.defaultProjectName = value;
-						this.plugin.saveSettings()
-						new Notice(`The default project has been modified successfully.`)
+        new Setting(containerEl)
+            .setName('Use Desktop URIs')
+            .setDesc('Open Todoist tasks in desktop app (todoist://) instead of browser (https://).')
+            .addToggle(component =>
+                component
+                    .setValue(this.plugin.settings.useAppURI)
+                    .onChange((value) => {
+                        this.plugin.settings.useAppURI = value
+                        this.plugin.saveSettings()
+                    })
+            );
 
-					})
+        // ============================================
+        // Sync Direction Control Section
+        // ============================================
+        containerEl.createEl('h3', { text: 'Sync Direction' });
 
-		);
-		*/
+        const syncStatusEl = containerEl.createEl('div', { cls: 'setting-item-description' });
+        const updateSyncStatus = () => {
+            const passed = this.plugin.settings.lastDatabaseCheckPassed;
+            const mainEnabled = this.plugin.settings.syncEnabled;
+            const o2tEnabled = this.plugin.settings.obsidianToTodoistEnabled;
+            const t2oEnabled = this.plugin.settings.todoistToObsidianEnabled;
+            const lastCheck = this.plugin.settings.lastDatabaseCheckTime
+                ? new Date(this.plugin.settings.lastDatabaseCheckTime).toLocaleString()
+                : 'Never';
 
-		new Setting(containerEl)
-			.setName('Default Project')
-			.setDesc('New tasks are automatically synced to the default project. You can modify the project here.')
-			.addDropdown(component => 
-				component
-						.addOption(this.plugin.settings.defaultProjectId,this.plugin.settings.defaultProjectName)
-						.addOptions(myProjectsOptions)
-						.onChange((value)=>{
-							this.plugin.settings.defaultProjectId = value
-							const project = this.plugin.todoistSyncAPI.getSyncData()?.projects?.find((p: any) => p.id === value);
-							this.plugin.settings.defaultProjectName = project?.name || value;
-							this.plugin.saveSettings()
-							
-							
-						})
-						
-				)
+            let statusText = '';
+            if (!passed) {
+                statusText = '⚠️ Blocked - database issues detected';
+            } else if (!mainEnabled) {
+                statusText = '❌ Disabled';
+            } else {
+                const o2t = o2tEnabled ? '✅' : '❌';
+                const t2o = t2oEnabled ? '✅' : '❌';
+                statusText = `✅ Enabled (O→T: ${o2t}, T→O: ${t2o})`;
+            }
 
+            syncStatusEl.innerHTML = `
+                <div style="margin-bottom: 8px;"><strong>Status:</strong> ${statusText}</div>
+                <div><strong>Last Check:</strong> ${lastCheck}</div>
+            `;
+        };
+        updateSyncStatus();
 
-		
-		new Setting(containerEl)
-			.setName('Full Vault Sync')
-			.setDesc('By default, only tasks marked with #todoist are synchronized. If this option is turned on, all tasks in the vault will be synchronized.')
-			.addToggle(component => 
-				component
-						.setValue(this.plugin.settings.enableFullVaultSync)
-						.onChange((value)=>{
-							this.plugin.settings.enableFullVaultSync = value
-							this.plugin.saveSettings()
-							new Notice("Full vault sync is enabled.")							
-						})
-						
-				)						
+        new Setting(containerEl)
+            .setName('Enable Sync')
+            .setDesc('Master switch for all synchronization.')
+            .addToggle(component =>
+                component
+                    .setValue(this.plugin.settings.syncEnabled)
+                    .onChange(async (value) => {
+                        this.plugin.settings.syncEnabled = value;
+                        await this.plugin.saveSettings();
+                        updateSyncStatus();
+                        new Notice(`Sync ${value ? 'enabled' : 'disabled'}`);
+                    })
+            );
 
+        new Setting(containerEl)
+            .setName('Obsidian → Todoist')
+            .setDesc('Push changes from Obsidian to Todoist.')
+            .addToggle(component =>
+                component
+                    .setValue(this.plugin.settings.obsidianToTodoistEnabled)
+                    .onChange(async (value) => {
+                        this.plugin.settings.obsidianToTodoistEnabled = value;
+                        await this.plugin.saveSettings();
+                        updateSyncStatus();
+                        new Notice(`Obsidian → Todoist ${value ? 'enabled' : 'disabled'}`);
+                    })
+            );
 
+        new Setting(containerEl)
+            .setName('Todoist → Obsidian')
+            .setDesc('Pull changes from Todoist to Obsidian.')
+            .addToggle(component =>
+                component
+                    .setValue(this.plugin.settings.todoistToObsidianEnabled)
+                    .onChange(async (value) => {
+                        this.plugin.settings.todoistToObsidianEnabled = value;
+                        await this.plugin.saveSettings();
+                        updateSyncStatus();
+                        new Notice(`Todoist → Obsidian ${value ? 'enabled' : 'disabled'}`);
+                    })
+            );
 
-		new Setting(containerEl)
-		.setName('Manual Sync')
-		.setDesc('Manually perform a synchronization task.')
-		.addButton(button => button
-			.setButtonText('Sync')
-			.onClick(async () => {
-				// Add code here to handle exporting Todoist data
-				if(!this.plugin.settings.apiInitialized){
-					new Notice(`Please set the todoist api first`)
-					return
-				}
-				try{
-					await this.plugin.scheduledSynchronization()
-					this.plugin.syncLock = false
-					new Notice(`Sync completed..`)
-				}catch(error){
-					new Notice(`An error occurred while syncing.:${error}`)
-					this.plugin.syncLock = false
-				}
+        // ============================================
+        // Tools Section
+        // ============================================
+        containerEl.createEl('h3', { text: 'Tools' });
 
-			})
-		);
+        new Setting(containerEl)
+            .setName('Manual Sync')
+            .setDesc('Manually trigger a sync now.')
+            .addButton(button => button
+                .setButtonText('Sync Now')
+                .onClick(async () => {
+                    if (!this.plugin.settings.apiInitialized) {
+                        new Notice('Please set the Todoist API first')
+                        return
+                    }
+                    try {
+                        await this.plugin.scheduledSynchronization()
+                        this.plugin.syncLock = false
+                        new Notice('Sync completed.')
+                    } catch (error) {
+                        new Notice(`Sync error: ${error}`)
+                        this.plugin.syncLock = false;
+                    }
+                })
+            );
 
-		new Setting(containerEl)
-		.setName('Rebuild Cache')
-		.setDesc('Scan the vault and Todoist to rebuild the task cache. Use this if your cache is corrupted or lost.')
-		.addButton(button => button
-			.setButtonText('Rebuild')
-			.onClick(async () => {
-				if(!this.plugin.settings.apiInitialized){
-					new Notice(`Please set the todoist api first`)
-					return
-				}
-				
-				const rebuildNotice = new Notice('Starting cache rebuild...', 0);
-				
-				try{
-					const result = await this.plugin.cacheOperation.rebuildCache((message: string) => {
-						rebuildNotice.setMessage(message);
-					});
-					
-					if(result.success){
-						new Notice(`Cache rebuilt successfully! ${result.tasksProcessed} tasks processed.`);
-					}else{
-						new Notice(`Cache rebuild failed!`);
-					}
-				}catch(error){
-					new Notice(`Cache rebuild failed: ${error.message}`);
-				}
-			})
-		);				
+        new Setting(containerEl)
+            .setName('Rebuild Cache')
+            .setDesc('Scan vault and Todoist to rebuild task cache. Use when cache is corrupted.')
+            .addButton(button => button
+                .setButtonText('Rebuild')
+                .onClick(async () => {
+                    if (!this.plugin.settings.apiInitialized) {
+                        new Notice('Please set the Todoist API first')
+                        return
+                    }
 
+                    const rebuildNotice = new Notice('Starting cache rebuild...', 0);
 
+                    try {
+                        const result = await this.plugin.cacheOperation.rebuildCache((message: string) => {
+                            rebuildNotice.setMessage(message);
+                        });
 
-		new Setting(containerEl)
-		.setName('Check Database')
-		.setDesc('Check for possible issues: sync errors, file renaming, missing tasks, or conflicts between Obsidian and Todoist.')
-		.addButton(button => button
-			.setButtonText('Check Database')
-			.onClick(async () => {
-				if(!this.plugin.settings.apiInitialized){
-					new Notice(`Please set the todoist api first`)
-					return
-				}
+                        if (result.success) {
+                            new Notice(`Cache rebuilt! ${result.tasksProcessed} tasks processed.`);
+                        } else {
+                            new Notice('Cache rebuild failed!');
+                        }
+                    } catch (error) {
+                        new Notice(`Rebuild error: ${error.message}`);
+                    }
+                })
+            );
 
-				const checkNotice = new Notice('Checking database integrity...', 0);
+        new Setting(containerEl)
+            .setName('Check Database')
+            .setDesc('Check for sync issues, conflicts, and data inconsistencies.')
+            .addButton(button => button
+                .setButtonText('Check')
+                .onClick(async () => {
+                    if (!this.plugin.settings.apiInitialized) {
+                        new Notice('Please set the Todoist API first')
+                        return
+                    }
 
-				try{
-					const result = await this.plugin.databaseChecker!.checkDatabase((message: string) => {
-						checkNotice.setMessage(message);
-					});
+                    const checkNotice = new Notice('Checking database...', 0);
 
-					checkNotice.hide();
-					
-					// Update sync control status
-					this.plugin.settings.lastDatabaseCheckTime = Date.now();
-					if (result.success) {
-						this.plugin.settings.lastDatabaseCheckPassed = true;
-						this.plugin.settings.syncEnabled = true;
-						await this.plugin.saveSettings();
-						new Notice(`Database check passed! No issues found.\nReport saved to: .todoist-reports/`);
-					}else{
-						this.plugin.settings.lastDatabaseCheckPassed = false;
-						this.plugin.settings.syncEnabled = false;
-						await this.plugin.saveSettings();
-						let message = `Found ${result.totalIssues} issues:\n`;
-						message += `- ${result.summary.taskDeletedInTodoist} deleted in Todoist\n`;
-						message += `- ${result.summary.missingInCache} missing in cache\n`;
-						message += `- ${result.summary.newTaskNotSynced} not synced\n`;
-						message += `- ${result.summary.fileReferenceMissing} file reference missing\n`;
-						message += `- ${result.summary.orphanedInCache} orphaned in cache\n`;
-						message += `- ${result.summary.taskNotInVault} not in vault\n`;
-						message += `- ${result.summary.contentMismatch} content mismatch\n`;
-						message += `- ${result.summary.cacheContentOutdated} cache content outdated\n`;
-						message += `- ${result.summary.statusMismatch} status mismatch\n`;
-						message += `- ${result.summary.cacheStatusOutdated} cache status outdated\n`;
-						message += `- ${result.summary.duedateMismatch} due date mismatch\n`;
-						message += `- ${result.summary.duplicateTask} duplicate tasks\n`;
-						message += `- ${result.summary.priorityMismatch} priority mismatch\n`;
-						message += `- ${result.summary.projectMismatch} project mismatch\n\n`;
+                    try {
+                        const result = await this.plugin.databaseChecker!.checkDatabase((message: string) => {
+                            checkNotice.setMessage(message);
+                        });
 
-						if (result.reportPath) {
-							message += `Report saved to: ${result.reportPath}`;
-						}
+                        checkNotice.hide();
+                        this.plugin.settings.lastDatabaseCheckTime = Date.now();
 
-						new Notice(message, 10000);
+                        if (result.success) {
+                            this.plugin.settings.lastDatabaseCheckPassed = true;
+                            this.plugin.settings.syncEnabled = true;
+                            await this.plugin.saveSettings();
+                            updateSyncStatus();
+                            new Notice('✅ Database check passed! No issues found.');
+                        } else {
+                            this.plugin.settings.lastDatabaseCheckPassed = false;
+                            this.plugin.settings.syncEnabled = false;
+                            await this.plugin.saveSettings();
+                            updateSyncStatus();
+                            new Notice(`⚠️ Found ${result.totalIssues} issues. Sync disabled.`);
+                        }
 
-						this.plugin.logOperation?.log('DATABASE_CHECK', `Found ${result.totalIssues} database issues`);
-					}
+                        if (result.reportPath) {
+                            new Notice(`Report: ${result.reportPath}`, 5000);
+                        }
+                    } catch (error) {
+                        checkNotice.hide();
+                        new Notice(`Check failed: ${error.message}`);
+                    }
+                })
+            );
 
-					if (result.reportPath) {
-						new Notice(`Detailed report saved to: ${result.reportPath}`, 5000);
-					}else{
-						new Notice(`Report generation failed. Check console for details.`, 5000);
-					}
-				}catch(error){
-					checkNotice.hide();
-					new Notice(`Database check failed: ${error.message}`);
-				}
-			})
-		);
+        new Setting(containerEl)
+            .setName('Fix & Enable Sync')
+            .setDesc('Run database check and auto-enable sync if no issues.')
+            .addButton(button => button
+                .setButtonText('Fix & Enable')
+                .onClick(async () => {
+                    if (!this.plugin.settings.apiInitialized) {
+                        new Notice('Please set the Todoist API first')
+                        return
+                    }
+                    if (!this.plugin.databaseChecker) {
+                        new Notice('Database checker not initialized')
+                        return
+                    }
 
-		new Setting(containerEl)
-			.setName('Debug Mode')
-			.setDesc('After enabling this option, all log information will be output to the console, which can help check for errors.')
-			.addToggle(component => 
-				component
-						.setValue(this.plugin.settings.debugMode)
-						.onChange((value)=>{
-							this.plugin.settings.debugMode = value
-							this.plugin.saveSettings()						
-						})
-						
-				)
+                    const checkNotice = new Notice('Running database check...', 0);
+                    try {
+                        const result = await this.plugin.databaseChecker.checkDatabase();
+                        checkNotice.hide();
 
-		new Setting(containerEl)
-			.setName('Enable Log')
-			.setDesc('Enable logging of file modifications.')
-			.addToggle(component => 
-				component
-						.setValue(this.plugin.settings.enableLog)
-						.onChange((value)=>{
-							this.plugin.settings.enableLog = value
-							this.plugin.saveSettings()						
-						})
-						
-				)
+                        this.plugin.settings.lastDatabaseCheckTime = Date.now();
 
-		new Setting(containerEl)
-			.setName('View Logs')
-			.setDesc('View the operation logs.')
-			.addButton(button => button
-				.setButtonText('View Logs')
-				.onClick(() => {
-					const logsText = this.plugin.logOperation?.getLogsAsText() || 'No logs available.';
-					const logModal = new Notice(logsText, 10000);
-				})
-			);
+                        if (result.success) {
+                            this.plugin.settings.lastDatabaseCheckPassed = true;
+                            this.plugin.settings.syncEnabled = true;
+                            await this.plugin.saveSettings();
+                            updateSyncStatus();
+                            new Notice('✅ Issues fixed! Sync enabled.');
+                        } else {
+                            this.plugin.settings.lastDatabaseCheckPassed = false;
+                            this.plugin.settings.syncEnabled = false;
+                            await this.plugin.saveSettings();
+                            updateSyncStatus();
+                            new Notice(`⚠️ Found ${result.totalIssues} issues. Please fix manually.`);
+                        }
+                    } catch (error) {
+                        checkNotice.hide();
+                        new Notice(`Error: ${error.message}`);
+                    }
+                })
+            );
 
-		new Setting(containerEl)
-			.setName('Clear Logs')
-			.setDesc('Clear all operation logs.')
-			.addButton(button => button
-				.setButtonText('Clear')
-				.onClick(() => {
-					this.plugin.logOperation?.clearLogs();
-					new Notice('Logs cleared.');
-				})
-			);
+        // ============================================
+        // Logs & Debug Section
+        // ============================================
+        containerEl.createEl('h3', { text: 'Logs & Debug' });
 
-		new Setting(containerEl)
-			.setName('Backup Todoist Data')
-			.setDesc('Click to backup Todoist data, The backed-up files will be stored in the root directory of the Obsidian vault.')
-			.addButton(button => button
-				.setButtonText('Backup')
-				.onClick(() => {
-					// Add code here to handle exporting Todoist data
-					if(!this.plugin.settings.apiInitialized){
-						new Notice(`Please set the todoist api first`)
-						return
-					}
-					this.plugin.todoistSync.backupTodoistAllResources()
-				})
-			);
+        new Setting(containerEl)
+            .setName('Enable Logging')
+            .setDesc('Log file modifications and sync operations.')
+            .addToggle(component =>
+                component
+                    .setValue(this.plugin.settings.enableLog)
+                    .onChange((value) => {
+                        this.plugin.settings.enableLog = value
+                        this.plugin.saveSettings()
+                    })
+            );
 
-		new Setting(containerEl)
-			.setName('Use Desktop URIs')
-			.setDesc('If enabled produces application URI links (todoist://...) instead of web urls (https://...), which open in the app instead of the browser')
-			.addToggle(component => 
-				component
-						.setValue(this.plugin.settings.useAppURI)
-						.onChange((value)=>{
-							this.plugin.settings.useAppURI = value
-							this.plugin.saveSettings()						
-						})
-						
-				)
+        new Setting(containerEl)
+            .setName('Debug Mode')
+            .setDesc('Output detailed logs to console for troubleshooting.')
+            .addToggle(component =>
+                component
+                    .setValue(this.plugin.settings.debugMode)
+                    .onChange((value) => {
+                        this.plugin.settings.debugMode = value
+                        this.plugin.saveSettings()
+                    })
+            );
 
-		// ============================================
-		// Database Sync Control Section
-		// ============================================
-		
-		containerEl.createEl('h3', { text: 'Database Sync Control' });
+        new Setting(containerEl)
+            .setName('View Logs')
+            .setDesc('View operation logs.')
+            .addButton(button => button
+                .setButtonText('View')
+                .onClick(() => {
+                    const logsText = this.plugin.logOperation?.getLogsAsText() || 'No logs.';
+                    new Notice(logsText, 10000);
+                })
+            );
 
-		// Sync Status Display
-		const syncStatusEl = containerEl.createEl('div', { cls: 'setting-item-description' });
-		const updateSyncStatus = () => {
-			const passed = this.plugin.settings.lastDatabaseCheckPassed;
-			const mainEnabled = this.plugin.settings.syncEnabled;
-			const o2tEnabled = this.plugin.settings.obsidianToTodoistEnabled;
-			const t2oEnabled = this.plugin.settings.todoistToObsidianEnabled;
-			const lastCheck = this.plugin.settings.lastDatabaseCheckTime 
-				? new Date(this.plugin.settings.lastDatabaseCheckTime).toLocaleString() 
-				: 'Never';
-			
-			let statusText = '';
-			if (!passed) {
-				statusText = '⚠️ Sync blocked due to database issues';
-			} else if (!mainEnabled) {
-				statusText = '❌ Sync disabled (main switch off)';
-			} else {
-				const o2t = o2tEnabled ? '✅' : '❌';
-				const t2o = t2oEnabled ? '✅' : '❌';
-				statusText = `✅ Sync enabled (O→T: ${o2t}, T→O: ${t2o})`;
-			}
-			
-			syncStatusEl.innerHTML = `
-				<div>Status: ${statusText}</div>
-				<div>Last check: ${lastCheck}</div>
-			`;
-		};
-		updateSyncStatus();
+        new Setting(containerEl)
+            .setName('Clear Logs')
+            .setDesc('Clear all operation logs.')
+            .addButton(button => button
+                .setButtonText('Clear')
+                .onClick(() => {
+                    this.plugin.logOperation?.clearLogs();
+                    new Notice('Logs cleared.');
+                })
+            );
 
-		// Sync Enable Toggle (Main Switch)
-		new Setting(containerEl)
-			.setName('Enable Sync')
-			.setDesc('Main sync toggle')
-			.addToggle(component =>
-				component
-					.setValue(this.plugin.settings.syncEnabled)
-					.onChange(async (value) => {
-						this.plugin.settings.syncEnabled = value;
-						await this.plugin.saveSettings();
-						updateSyncStatus();
-						new Notice(`Sync ${value ? 'enabled' : 'disabled'} by user`);
-					})
-			);
+        // ============================================
+        // Backup & Recovery Section
+        // ============================================
+        containerEl.createEl('h3', { text: 'Backup & Recovery' });
 
-		// Obsidian → Todoist Toggle
-		new Setting(containerEl)
-			.setName('Obsidian → Todoist')
-			.setDesc('Sync tasks from Obsidian to Todoist')
-			.addToggle(component =>
-				component
-					.setValue(this.plugin.settings.obsidianToTodoistEnabled)
-					.onChange(async (value) => {
-						this.plugin.settings.obsidianToTodoistEnabled = value;
-						await this.plugin.saveSettings();
-						updateSyncStatus();
-						new Notice(`Obsidian → Todoist sync ${value ? 'enabled' : 'disabled'}`);
-					})
-			);
+        new Setting(containerEl)
+            .setName('Backup Todoist Data')
+            .setDesc('Backup all Todoist data to vault.')
+            .addButton(button => button
+                .setButtonText('Backup')
+                .onClick(() => {
+                    if (!this.plugin.settings.apiInitialized) {
+                        new Notice('Please set the Todoist API first')
+                        return
+                    }
+                    this.plugin.todoistSync.backupTodoistAllResources()
+                })
+            );
 
-		// Todoist → Obsidian Toggle
-		new Setting(containerEl)
-			.setName('Todoist → Obsidian')
-			.setDesc('Sync tasks from Todoist to Obsidian')
-			.addToggle(component =>
-				component
-					.setValue(this.plugin.settings.todoistToObsidianEnabled)
-					.onChange(async (value) => {
-						this.plugin.settings.todoistToObsidianEnabled = value;
-						await this.plugin.saveSettings();
-						updateSyncStatus();
-						new Notice(`Todoist → Obsidian sync ${value ? 'enabled' : 'disabled'}`);
-					})
-			);
+        new Setting(containerEl)
+            .setName('Backup Settings')
+            .setDesc('Manually backup current settings.')
+            .addButton(button => button
+                .setButtonText('Backup')
+                .onClick(async () => {
+                    if (!this.plugin.settingsBackup) {
+                        new Notice('Settings backup not initialized')
+                        return;
+                    }
+                    const success = await this.plugin.settingsBackup.backup();
+                    new Notice(success ? 'Settings backed up.' : 'Backup failed.');
+                })
+            );
 
-		// Fix and Enable Sync Button
-		new Setting(containerEl)
-			.setName('Fix & Enable Sync')
-			.setDesc('Run database check, and enable sync if no issues found')
-			.addButton(component => {
-				component.setButtonText('Fix & Enable');
-				component.onClick(async () => {
-					if (!this.plugin.settings.apiInitialized) {
-						new Notice('Please set the Todoist API first');
-						return;
-					}
-					if (!this.plugin.databaseChecker) {
-						new Notice('Database checker not initialized');
-						return;
-					}
-					
-					const checkNotice = new Notice('Running database check...', 0);
-					try {
-						const result = await this.plugin.databaseChecker.checkDatabase();
-						checkNotice.hide();
-						
-						this.plugin.settings.lastDatabaseCheckTime = Date.now();
-						
-						if (result.success) {
-							this.plugin.settings.lastDatabaseCheckPassed = true;
-							this.plugin.settings.syncEnabled = true;
-							await this.plugin.saveSettings();
-							updateSyncStatus();
-							new Notice('Database check passed! Sync is now enabled.');
-						} else {
-							this.plugin.settings.lastDatabaseCheckPassed = false;
-							this.plugin.settings.syncEnabled = false;
-							await this.plugin.saveSettings();
-							updateSyncStatus();
-							new Notice(`Found ${result.totalIssues} issues. Please fix them first.`);
-						}
-					} catch (error) {
-						checkNotice.hide();
-						new Notice(`Database check failed: ${error.message}`);
-					}
-				});
-				return component;
-			});
+        new Setting(containerEl)
+            .setName('Restore Settings')
+            .setDesc('Restore settings from latest backup.')
+            .addButton(button => button
+                .setButtonText('Restore')
+                .onClick(async () => {
+                    if (!this.plugin.settingsBackup) {
+                        new Notice('Settings backup not initialized')
+                        return;
+                    }
+                    const success = await this.plugin.settingsBackup.restore();
+                    if (success) {
+                        new Notice('Settings restored. Please reload the plugin.');
+                    }
+                })
+            );
 
-		containerEl.createEl('h3', { text: 'Settings Backup & Recovery' });
+        new Setting(containerEl)
+            .setName('View Backup History')
+            .setDesc('View available settings backups.')
+            .addButton(button => button
+                .setButtonText('View')
+                .onClick(async () => {
+                    if (!this.plugin.settingsBackup) {
+                        new Notice('Not initialized')
+                        return;
+                    }
+                    const backups = await this.plugin.settingsBackup.getBackupList();
+                    if (backups.length === 0) {
+                        new Notice('No backups found');
+                        return;
+                    }
+                    let msg = 'Backups:\n';
+                    backups.slice(0, 5).forEach((b, i) => {
+                        msg += `${i + 1}. ${b.split('/').pop()}\n`;
+                    });
+                    new Notice(msg, 8000);
+                })
+            );
 
-		new Setting(containerEl)
-			.setName('Backup Settings')
-			.setDesc('Create a manual backup of current settings')
-			.addButton(component => {
-				component.setButtonText('Backup Now');
-				component.onClick(async () => {
-					if (!this.plugin.settingsBackup) {
-						new Notice('Settings backup not initialized');
-						return;
-					}
-					const success = await this.plugin.settingsBackup.backup();
-					if (success) {
-						new Notice('Settings backed up successfully');
-					} else {
-						new Notice('Failed to backup settings');
-					}
-				});
-				return component;
-			});
+        new Setting(containerEl)
+            .setName('Reset Settings')
+            .setDesc('Reset all settings to defaults. WARNING: Will lose all task mappings!')
+            .addButton(button => {
+                button.setButtonText('Reset');
+                button.setWarning();
+                button.onClick(async () => {
+                    const confirmed = confirm('Reset ALL settings to defaults? All task mappings will be lost!');
+                    if (!confirmed) return;
 
-		new Setting(containerEl)
-			.setName('Restore Settings')
-			.setDesc('Restore settings from the latest backup')
-			.addButton(component => {
-				component.setButtonText('Restore from Backup');
-				component.onClick(async () => {
-					if (!this.plugin.settingsBackup) {
-						new Notice('Settings backup not initialized');
-						return;
-					}
-					const success = await this.plugin.settingsBackup.restore();
-					if (success) {
-						new Notice('Settings restored. Please reload the plugin.');
-					}
-				});
-				return component;
-			});
-
-		new Setting(containerEl)
-			.setName('Reset Settings')
-			.setDesc('Reset all settings to defaults (will lose all task mappings)')
-			.addButton(component => {
-				component.setButtonText('Reset to Defaults');
-				component.setWarning();
-				component.onClick(async () => {
-					const confirmed = confirm('Are you sure you want to reset all settings? This will lose all task mappings and cannot be undone.');
-					if (!confirmed) return;
-					
-					this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS);
-					await this.plugin.saveSettings();
-					new Notice('Settings reset to defaults. Please reload the plugin.');
-				});
-				return component;
-			});
-
-		new Setting(containerEl)
-			.setName('View Backup History')
-			.setDesc('View and restore from previous settings backups')
-			.addButton(component => {
-				component.setButtonText('Show Backups');
-				component.onClick(async () => {
-					if (!this.plugin.settingsBackup) {
-						new Notice('Settings backup not initialized');
-						return;
-					}
-					const backups = await this.plugin.settingsBackup.getBackupList();
-					if (backups.length === 0) {
-						new Notice('No backups found');
-						return;
-					}
-					let message = 'Available backups:\n';
-					backups.slice(0, 5).forEach((backup, index) => {
-						const fileName = backup.split('/').pop() || backup;
-						message += `${index + 1}. ${fileName}\n`;
-					});
-					message += '\nTo restore, click "Restore from Backup" button.';
-					new Notice(message, 10000);
-					console.log('[Settings] Available backups:', backups);
-				});
-				return component;
-			});
-	}
+                    this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS);
+                    await this.plugin.saveSettings();
+                    new Notice('Settings reset. Please reload the plugin.');
+                });
+            });
+    }
 }
-
