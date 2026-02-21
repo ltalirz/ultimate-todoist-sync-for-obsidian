@@ -200,8 +200,14 @@ export class SettingsBackup {
                 const filesToDelete = files.slice(this.maxBackups);
                 const adapter = this.app.vault.adapter;
                 for (const file of filesToDelete) {
-                    await adapter.remove(file.path);
-                    console.log('[SettingsBackup] Deleted old backup:', file.path);
+                    try {
+                        if (await adapter.exists(file.path)) {
+                            await adapter.remove(file.path);
+                            console.log('[SettingsBackup] Deleted old backup:', file.path);
+                        }
+                    } catch (e) {
+                        // File may have been deleted by concurrent cleanup
+                    }
                 }
             }
         } catch (error) {
