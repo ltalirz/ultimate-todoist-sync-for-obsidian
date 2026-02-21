@@ -27,6 +27,9 @@ import { DatabaseChecker } from './src/databaseChecker';
 //device manager
 import { DeviceManager } from './src/deviceManager';
 
+//storage path manager
+import { StoragePathManager } from './src/storagePathManager';
+
 
 //import modal
 import { SetDefalutProjectInTheFilepathModal } from 'src/modal';
@@ -43,6 +46,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
     backupOperation: BackupOperation | undefined;
     databaseChecker: DatabaseChecker | undefined;
     deviceManager: DeviceManager | undefined;
+    storagePathManager: StoragePathManager | undefined;
 	lastLines: Map<string,number>;
 	statusBar;
 	syncLock: Boolean;
@@ -460,6 +464,14 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 
 		//initialize device manager
 		this.deviceManager = new DeviceManager(this.app, this)
+
+		//initialize storage path manager
+		this.storagePathManager = new StoragePathManager(this.app, this)
+		
+		//ensure all storage directories exist
+		this.storagePathManager.ensureAllDirs().catch(error => {
+			console.error('[Plugin] Failed to create storage directories:', error);
+		});
 
 		//initialize sync data (load from cache or full sync on startup)
 		try {

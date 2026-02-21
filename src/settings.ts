@@ -42,6 +42,7 @@ export interface UltimateTodoistSyncSettings {
 	deviceIdGenerated: boolean;
 	// Log settings
 	enableLog:boolean;
+	// Legacy logs array (deprecated - kept for backward compatibility during migration)
 	logs:Array<{
 		timestamp:number;
 		action:LogAction;
@@ -49,6 +50,19 @@ export interface UltimateTodoistSyncSettings {
 		filePath?:string;
 		taskId?:string;
 	}>;
+	// New log file settings
+	logFileEnabled: boolean;
+	logRetentionDays: number;
+	// Memory buffer for today's logs
+	todayLogs: Array<{
+		timestamp:number;
+		action:LogAction;
+		details:string;
+		filePath?:string;
+		taskId?:string;
+	}>;
+	// Backup settings
+	maxBackupsPerFile: number;
 }
 
 
@@ -74,6 +88,10 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
 	deviceIdGenerated: false,
 	enableLog:true,
 	logs:[],
+	logFileEnabled: true,
+	logRetentionDays: 365,
+	todayLogs: [],
+	maxBackupsPerFile: 100,
 }
 
 

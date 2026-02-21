@@ -4,19 +4,24 @@ import UltimateTodoistSyncForObsidian from "../main";
 export class BackupOperation {
     app: App;
     plugin: UltimateTodoistSyncForObsidian;
-    private backupFolder = '.ultimate-todoist-backup';
-    private maxBackupsPerFile = 5;
+    private maxBackupsPerFile = 100;
 
     constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
         this.app = app;
         this.plugin = plugin;
+        this.maxBackupsPerFile = plugin.settings.maxBackupsPerFile || 100;
     }
 
     async ensureBackupFolderExists(): Promise<void> {
-        const folderExists = this.app.vault.getAbstractFileByPath(this.backupFolder);
-        if (!folderExists) {
-            await this.app.vault.createFolder(this.backupFolder);
+        if (!this.plugin.storagePathManager) {
+            console.warn('[BackupOperation] StoragePathManager not initialized');
+            return;
         }
+        await this.plugin.storagePathManager.ensureAllDirs();
+    }
+
+    getBackupFolder(): string {
+        return this.plugin.storagePathManager?.getBackupsFilesPath() || '.ultimate-todoist-sync/backups/files';
     }
 
     async backupFile(filePath: string): Promise<string | null> {
@@ -35,7 +40,7 @@ export class BackupOperation {
             
             const fileName = filePath.replace(/[/\\]/g, '_');
             const backupFileName = `${fileName}-${timestamp}.md`;
-            const backupPath = `${this.backupFolder}/${backupFileName}`;
+            const backupPath = `${this.getBackupFolder()}/${backupFileName}`;
 
             await this.app.vault.create(backupPath, content);
 
@@ -55,11 +60,12 @@ export class BackupOperation {
             const fileName = originalFilePath.replace(/[/\\]/g, '_');
             const prefix = `${fileName}-`;
             
-            const backupFolder = this.app.vault.getAbstractFileByPath(this.backupFolder);
+            const backupFolderPath = this.getBackupFolder();
+            const backupFolder = this.app.vault.getAbstractFileByPath(backupFolderPath);
             if (!backupFolder) return;
 
             const files = this.app.vault.getFiles()
-                .filter(f => f.path.startsWith(this.backupFolder) && f.name.startsWith(prefix))
+                .filter(f => f.path.startsWith(backupFolderPath) && f.name.startsWith(prefix))
                 .sort((a, b) => b.stat.mtime - a.stat.mtime);
 
             if (files.length > this.maxBackupsPerFile) {
@@ -76,8 +82,9 @@ export class BackupOperation {
     async getBackupList(filePath?: string): Promise<string[]> {
         try {
             const backups: string[] = [];
+            const backupFolderPath = this.getBackupFolder();
             const files = this.app.vault.getFiles()
-                .filter(f => f.path.startsWith(this.backupFolder));
+                .filter(f => f.path.startsWith(backupFolderPath));
 
             for (const file of files) {
                 if (filePath) {
@@ -129,14 +136,15 @@ export class BackupOperation {
 
     async clearAllBackups(): Promise<void> {
         try {
+            const backupFolderPath = this.getBackupFolder();
             const files = this.app.vault.getFiles()
-                .filter(f => f.path.startsWith(this.backupFolder));
+                .filter(f => f.path.startsWith(backupFolderPath));
 
             for (const file of files) {
                 await this.app.vault.delete(file);
             }
 
-            const backupFolder = this.app.vault.getAbstractFileByPath(this.backupFolder);
+            const backupFolder = this.app.vault.getAbstractFileByPath(backupFolderPath);
             if (backupFolder) {
                 await this.app.vault.delete(backupFolder);
             }
