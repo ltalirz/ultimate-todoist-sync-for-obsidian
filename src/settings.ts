@@ -559,6 +559,63 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 				});
 				return component;
 			});
+
+		containerEl.createEl('h3', { text: 'Settings Backup & Recovery' });
+
+		new Setting(containerEl)
+			.setName('Backup Settings')
+			.setDesc('Create a manual backup of current settings')
+			.addButton(component => {
+				component.setButtonText('Backup Now');
+				component.onClick(async () => {
+					if (!this.plugin.settingsBackup) {
+						new Notice('Settings backup not initialized');
+						return;
+					}
+					const success = await this.plugin.settingsBackup.backup();
+					if (success) {
+						new Notice('Settings backed up successfully');
+					} else {
+						new Notice('Failed to backup settings');
+					}
+				});
+				return component;
+			});
+
+		new Setting(containerEl)
+			.setName('Restore Settings')
+			.setDesc('Restore settings from the latest backup')
+			.addButton(component => {
+				component.setButtonText('Restore from Backup');
+				component.onClick(async () => {
+					if (!this.plugin.settingsBackup) {
+						new Notice('Settings backup not initialized');
+						return;
+					}
+					const success = await this.plugin.settingsBackup.restore();
+					if (success) {
+						new Notice('Settings restored. Please reload the plugin.');
+					}
+				});
+				return component;
+			});
+
+		new Setting(containerEl)
+			.setName('Reset Settings')
+			.setDesc('Reset all settings to defaults (will lose all task mappings)')
+			.addButton(component => {
+				component.setButtonText('Reset to Defaults');
+				component.setWarning();
+				component.onClick(async () => {
+					const confirmed = confirm('Are you sure you want to reset all settings? This will lose all task mappings and cannot be undone.');
+					if (!confirmed) return;
+					
+					this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS);
+					await this.plugin.saveSettings();
+					new Notice('Settings reset to defaults. Please reload the plugin.');
+				});
+				return component;
+			});
 	}
 }
 

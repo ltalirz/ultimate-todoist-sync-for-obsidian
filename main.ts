@@ -30,6 +30,9 @@ import { DeviceManager } from './src/deviceManager';
 //storage path manager
 import { StoragePathManager } from './src/storagePathManager';
 
+//settings backup
+import { SettingsBackup } from './src/settingsBackup';
+
 
 //import modal
 import { SetDefalutProjectInTheFilepathModal } from 'src/modal';
@@ -44,21 +47,27 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
     todoistSync: TodoistSync | undefined;
     logOperation: LogOperation | undefined;
     backupOperation: BackupOperation | undefined;
-    databaseChecker: DatabaseChecker | undefined;
+	databaseChecker: DatabaseChecker | undefined;
     deviceManager: DeviceManager | undefined;
     storagePathManager: StoragePathManager | undefined;
+	settingsBackup: SettingsBackup | undefined;
 	lastLines: Map<string,number>;
 	statusBar;
-	syncLock: Boolean;
+	syncLock: boolean;
+	saveLock: boolean;
 
 	async onload() {
+		this.saveLock = false;
 
 		const isSettingsLoaded = await this.loadSettings();
 
 		if(!isSettingsLoaded){
-			new Notice('Settings failed to load.Please reload the ultimate todoist sync plugin.');
+			new Notice('Settings failed to load. Please reload the ultimate todoist sync plugin.');
 			return;
 		}
+
+		this.settingsBackup = new SettingsBackup(this.app, this);
+
 		// This adds a settings tab so the user can configure various aspects of the plugin
 		this.addSettingTab(new UltimateTodoistSyncSettingTab(this.app, this));
 		if (!this.settings.todoistAPIToken) {
@@ -311,28 +320,131 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 
 	}
 
-	async loadSettings() {
+	async loadSettings(): Promise<boolean> {
 		try {
 			const data = await this.loadData();
+
+			if (!this.validateLoadedSettings(data)) {
+				console.warn('[Settings] Settings corrupted, attempting recovery...');
+				
+				this.settingsBackup = new SettingsBackup(this.app, this);
+				const recovered = await this.settingsBackup.restore();
+				if (recovered) {
+					new Notice('Settings recovered from backup');
+					const recoveredData = await this.loadData();
+					this.settings = Object.assign({}, DEFAULT_SETTINGS, recoveredData);
+					return true;
+				}
+
+				console.error('[Settings] Recovery failed, using default settings');
+				this.settings = Object.assign({}, DEFAULT_SETTINGS);
+				new Notice('Settings reset to defaults due to corruption');
+				await this.saveSettings();
+				return true;
+			}
+
 			this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
-			return true; // 返回 true 表示设置加载成功
+			this.settingsBackup = new SettingsBackup(this.app, this);
+			return true;
 		} catch (error) {
-			console.error('Failed to load data:', error);
-			return false; // 返回 false 表示设置加载失败
+			console.error('[Settings] Failed to load data:', error);
+			this.settings = Object.assign({}, DEFAULT_SETTINGS);
+			return true;
 		}
 	}
 
-	async saveSettings() {
-		try {
-			// 验证设置是否存在且不为空
-			if (this.settings && Object.keys(this.settings).length > 0) {
-				await this.saveData(this.settings);
-			} else {
-				console.error('Settings are empty or invalid, not saving to avoid data loss.');
+	private validateLoadedSettings(data: any): boolean {
+		if (!data || typeof data !== 'object') {
+			console.warn('[Settings] Settings data is not a valid object');
+			return false;
+		}
+
+		const requiredFields = ['initialized', 'todoistAPIToken', 'taskFileMapping'];
+		for (const field of requiredFields) {
+			if (!(field in data)) {
+				console.warn(`[Settings] Missing required field: ${field}`);
+				return false;
 			}
+		}
+
+		if (data.taskFileMapping && typeof data.taskFileMapping !== 'object') {
+			console.warn('[Settings] taskFileMapping is not a valid object');
+			return false;
+		}
+
+		try {
+			JSON.parse(JSON.stringify(data));
+			return true;
+		} catch {
+			console.warn('[Settings] Settings data cannot be stringified');
+			return false;
+		}
+	}
+
+	async saveSettings(): Promise<boolean> {
+		if (this.saveLock) {
+			console.log('[Settings] Save already in progress, skipping...');
+			return false;
+		}
+
+		this.saveLock = true;
+		try {
+			if (!this.settings || Object.keys(this.settings).length === 0) {
+				console.error('[Settings] Settings are empty or invalid, not saving to avoid data loss.');
+				this.saveLock = false;
+				return false;
+			}
+
+			if (!this.validateSettings()) {
+				console.error('[Settings] Settings validation failed');
+				this.saveLock = false;
+				return false;
+			}
+
+			if (this.settingsBackup) {
+				const backupSuccess = await this.settingsBackup.backup();
+				if (!backupSuccess) {
+					console.warn('[Settings] Backup failed, proceeding with save anyway');
+				}
+			}
+
+			await this.saveData(this.settings);
+
+			console.log('[Settings] Settings saved successfully');
+			this.saveLock = false;
+			return true;
 		} catch (error) {
-			// 打印或处理错误
-			console.error('Error saving settings:', error);
+			console.error('[Settings] Error saving settings:', error);
+			if (this.settingsBackup) {
+				await this.settingsBackup.restore();
+			}
+			this.saveLock = false;
+			return false;
+		}
+	}
+
+	private validateSettings(): boolean {
+		if (!this.settings) {
+			return false;
+		}
+
+		const requiredFields = ['initialized', 'todoistAPIToken', 'taskFileMapping'];
+		for (const field of requiredFields) {
+			if (!(field in this.settings)) {
+				console.error(`[SettingsValidator] Missing required field: ${field}`);
+				return false;
+			}
+		}
+
+		if (this.settings.taskFileMapping && typeof this.settings.taskFileMapping !== 'object') {
+			return false;
+		}
+
+		try {
+			JSON.parse(JSON.stringify(this.settings));
+			return true;
+		} catch {
+			return false;
 		}
 	}
 

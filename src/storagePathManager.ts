@@ -31,6 +31,10 @@ export class StoragePathManager {
         return `${this.basePath}/backups/todoist`;
     }
 
+    getBackupsSettingsPath(): string {
+        return `${this.basePath}/backups/settings`;
+    }
+
     async getLogsPath(): Promise<string> {
         const deviceId = await this.plugin.deviceManager?.getDeviceId() || 'unknown';
         return `${this.getLogsBasePath()}/${deviceId}`;
@@ -80,6 +84,7 @@ export class StoragePathManager {
         await this.ensureDir(this.getBackupsBasePath());
         await this.ensureDir(this.getBackupsFilesPath());
         await this.ensureDir(this.getBackupsTodoistPath());
+        await this.ensureDir(this.getBackupsSettingsPath());
     }
 
     async readJsonFile<T>(path: string): Promise<T | null> {
