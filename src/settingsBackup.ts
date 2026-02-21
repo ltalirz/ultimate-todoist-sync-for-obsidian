@@ -109,18 +109,34 @@ export class SettingsBackup {
             
             const exists = await adapter.exists(backupDir);
             if (!exists) {
+                console.log('[SettingsBackup] Backup directory does not exist');
                 return null;
             }
 
-            const files = this.app.vault.getFiles()
-                .filter(f => f.path.startsWith(backupDir + '/') && f.name.startsWith('settings-'))
-                .sort((a, b) => b.stat.mtime - a.stat.mtime);
+            const fileList = await adapter.list(backupDir);
+            const jsonFiles = fileList.files.filter(f => 
+                f.startsWith('settings-') && f.endsWith('.json')
+            );
 
-            if (files.length === 0) {
+            if (jsonFiles.length === 0) {
+                console.log('[SettingsBackup] No backup files found');
                 return null;
             }
 
-            return files[0].path;
+            // 获取每个文件的修改时间并排序
+            const filesWithTime = await Promise.all(
+                jsonFiles.map(async (fileName) => {
+                    const fullPath = `${backupDir}/${fileName}`;
+                    const stat = await adapter.stat(fullPath);
+                    return {
+                        path: fullPath,
+                        mtime: stat?.mtime || 0
+                    };
+                })
+            );
+
+            filesWithTime.sort((a, b) => b.mtime - a.mtime);
+            return filesWithTime[0].path;
         } catch (error) {
             console.error('[SettingsBackup] Failed to get latest backup:', error);
             return null;
@@ -130,11 +146,34 @@ export class SettingsBackup {
     async getBackupList(): Promise<string[]> {
         try {
             const backupDir = this.getBackupDir();
-            const files = this.app.vault.getFiles()
-                .filter(f => f.path.startsWith(backupDir + '/') && f.name.startsWith('settings-'))
-                .sort((a, b) => b.stat.mtime - a.stat.mtime);
+            const adapter = this.app.vault.adapter;
+            
+            const dirExists = await adapter.exists(backupDir);
+            if (!dirExists) {
+                console.log('[SettingsBackup] Backup directory does not exist:', backupDir);
+                return [];
+            }
 
-            return files.map(f => f.path);
+            const fileList = await adapter.list(backupDir);
+            const jsonFiles = fileList.files.filter(f => 
+                f.startsWith('settings-') && f.endsWith('.json')
+            );
+
+            // 获取每个文件的修改时间并排序
+            const filesWithTime = await Promise.all(
+                jsonFiles.map(async (fileName) => {
+                    const fullPath = `${backupDir}/${fileName}`;
+                    const stat = await adapter.stat(fullPath);
+                    return {
+                        path: fullPath,
+                        mtime: stat?.mtime || 0
+                    };
+                })
+            );
+
+            filesWithTime.sort((a, b) => b.mtime - a.mtime);
+            console.log('[SettingsBackup] Found backup files:', filesWithTime.map(f => f.path));
+            return filesWithTime.map(f => f.path);
         } catch (error) {
             console.error('[SettingsBackup] Failed to get backup list:', error);
             return [];
@@ -181,17 +220,36 @@ export class SettingsBackup {
     private async cleanOldBackups(): Promise<void> {
         try {
             const backupDir = this.getBackupDir();
-            const files = this.app.vault.getFiles()
-                .filter(f => f.path.startsWith(backupDir + '/') && f.name.startsWith('settings-'))
-                .sort((a, b) => b.stat.mtime - a.stat.mtime);
+            const adapter = this.app.vault.adapter;
 
-            if (files.length > this.maxBackups) {
-                const filesToDelete = files.slice(this.maxBackups);
-                const adapter = this.app.vault.adapter;
-                for (const file of filesToDelete) {
-                    await adapter.remove(file.path);
-                    console.log('[SettingsBackup] Deleted old backup:', file.path);
-                }
+            const dirExists = await adapter.exists(backupDir);
+            if (!dirExists) return;
+
+            const fileList = await adapter.list(backupDir);
+            const jsonFiles = fileList.files.filter(f => 
+                f.startsWith('settings-') && f.endsWith('.json')
+            );
+
+            if (jsonFiles.length <= this.maxBackups) return;
+
+            // 获取每个文件的修改时间并排序
+            const filesWithTime = await Promise.all(
+                jsonFiles.map(async (fileName) => {
+                    const fullPath = `${backupDir}/${fileName}`;
+                    const stat = await adapter.stat(fullPath);
+                    return {
+                        path: fullPath,
+                        mtime: stat?.mtime || 0
+                    };
+                })
+            );
+
+            filesWithTime.sort((a, b) => b.mtime - a.mtime);
+
+            const filesToDelete = filesWithTime.slice(this.maxBackups);
+            for (const file of filesToDelete) {
+                await adapter.remove(file.path);
+                console.log('[SettingsBackup] Deleted old backup:', file.path);
             }
         } catch (error) {
             console.error('[SettingsBackup] Failed to clean old backups:', error);
