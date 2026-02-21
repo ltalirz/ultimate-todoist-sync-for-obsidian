@@ -50,11 +50,12 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 	databaseChecker: DatabaseChecker | undefined;
     deviceManager: DeviceManager | undefined;
     storagePathManager: StoragePathManager | undefined;
-	settingsBackup: SettingsBackup | undefined;
-	lastLines: Map<string,number>;
-	statusBar;
-	syncLock: boolean;
-	saveLock: boolean;
+ 	settingsBackup: SettingsBackup | undefined;
+ 	lastLines: Map<string,number>;
+ 	statusBar;
+ 	syncLock: boolean;
+ 	saveLock: boolean;
+ 	isProcessingModify: boolean;
 
 	async onload() {
 		this.saveLock = false;
@@ -219,6 +220,13 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				if(!this.settings.apiInitialized){
 					return
 				}
+				
+				// Re-entry protection - prevent infinite loop
+				if (this.isProcessingModify) {
+					return
+				}
+				this.isProcessingModify = true;
+				
 				const filepath = file.path
 				console.log(`${filepath} is modified`)
 
@@ -230,10 +238,14 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 
 				//To avoid conflicts, Do not check files being edited
 				if(activateFile?.path == filepath){
+					this.isProcessingModify = false;
 					return
 				}
 
-				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
+				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) {
+					this.isProcessingModify = false;
+					return;
+				}
 				
 				await this.todoistSync.fullTextNewTaskCheck(filepath)
 				this.syncLock = false;
@@ -243,6 +255,8 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				this.syncLock = false
 				// You can add further error handling logic here. For example, you may want to 
 				// revert certain operations, or alert the user about the error.
+			} finally {
+				this.isProcessingModify = false;
 			}
 		}));
 
