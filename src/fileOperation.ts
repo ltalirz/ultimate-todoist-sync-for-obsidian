@@ -421,6 +421,111 @@ export class FileOperation   {
     }
 
 
+    async syncTaskContentToFile(taskId: string, newContent: string): Promise<boolean> {
+        const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId);
+        if (!taskMapping) return false;
+        const filepath = taskMapping.filePath;
+
+        const file = this.app.vault.getAbstractFileByPath(filepath);
+        const fileContent = await this.app.vault.read(file);
+        const lines = fileContent.split('\n');
+        let modified = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (line.includes(taskId) && this.plugin.taskParser.hasTodoistTag(line)) {
+                const oldContent = this.plugin.taskParser.getTaskContentFromLineText(line);
+                if (oldContent && oldContent !== newContent) {
+                    lines[i] = line.replace(oldContent, newContent);
+                    modified = true;
+                }
+                break;
+            }
+        }
+
+        if (modified) {
+            const newFileContent = lines.join('\n');
+            await this.plugin.backupOperation?.backupFile(filepath);
+            await this.app.vault.modify(file, newFileContent);
+            this.plugin.logOperation?.log('FILE_TASK_CONTENT_SYNCED', `Synced content from Todoist: ${taskId}`, filepath, taskId);
+        }
+        return modified;
+    }
+
+    async syncTaskDueDateToFile(taskId: string, newDueDate: string): Promise<boolean> {
+        const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId);
+        if (!taskMapping) return false;
+        const filepath = taskMapping.filePath;
+
+        const file = this.app.vault.getAbstractFileByPath(filepath);
+        const fileContent = await this.app.vault.read(file);
+        const lines = fileContent.split('\n');
+        let modified = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (line.includes(taskId) && this.plugin.taskParser.hasTodoistTag(line)) {
+                const oldDueDate = this.plugin.taskParser.getDueDateFromLineText(line) || "";
+                const localDueDate = this.plugin.taskParser.ISOStringToLocalDateString(newDueDate) || "";
+
+                if (oldDueDate === localDueDate) break;
+
+                if (oldDueDate === "" && localDueDate !== "") {
+                    lines[i] = this.plugin.taskParser.insertDueDateBeforeTodoist(line, localDueDate);
+                    modified = true;
+                } else if (localDueDate === "") {
+                    const regexRemoveDate = /(🗓️|📅|📆|🗓)\s?\d{4}-\d{2}-\d{2}/;
+                    lines[i] = line.replace(regexRemoveDate, "");
+                    modified = true;
+                } else {
+                    lines[i] = line.replace(oldDueDate, localDueDate);
+                    modified = true;
+                }
+                break;
+            }
+        }
+
+        if (modified) {
+            const newFileContent = lines.join('\n');
+            await this.plugin.backupOperation?.backupFile(filepath);
+            await this.app.vault.modify(file, newFileContent);
+            this.plugin.logOperation?.log('FILE_TASK_DUEDATE_SYNCED', `Synced due date from Todoist: ${taskId}`, filepath, taskId);
+        }
+        return modified;
+    }
+
+    async syncTaskNoteToFile(taskId: string, noteContent: string, noteDate: string): Promise<boolean> {
+        const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId);
+        if (!taskMapping) return false;
+        const filepath = taskMapping.filePath;
+
+        const file = this.app.vault.getAbstractFileByPath(filepath);
+        const fileContent = await this.app.vault.read(file);
+        const lines = fileContent.split('\n');
+        let modified = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (line.includes(taskId) && this.plugin.taskParser.hasTodoistTag(line)) {
+                const indent = '\t'.repeat(line.length - line.trimStart().length + 1);
+                const noteLine = `${indent}- ${noteDate} ${noteContent}`;
+                // skip if note already exists in next lines
+                if (i + 1 < lines.length && lines[i + 1].includes(noteContent)) break;
+                lines.splice(i + 1, 0, noteLine);
+                modified = true;
+                break;
+            }
+        }
+
+        if (modified) {
+            const newFileContent = lines.join('\n');
+            await this.plugin.backupOperation?.backupFile(filepath);
+            await this.app.vault.modify(file, newFileContent);
+            this.plugin.logOperation?.log('FILE_TASK_NOTE_ADDED', `Synced note from Todoist: ${taskId}`, filepath, taskId);
+        }
+        return modified;
+    }
+
     //避免使用该方式，通过view可以获得实时更新的value
     async readContentFromFilePath(filepath:string){
         try {

@@ -60,9 +60,11 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
  	syncLock: boolean;
  	saveLock: boolean;
  	isProcessingModify: boolean;
+ 	scheduledSyncInProgress: boolean;
 
 	async onload() {
 		this.saveLock = false;
+		this.scheduledSyncInProgress = false;
 
 		const isSettingsLoaded = await this.loadSettings();
 
@@ -689,34 +691,33 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		}
 		const target = evt.target as HTMLInputElement;
 
-		const taskElement = target.closest("div");    //使用 evt.target.closest() 方法寻找特定的父元素，而不是直接访问事件路径中的特定索引
-		//console.log(taskElement)
+		const taskElement = target.closest("div");
 		if (!taskElement) return;
 		const regex = /\[todoist_id::\s*(\w+)\]/;
 		const match = taskElement.textContent?.match(regex) || false;
 		if (match) {
 			const taskId = match[1];
-			//console.log(taskId)
-			//const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-			if (target.checked) {
-				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
-				this.todoistSync.closeTask(taskId);
-			} else {
-				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
-				this.todoistSync.repoenTask(taskId);
+			if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
+			try {
+				if (target.checked) {
+					await this.todoistSync.closeTask(taskId);
+				} else {
+					await this.todoistSync.repoenTask(taskId);
+				}
+			} catch(error) {
+				console.error(`An error occurred while toggling task: ${error}`);
+			} finally {
+				this.syncLock = false;
 			}
 		} else {
-			//console.log('未找到 todoist_id');
-			//开始全文搜索，检查status更新
-			try{
-				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
+			if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
+			try {
 				await this.todoistSync.fullTextModifiedTaskCheck()
-				this.syncLock = false;
-			}catch(error){
+			} catch(error) {
 				console.error(`An error occurred while check modified tasks in the file: ${error}`);
+			} finally {
 				this.syncLock = false;
 			}
-
 		}
 	}
 
@@ -761,83 +762,79 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 	}
 
 	async scheduledSynchronization() {
+		if (this.scheduledSyncInProgress) {
+			console.log('Scheduled sync already in progress, skipping');
+			return;
+		}
 		if (!(this.checkModuleClass())) {
 			return;
 		}
-		console.log("Todoist scheduled synchronization task started at", new Date().toLocaleString());
-		try {
-			if (!await this.checkAndHandleSyncLock('todoistToObsidian')) return;
-			try {
-				await this.todoistSync.syncTodoistToObsidian();
-			} catch(error) {
-				console.error('An error occurred in syncTodoistToObsidian:', error);
-			}
-			this.syncLock = false;
-			try {
-				await this.saveSettings();
-			} catch(error) {
-				console.error('An error occurred in saveSettings:', error);
-			}
 
-			// Sleep for 5 seconds
+		this.scheduledSyncInProgress = true;
+		console.log("Todoist scheduled synchronization task started at", new Date().toLocaleString());
+
+		try {
+			await this.withSyncLock('todoistToObsidian', async () => {
+				await this.todoistSync.syncTodoistToObsidian();
+			});
+
+			await this.saveSettings();
 			await new Promise(resolve => setTimeout(resolve, 5000));
 
-			// 从 taskFileMapping 推导需要同步的文件列表
 			const filesToSyncSet = new Set<string>();
 			const taskFileMapping = this.settings.taskFileMapping;
 			for (const taskId in taskFileMapping) {
 				filesToSyncSet.add(taskFileMapping[taskId].filePath);
 			}
 			const filesToSync = Array.from(filesToSyncSet);
-			
-			if(this.settings.debugMode){
-				console.log('Files to sync:', filesToSync)
+
+			if (this.settings.debugMode) {
+				console.log('Files to sync:', filesToSync);
 			}
 
 			for (const fileKey of filesToSync) {
-				if(this.settings.debugMode){
-					console.log('Syncing file:', fileKey)
+				if (this.settings.debugMode) {
+					console.log('Syncing file:', fileKey);
 				}
 
-				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
-				try {
+				const lockOk = await this.withSyncLock('obsidianToTodoist', async () => {
 					await this.todoistSync.fullTextNewTaskCheck(fileKey);
-				} catch(error) {
-					console.error('An error occurred in fullTextNewTaskCheck:', error);
-				}
-				this.syncLock = false;
+				});
+				if (!lockOk) continue;
 
-				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
-				try {
+				await this.withSyncLock('obsidianToTodoist', async () => {
 					await this.todoistSync.deletedTaskCheck(fileKey);
-				} catch(error) {
-					console.error('An error occurred in deletedTaskCheck:', error);
-				}
-				this.syncLock = false;
+				});
 
-				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
-				try {
+				await this.withSyncLock('obsidianToTodoist', async () => {
 					await this.todoistSync.fullTextModifiedTaskCheck(fileKey);
-				} catch(error) {
-					console.error('An error occurred in fullTextModifiedTaskCheck:', error);
-				}
-				this.syncLock = false;
+				});
 			}
-
 		} catch (error) {
-			console.error('An error occurred:', error);
-			new Notice('An error occurred:', error);
+			console.error('An error occurred during scheduled sync:', error);
 			this.syncLock = false;
 		}
 
-		// Flush log buffer after sync completes
 		try {
 			await this.logOperation?.flushToFile();
 		} catch (error) {
 			console.error('An error occurred in flushToFile:', error);
 		}
 
+		this.scheduledSyncInProgress = false;
 		console.log("Todoist scheduled synchronization task completed at", new Date().toLocaleString());
+	}
+
+	async withSyncLock(direction: 'obsidianToTodoist' | 'todoistToObsidian', fn: () => Promise<void>): Promise<boolean> {
+		if (!await this.checkAndHandleSyncLock(direction)) return false;
+		try {
+			await fn();
+		} catch(error) {
+			console.error(`Error during ${direction} sync:`, error);
+		} finally {
+			this.syncLock = false;
+		}
+		return true;
 	}
 
 	async checkSyncLock() {

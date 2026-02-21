@@ -52,30 +52,6 @@ export class TodoistSync {
         return this.obsidianToTodoist.updateTaskDescription(filepath);
     }
 
-    async syncCompletedTaskStatusToObsidian(unSynchronizedEvents: unknown[]): Promise<void> {
-        return this.todoistToObsidian.syncCompletedTaskStatusToObsidian(unSynchronizedEvents);
-    }
-
-    async syncUncompletedTaskStatusToObsidian(unSynchronizedEvents: unknown[]): Promise<void> {
-        return this.todoistToObsidian.syncUncompletedTaskStatusToObsidian(unSynchronizedEvents);
-    }
-
-    async syncUpdatedTaskToObsidian(unSynchronizedEvents: unknown[]): Promise<void> {
-        return this.todoistToObsidian.syncUpdatedTaskToObsidian(unSynchronizedEvents);
-    }
-
-    async syncUpdatedTaskContentToObsidian(e: unknown): Promise<void> {
-        return this.todoistToObsidian.syncUpdatedTaskContentToObsidian(e);
-    }
-
-    async syncUpdatedTaskDueDateToObsidian(e: unknown): Promise<void> {
-        return this.todoistToObsidian.syncUpdatedTaskDueDateToObsidian(e);
-    }
-
-    async syncAddedTaskNoteToObsidian(unSynchronizedEvents: unknown[]): Promise<void> {
-        return this.todoistToObsidian.syncAddedTaskNoteToObsidian(unSynchronizedEvents);
-    }
-
     async syncTodoistToObsidian(): Promise<void> {
         return this.todoistToObsidian.syncTodoistToObsidian();
     }

@@ -15,6 +15,8 @@ export interface UltimateTodoistSyncSettings {
             lineNumber: number;
             status?: 'active' | 'nonActive' | 'conflicted' | 'issue';
             syncEnabled?: boolean;
+            updated_at?: string;
+            note_count?: number;
         };
     };
     enableFullVaultSync: boolean;
