@@ -52,7 +52,7 @@ const REGEX = {
     TODOIST_TAG: new RegExp(`^[\\s]*[-] \\[[x ]\\] [\\s\\S]*${keywords.TODOIST_TAG}[\\s\\S]*$`, "i"),
     TODOIST_ID: /\[todoist_id::\s*\w+\]/,
     TODOIST_ID_NUM:/\[todoist_id::\s*(\S+)\]/,
-    TODOIST_LINK:/\[link\]\(https?:\/\/[^)]*todoist\.com[^)]*\)/,
+    TODOIST_LINK:/\[link\]\((https?:\/\/[^)]*todoist\.com[^)]*|todoist:\/\/[^)]*)\)/,
     DUE_DATE_WITH_EMOJ: new RegExp(`(${keywords.DUE_DATE})\\s?\\d{4}-\\d{2}-\\d{2}`),
     DUE_DATE : new RegExp(`(?:${keywords.DUE_DATE})\\s?(\\d{4}-\\d{2}-\\d{2})`),
     PROJECT_NAME: /\[project::\s*(.*?)\]/,
@@ -71,6 +71,7 @@ const REGEX = {
         REMOVE_TODOIST_LINK_NEW: /\[([^\]]*)\]\(https?:\/\/app\.todoist\.com\/app\/task\/\S*\)/,
         // 混合格式: [xxx](https://todoist.com/app/task/123) - 旧域名 + 新路径
         REMOVE_TODOIST_LINK_OLD_DOMAIN_NEW_PATH: /\[([^\]]*)\]\(https?:\/\/todoist\.com\/app\/task\/\S*\)/,
+        REMOVE_TODOIST_LINK_APP_URI: /\[([^\]]*)\]\(todoist:\/\/task\?id=\S*\)/,
     },
     ALL_TAGS: /#[\w\u4e00-\u9fa5-]+/g,
     TASK_CHECKBOX_CHECKED: /- \[(x|X)\] /,
@@ -285,7 +286,8 @@ export class TaskParser   {
         const TaskContent = lineText.replace(REGEX.TASK_CONTENT.REMOVE_INLINE_METADATA,"")
                                     .replace(REGEX.TASK_CONTENT.REMOVE_TODOIST_LINK_OLD,"")  // 旧格式: todoist.com/showtask?id=xxx
                                     .replace(REGEX.TASK_CONTENT.REMOVE_TODOIST_LINK_NEW,"")  // 新格式: app.todoist.com/app/task/xxx
-                                    .replace(REGEX.TASK_CONTENT.REMOVE_TODOIST_LINK_OLD_DOMAIN_NEW_PATH,"")  // 混合格式: todoist.com/app/task/xxx
+                                    .replace(REGEX.TASK_CONTENT.REMOVE_TODOIST_LINK_OLD_DOMAIN_NEW_PATH,"")
+                                    .replace(REGEX.TASK_CONTENT.REMOVE_TODOIST_LINK_APP_URI,"")
                                     .replace(REGEX.TASK_CONTENT.REMOVE_PRIORITY," ") //priority 前后必须都有空格，
                                     .replace(REGEX.TASK_CONTENT.REMOVE_TAGS,"")
                                     .replace(REGEX.TASK_CONTENT.REMOVE_DATE,"")
