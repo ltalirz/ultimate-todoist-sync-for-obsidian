@@ -237,47 +237,6 @@ export class FileOperation   {
     }
 
 
-        //add #todoist at the end of task line, if full vault sync enabled
-    async addTodoistTagToLine(filepath:string,lineText:string,lineNumber:number,fileContent:string) {    
-        // 获取文件对象并更新内容
-        const file = this.app.vault.getAbstractFileByPath(filepath)
-        const content = fileContent
-    
-        const lines = content.split('\n')
-        let modified = false
-    
-        
-        const line = lineText
-        if(!this.plugin.taskParser.isMarkdownTask(line)){
-            //console.log(line)
-            //console.log("It is not a markdown task.")
-            return;
-        }
-        //if content is empty
-        if(this.plugin.taskParser.getTaskContentFromLineText(line) == ""){
-            //console.log("Line content is empty")
-            return;
-        }
-        if (!this.plugin.taskParser.hasTodoistId(line) && !this.plugin.taskParser.hasTodoistTag(line)) {
-            //console.log(line)
-            //console.log('prepare to add todoist tag')
-            const newLine = this.plugin.taskParser.addTodoistTag(line);
-            //console.log(newLine)
-            lines[lineNumber] = newLine
-            modified = true
-        }
-        
-        
-        if (modified) {
-            console.log(`New task found in files ${filepath}`)
-            const newContent = lines.join('\n')
-            console.log(newContent)
-            await this.plugin.backupOperation?.backupFile(filepath);
-            await this.app.vault.modify(file, newContent)
-
-        }
-    }
-
     // sync updated task content  to file
     async syncUpdatedTaskContentToTheFile(evt:Object) {
         const taskId = evt.object_id

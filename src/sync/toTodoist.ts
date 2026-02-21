@@ -73,10 +73,19 @@ export class ObsidianToTodoistSync {
         const line = cursor.line;
         const linetxt = editor.getLine(line);
 
-        if ((!this.plugin.taskParser.hasTodoistId(linetxt) && this.plugin.taskParser.hasTodoistTag(linetxt))) {
+        const hasId = this.plugin.taskParser.hasTodoistId(linetxt);
+        const hasTag = this.plugin.taskParser.hasTodoistTag(linetxt);
+        const fullVault = this.plugin.settings.enableFullVaultSync;
+        const isTask = this.plugin.taskParser.isMarkdownTask(linetxt);
+        const contentNotEmpty = isTask && this.plugin.taskParser.getTaskContentFromLineText(linetxt) !== "";
+
+        const isNewTask = !hasId && (hasTag || (fullVault && contentNotEmpty));
+
+        if (isNewTask) {
+            const processedLine = hasTag ? linetxt : this.plugin.taskParser.addTodoistTag(linetxt);
             console.log('this is a new task');
-            console.log(linetxt);
-            const currentTask = await this.plugin.taskParser.convertTextToTodoistTaskObject(linetxt, filepath, line, fileContent);
+            console.log(processedLine);
+            const currentTask = await this.plugin.taskParser.convertTextToTodoistTaskObject(processedLine, filepath, line, fileContent);
 
             try {
                 const newTask = await this.plugin.todoistSyncAPI.AddTask(currentTask);
@@ -96,7 +105,7 @@ export class ObsidianToTodoistSync {
                     this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Completed task in Todoist: ${newTask.content}`, filepath, todoist_id);
                 }
 
-                const text_with_out_link = `${linetxt} %%[todoist_id:: ${todoist_id}]%%`;
+                const text_with_out_link = `${processedLine} %%[todoist_id:: ${todoist_id}]%%`;
                 const link = this.plugin.settings.useAppURI ? `[link](todoist://task?id=${newTask.id})` : `[link](https://app.todoist.com/app/task/${newTask.id})`;
                 const text = this.plugin.taskParser.addTodoistLink(text_with_out_link, link);
                 const from = { line: cursor.line, ch: 0 };
@@ -136,6 +145,7 @@ export class ObsidianToTodoistSync {
 
         if (this.plugin.settings.enableFullVaultSync) {
             await this.plugin.fileOperation.addTodoistTagToFile(filepath);
+            currentFileValue = await this.app.vault.read(file);
         }
 
         const content = currentFileValue;

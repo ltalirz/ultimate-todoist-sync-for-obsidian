@@ -153,9 +153,6 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				if(!(this.checkModuleClass())){
 					return
 				}
-				if(this.settings.enableFullVaultSync){
-					return
-				}
 				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
 				await this.obsidianToTodoist.lineContentNewTaskCheck(editor,view)
 				this.syncLock = false
