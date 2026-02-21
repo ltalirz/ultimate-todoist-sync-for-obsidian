@@ -240,12 +240,12 @@ export class CacheOperation   {
      * - 初始化 defaultProjectId
      */
     async newEmptyFileMetadata(filepath: string): Promise<void> {
-        const metadatas = this.plugin.settings.fileMetadata;
+        const metadatas = { ...this.plugin.settings.fileMetadata };
         if (metadatas[filepath]) {
             return;
         }
         metadatas[filepath] = {};
-        this.plugin.settings.fileMetadata = metadatas;
+        await this.plugin.safeSettings?.update({ fileMetadata: metadatas });
     }
 
     /**
@@ -257,7 +257,7 @@ export class CacheOperation   {
      * - 当需要更新文件的默认项目时调用
      */
     async updateFileMetadata(filepath: string, newMetadata: { defaultProjectId?: string }): Promise<void> {
-        const metadatas = this.plugin.settings.fileMetadata;
+        const metadatas = { ...this.plugin.settings.fileMetadata };
     
         if (!metadatas[filepath]) {
             metadatas[filepath] = {};
@@ -267,7 +267,7 @@ export class CacheOperation   {
             metadatas[filepath].defaultProjectId = newMetadata.defaultProjectId;
         }
     
-        this.plugin.settings.fileMetadata = metadatas;
+        await this.plugin.safeSettings?.update({ fileMetadata: metadatas });
         this.plugin.logOperation?.log('CACHE_FILE_METADATA_UPDATED', `Updated file metadata for: ${filepath}`, filepath);
     }
 
@@ -371,7 +371,9 @@ export class CacheOperation   {
      * @param syncEnabled - 是否启用同步，默认 true
      */
     setTaskFileMapping(taskId: string, filePath: string, lineNumber: number, status: 'active' | 'nonActive' | 'conflicted' | 'issue' = 'active', syncEnabled: boolean = true): void {
-        this.plugin.settings.taskFileMapping[taskId] = { filePath, lineNumber, status, syncEnabled };
+        const mapping = { ...this.plugin.settings.taskFileMapping };
+        mapping[taskId] = { filePath, lineNumber, status, syncEnabled };
+        this.plugin.safeSettings?.updateSync({ taskFileMapping: mapping });
     }
 
     /**
@@ -379,7 +381,9 @@ export class CacheOperation   {
      * @param taskId - Todoist 任务 ID
      */
     deleteTaskFileMapping(taskId: string): void {
-        delete this.plugin.settings.taskFileMapping[taskId];
+        const mapping = { ...this.plugin.settings.taskFileMapping };
+        delete mapping[taskId];
+        this.plugin.safeSettings?.updateSync({ taskFileMapping: mapping });
     }
 
     /**
@@ -532,15 +536,14 @@ export class CacheOperation   {
      * @param filepath - 文件路径
      * @param defaultProjectId - 项目 ID
      */
-    setDefaultProjectIdForFilepath(filepath:string,defaultProjectId:string){
-        const metadatas = this.plugin.settings.fileMetadata
+    setDefaultProjectIdForFilepath(filepath:string, defaultProjectId:string){
+        const metadatas = { ...this.plugin.settings.fileMetadata }
         if (!metadatas[filepath]) {
             metadatas[filepath] = {}
         }
         metadatas[filepath].defaultProjectId = defaultProjectId
     
-        // 将更新后的metadatas对象保存回设置对象中
-        this.plugin.settings.fileMetadata = metadatas
+        this.plugin.safeSettings?.update({ fileMetadata: metadatas })
 
     }
 
@@ -636,19 +639,21 @@ export class CacheOperation   {
      * @param newpath - 新的文件路径
      */
     async updateRenamedFilePath(oldpath: string, newpath: string): Promise<void> {
-        const taskFileMapping = this.plugin.settings.taskFileMapping || {};
-        const fileMetadata = this.plugin.settings.fileMetadata || {};
+        const taskFileMapping = { ...this.plugin.settings.taskFileMapping };
+        const fileMetadata = { ...this.plugin.settings.fileMetadata };
         for (const [taskId, mapping] of Object.entries(taskFileMapping)) {
             if (mapping.filePath === oldpath) {
                 taskFileMapping[taskId] = { ...mapping, filePath: newpath };
             }
         }
-        this.plugin.settings.taskFileMapping = taskFileMapping;
         if (fileMetadata[oldpath]) {
             fileMetadata[newpath] = fileMetadata[oldpath];
             delete fileMetadata[oldpath];
-            this.plugin.settings.fileMetadata = fileMetadata;
         }
+        await this.plugin.safeSettings?.update({ 
+            taskFileMapping, 
+            fileMetadata 
+        }, true);
         this.plugin.logOperation?.log('CACHE_RENAMED', `Renamed file path from ${oldpath} to ${newpath}`, newpath);
     }
 
@@ -714,7 +719,7 @@ export class CacheOperation   {
             // ==========================================================================================
             
             // Step 1: Clear taskFileMapping (keep fileMetadata for other uses)
-            this.plugin.settings.taskFileMapping = {};
+            await this.plugin.safeSettings?.update({ taskFileMapping: {} }, true);
 
             // ==========================================================================================
             // Step 2: 确保 syncData 已加载
