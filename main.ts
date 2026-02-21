@@ -33,6 +33,9 @@ import { StoragePathManager } from './src/storagePathManager';
 //settings backup
 import { SettingsBackup } from './src/settingsBackup';
 
+//safe settings
+import { SafeSettings } from './src/safeSettings';
+
 
 //import modal
 import { SetDefalutProjectInTheFilepathModal } from 'src/modal';
@@ -50,8 +53,9 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 	databaseChecker: DatabaseChecker | undefined;
     deviceManager: DeviceManager | undefined;
     storagePathManager: StoragePathManager | undefined;
- 	settingsBackup: SettingsBackup | undefined;
- 	lastLines: Map<string,number>;
+  	settingsBackup: SettingsBackup | undefined;
+    safeSettings: SafeSettings | undefined;
+  	lastLines: Map<string,number>;
  	statusBar;
  	syncLock: boolean;
  	saveLock: boolean;
@@ -68,6 +72,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		}
 
 		this.settingsBackup = new SettingsBackup(this.app, this);
+		this.safeSettings = new SafeSettings(this);
 
 		// This adds a settings tab so the user can configure various aspects of the plugin
 		this.addSettingTab(new UltimateTodoistSyncSettingTab(this.app, this));
