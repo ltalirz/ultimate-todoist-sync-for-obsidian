@@ -111,7 +111,7 @@ export class TodoistSyncAPI   {
 		console.log('[TodoistSyncAPI] Sync initialized with full data and cached');
 	}
 
-	private async incrementalSync(): Promise<void> {
+	async incrementalSync(): Promise<void> {
 		if (!this.syncData) {
 			await this.initializeSync();
 			return;
@@ -350,6 +350,7 @@ export class TodoistSyncAPI   {
 
       }catch(err){
         console.error('An error occurred:', err);
+        return [];
       }
 
     }
@@ -576,10 +577,9 @@ export class TodoistSyncAPI   {
  		}
 
       if (response.status >= 400) {
-        const errorText = (response as any).text ? await (response as any).text() : 'Unknown error';
-        throw new Error(`Failed to execute commands: ${response.status} - ${errorText}`);
+        throw new Error(`Failed to execute commands: ${response.status} - ${response.text}`);
       }
-      const data = (response as any).json();
+      const data = response.json;
 
 		this.rateLimitState.partialSyncCount++;
 
@@ -653,10 +653,10 @@ export class TodoistSyncAPI   {
     return true;
   }
 
-  // Reopen task using Sync API
+  // Reopen task using Sync API (item_uncomplete per official docs)
   async reopenTask(taskId: string): Promise<boolean> {
     const command = {
-      type: 'item_reopen',
+      type: 'item_uncomplete',
       uuid: this.generateUUID(),
       args: {
         id: taskId
@@ -752,7 +752,7 @@ export class TodoistSyncAPI   {
   async GetAllProjects(): Promise<any[]> {
     try {
       if (!this.syncData) {
-        await this.getAllResources(true);
+        this.syncData = await this.getAllResources(true);
       }
       return this.syncData?.projects || [];
     } catch (error) {
@@ -765,7 +765,7 @@ export class TodoistSyncAPI   {
   async GetTaskById(taskId: string): Promise<any> {
     try {
       if (!this.syncData) {
-        await this.getAllResources(true);
+        this.syncData = await this.getAllResources(true);
       }
       const tasks = this.syncData?.items || [];
       return tasks.find((t: any) => t.id === taskId);
@@ -786,7 +786,7 @@ export class TodoistSyncAPI   {
   }): Promise<any[]> {
     try {
       if (!this.syncData) {
-        await this.getAllResources(true);
+        this.syncData = await this.getAllResources(true);
       }
       let tasks = this.syncData?.items || [];
 
@@ -816,7 +816,7 @@ export class TodoistSyncAPI   {
   async getProjectById(projectId: string): Promise<any> {
     try {
       if (!this.syncData) {
-        await this.getAllResources(true);
+        this.syncData = await this.getAllResources(true);
       }
       const projects = this.syncData?.projects || [];
       return projects.find((p: any) => p.id === projectId);
@@ -830,7 +830,7 @@ export class TodoistSyncAPI   {
   async getProjectByName(projectName: string): Promise<any> {
     try {
       if (!this.syncData) {
-        await this.getAllResources(true);
+        this.syncData = await this.getAllResources(true);
       }
       const projects = this.syncData?.projects || [];
       return projects.find((p: any) => p.name === projectName);
@@ -875,7 +875,7 @@ export class TodoistSyncAPI   {
 
     try {
       if (!this.syncData) {
-        await this.getAllResources(true);
+        this.syncData = await this.getAllResources(true);
       }
       const allTasks = this.syncData?.items || [];
       

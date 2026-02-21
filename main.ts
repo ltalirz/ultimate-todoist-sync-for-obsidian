@@ -613,11 +613,13 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 
 		//initialize sync data (load from cache or full sync on startup)
 		try {
-			// Try to load from cache first
 			const loaded = this.todoistSyncAPI?.loadFromCache();
 			if (!loaded) {
-				// No cache, do full sync
 				await this.todoistSyncAPI?.initializeSync();
+			} else {
+				this.todoistSyncAPI?.incrementalSync().catch(err => {
+					console.error('[Plugin] Incremental sync after cache load failed:', err);
+				});
 			}
 			await this.safeSettings?.update({ deviceIdGenerated: true }, true);
 		} catch (error) {
