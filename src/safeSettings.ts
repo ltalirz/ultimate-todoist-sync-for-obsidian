@@ -8,7 +8,12 @@ export class SafeSettings {
     }
 
     async update(changes: Partial<typeof this.plugin.settings>, shouldSave = false): Promise<void> {
-        await this.plugin.settingsBackup?.backup();
+        // 防御性检查：确保 settingsBackup 存在
+        if (!this.plugin.settingsBackup) {
+            console.warn('[SafeSettings] settingsBackup not initialized, applying changes without backup');
+        } else {
+            await this.plugin.settingsBackup.backup();
+        }
 
         try {
             Object.assign(this.plugin.settings, changes);
@@ -19,8 +24,11 @@ export class SafeSettings {
 
             console.log('[SafeSettings] Update completed successfully');
         } catch (error) {
-            console.error('[SafeSettings] Update failed, restoring from backup...', error);
-            await this.plugin.settingsBackup?.restore();
+            console.error('[SafeSettings] Update failed:', error);
+            // 尝试恢复（如果 settingsBackup 存在）
+            if (this.plugin.settingsBackup) {
+                await this.plugin.settingsBackup.restore();
+            }
             throw error;
         }
     }
