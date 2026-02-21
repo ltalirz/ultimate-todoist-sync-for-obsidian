@@ -299,6 +299,14 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 
 	async onunload() {
 		console.log(`Ultimate Todoist Sync for Obsidian id unloaded!`)
+		
+		// Flush log buffer before unloading
+		try {
+			await this.logOperation?.flushLogBuffer();
+		} catch (error) {
+			console.error('An error occurred in flushLogBuffer:', error);
+		}
+		
 		await this.saveSettings()
 
 	}
@@ -827,6 +835,14 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			new Notice('An error occurred:', error);
 			this.syncLock = false;
 		}
+
+		// Flush log buffer after sync completes
+		try {
+			await this.logOperation?.flushLogBuffer();
+		} catch (error) {
+			console.error('An error occurred in flushLogBuffer:', error);
+		}
+
 		console.log("Todoist scheduled synchronization task completed at", new Date().toLocaleString());
 	}
 

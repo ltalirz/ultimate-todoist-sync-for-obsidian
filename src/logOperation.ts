@@ -74,6 +74,7 @@ export class LogOperation {
         this.app = app;
         this.plugin = plugin;
         this.initializeLogs();
+        this.loadTodayLogsFromFile();
     }
 
     private initializeLogs(): void {
@@ -88,7 +89,37 @@ export class LogOperation {
         this.todayLogs = [];
         
         if (this.plugin.settings.debugMode) {
-            console.log(`[LogOperation] Initialized with empty today's logs (stored in JSON files)`);
+            console.log(`[LogOperation] Initialized`);
+        }
+    }
+
+    private async loadTodayLogsFromFile(): Promise<void> {
+        if (!this.plugin.storagePathManager) {
+            return;
+        }
+
+        try {
+            const logPath = await this.plugin.storagePathManager.getTodayLogPath();
+            const adapter = this.plugin.app.vault.adapter;
+            
+            const exists = await adapter.exists(logPath);
+            if (exists) {
+                const content = await adapter.read(logPath);
+                try {
+                    const data = JSON.parse(content);
+                    if (Array.isArray(data)) {
+                        this.todayLogs = data;
+                        if (this.plugin.settings.debugMode) {
+                            console.log(`[LogOperation] Loaded ${data.length} logs from today's file`);
+                        }
+                    }
+                } catch {
+                    this.todayLogs = [];
+                }
+            }
+        } catch (error) {
+            console.error('[LogOperation] Failed to load today logs from file:', error);
+            this.todayLogs = [];
         }
     }
 
@@ -134,6 +165,10 @@ export class LogOperation {
 
         this.todayLogs.push(logEntry);
 
+        if (this.todayLogs.length > this.maxLogs) {
+            this.todayLogs.shift();
+        }
+
         if (this.plugin.settings.logFileEnabled) {
             this.logBuffer.push(logEntry);
             if (this.logBuffer.length >= this.BATCH_SIZE) {
@@ -172,7 +207,7 @@ export class LogOperation {
         }
     }
 
-    private async flushLogBuffer(): Promise<void> {
+    public async flushLogBuffer(): Promise<void> {
         if (this.logBuffer.length === 0) {
             return;
         }
@@ -243,7 +278,7 @@ export class LogOperation {
             
             for (const filePath of files) {
                 const fileName = filePath.split('/').pop() || '';
-                const dateMatch = fileName.match(/^(\d{4}-\d{2}-\d{2})\.json$/);
+                const dateMatch = fileName.match(/_(\d{4}-\d{2}-\d{2})\.json$/);
                 
                 if (dateMatch) {
                     const fileDate = dateMatch[1];
@@ -289,7 +324,7 @@ export class LogOperation {
             
             for (const filePath of files) {
                 const fileName = filePath.split('/').pop() || '';
-                const dateMatch = fileName.match(/^(\d{4}-\d{2}-\d{2})\.json$/);
+                const dateMatch = fileName.match(/_(\d{4}-\d{2}-\d{2})\.json$/);
                 
                 if (dateMatch) {
                     const fileDate = new Date(dateMatch[1]);
