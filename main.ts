@@ -758,6 +758,8 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 	}
 
 	//return true
+	private lastApiNoticeTime = 0;
+
 	checkModuleClass(){
 		if(this.settings.apiInitialized  === true){
 			if(this.todoistRestAPI === undefined || this.todoistSyncAPI === undefined ||this.cacheOperation === undefined || this.fileOperation === undefined ||this.todoistSync === undefined ||this.taskParser === undefined){
@@ -766,7 +768,11 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			return true
 		}
 		else{
-			new Notice(`Please enter the correct Todoist API token"`)
+			const now = Date.now();
+			if (now - this.lastApiNoticeTime > 60_000) {
+				new Notice(`Please enter the correct Todoist API token`)
+				this.lastApiNoticeTime = now;
+			}
 			return(false)
 		}
 		
