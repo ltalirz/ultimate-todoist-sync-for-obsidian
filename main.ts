@@ -228,6 +228,14 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				this.isProcessingModify = true;
 				
 				const filepath = file.path
+				
+				// Skip files in storage directory (logs, backups, reports)
+				const storagePath = this.storagePathManager?.getBasePath() || 'ultimate-todoist-sync';
+				if (filepath.includes(storagePath)) {
+					this.isProcessingModify = false;
+					return;
+				}
+
 				console.log(`${filepath} is modified`)
 
 				//get current view
