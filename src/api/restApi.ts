@@ -1,6 +1,6 @@
 import { TodoistApi } from "@doist/todoist-api-typescript"
 import { App} from 'obsidian';
-import UltimateTodoistSyncForObsidian from "../main";
+import UltimateTodoistSyncForObsidian from "../../main";
     //convert date from obsidian event
     // 使用示例
     //const str = "2023-03-27";

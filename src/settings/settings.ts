@@ -1,5 +1,5 @@
 import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
-import UltimateTodoistSyncForObsidian from "../main";
+import UltimateTodoistSyncForObsidian from "../../main";
 
 export interface UltimateTodoistSyncSettings {
     initialized: boolean;
@@ -496,7 +496,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         new Notice('Please set the Todoist API first')
                         return
                     }
-                    this.plugin.todoistSync.backupTodoistAllResources()
+                    this.plugin.todoistToObsidian.backupTodoistAllResources()
                 })
             );
 

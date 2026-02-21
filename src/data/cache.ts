@@ -44,8 +44,8 @@
  */
 
 import { App, TFile} from 'obsidian';
-import UltimateTodoistSyncForObsidian from "../main";
-import { TaskConflict, ConflictResolution, ConflictResolutionModal } from './conflictModal';
+import UltimateTodoistSyncForObsidian from "../../main";
+import { TaskConflict, ConflictResolution, ConflictResolutionModal } from '../ui/modals';
 
 /**
  * ==========================================================================================

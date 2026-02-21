@@ -11,7 +11,7 @@
  */
 
 import { App } from 'obsidian';
-import UltimateTodoistSyncForObsidian from '../main';
+import UltimateTodoistSyncForObsidian from '../../main';
 
 /**
  * 数据库检查问题类型定义

@@ -1,4 +1,4 @@
-import UltimateTodoistSyncForObsidian from "../main";
+import UltimateTodoistSyncForObsidian from "../../main";
 import { App, Editor, MarkdownView, Notice } from 'obsidian';
 
 export class ObsidianToTodoistSync {

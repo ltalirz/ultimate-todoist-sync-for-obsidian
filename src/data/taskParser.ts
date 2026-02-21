@@ -1,5 +1,5 @@
 import { App} from 'obsidian';
-import UltimateTodoistSyncForObsidian from "../main";
+import UltimateTodoistSyncForObsidian from "../../main";
 
 
 

@@ -1,44 +1,20 @@
 import { MarkdownView, Notice, Plugin, Editor } from 'obsidian';
 
-
-//settings
-import { UltimateTodoistSyncSettings,DEFAULT_SETTINGS,UltimateTodoistSyncSettingTab } from './src/settings';
-//todoist  api
-import { TodoistRestAPI } from './src/todoistRestAPI';
-import { TodoistSyncAPI } from './src/todoistSyncAPI';
-//task parser 
-import { TaskParser } from './src/taskParser';
-//cache task read and write
-import { CacheOperation } from './src/cacheOperation';
-//file operation
-import { FileOperation } from './src/fileOperation';
-//log operation
-import { LogOperation } from './src/logOperation';
-
-//backup operation
-import { BackupOperation } from './src/backupOperation';
-
-//sync module
-import { TodoistSync } from './src/syncModule';
-
-//database checker
-import { DatabaseChecker } from './src/databaseChecker';
-
-//device manager
-import { DeviceManager } from './src/deviceManager';
-
-//storage path manager
-import { StoragePathManager } from './src/storagePathManager';
-
-//settings backup
-import { SettingsBackup } from './src/settingsBackup';
-
-//safe settings
-import { SafeSettings } from './src/safeSettings';
-
-
-//import modal
-import { SetDefalutProjectInTheFilepathModal } from 'src/modal';
+import { UltimateTodoistSyncSettings, DEFAULT_SETTINGS, UltimateTodoistSyncSettingTab } from './src/settings/settings';
+import { TodoistRestAPI } from './src/api/restApi';
+import { TodoistSyncAPI } from './src/api/syncApi';
+import { TaskParser } from './src/data/taskParser';
+import { CacheOperation } from './src/data/cache';
+import { FileOperation } from './src/vault/fileOperation';
+import { LogOperation } from './src/storage/log';
+import { BackupOperation } from './src/storage/backup';
+import { ObsidianToTodoistSync } from './src/sync/toTodoist';
+import { TodoistToObsidianSync } from './src/sync/toObsidian';
+import { DatabaseChecker } from './src/data/databaseChecker';
+import { DeviceManager } from './src/utils/deviceManager';
+import { StoragePathManager } from './src/storage/pathManager';
+import { SafeSettings, SettingsBackup } from './src/settings/safeSettings';
+import { SetDefalutProjectInTheFilepathModal } from './src/ui/modals';
 
 export default class UltimateTodoistSyncForObsidian extends Plugin {
 	settings: UltimateTodoistSyncSettings;
@@ -47,7 +23,8 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
     taskParser: TaskParser | undefined;
     cacheOperation: CacheOperation | undefined;
     fileOperation: FileOperation | undefined;
-    todoistSync: TodoistSync | undefined;
+    obsidianToTodoist: ObsidianToTodoistSync | undefined;
+    todoistToObsidian: TodoistToObsidianSync | undefined;
     logOperation: LogOperation | undefined;
     backupOperation: BackupOperation | undefined;
 	databaseChecker: DatabaseChecker | undefined;
@@ -122,7 +99,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 						return
 					}
 					if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
-					const deletedCount = await this.todoistSync.deletedTaskCheck();
+					const deletedCount = await this.obsidianToTodoist.deletedTaskCheck();
 					this.syncLock = false;
 					if (deletedCount > 0) {
 						this.saveSettings();
@@ -157,7 +134,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 					return
 				}
 				this.checkboxEventhandle(evt)
-				//this.todoistSync.fullTextModifiedTaskCheck()
+				//this.obsidianToTodoist.fullTextModifiedTaskCheck()
 
 			}
 
@@ -180,7 +157,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 					return
 				}
 				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
-				await this.todoistSync.lineContentNewTaskCheck(editor,view)
+				await this.obsidianToTodoist.lineContentNewTaskCheck(editor,view)
 				this.syncLock = false
 
 			}catch(error){
@@ -213,7 +190,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			//update task description
 			if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
 			try {
-				await this.todoistSync.updateTaskDescription(file.path)
+				await this.obsidianToTodoist.updateTaskDescription(file.path)
 			} catch(error) {
 				console.error('An error occurred in updateTaskDescription:', error);
 			}
@@ -263,7 +240,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 					return;
 				}
 				
-				await this.todoistSync.fullTextNewTaskCheck(filepath)
+				await this.obsidianToTodoist.fullTextNewTaskCheck(filepath)
 				this.syncLock = false;
 			} catch(error) {
 				console.error(`An error occurred while modifying the file: ${error.message}`);
@@ -538,7 +515,8 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			this.taskParser = undefined
 			this.cacheOperation = undefined
 			this.fileOperation = undefined
-			this.todoistSync = undefined
+			this.obsidianToTodoist = undefined
+			this.todoistToObsidian = undefined
 			this.logOperation = undefined
 			this.backupOperation = undefined
 			await this.safeSettings?.update({ initialized: false, apiInitialized: false }, true)
@@ -553,7 +531,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				//每次启动前备份所有数据
 				// Note: Initialize module class first to enable backupOperation
 				this.initializeModuleClass();
-				this.todoistSync.backupTodoistAllResources()
+				this.todoistToObsidian.backupTodoistAllResources()
 
 			}catch(error){
 				console.log(`error creating user data folder: ${error}`)
@@ -630,8 +608,8 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		//initialize todoisy sync api
 		this.todoistSyncAPI = new TodoistSyncAPI(this.app,this)
 
-		//initialize todoist sync module
-		this.todoistSync = new TodoistSync(this.app,this)
+		this.obsidianToTodoist = new ObsidianToTodoistSync(this.app, this)
+		this.todoistToObsidian = new TodoistToObsidianSync(this.app, this)
 
 		//initialize backup operation
 		this.backupOperation = new BackupOperation(this.app,this)
@@ -700,7 +678,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				this.lastLines.set(fileName as string, line as number);
 				try{
 					if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
-					await this.todoistSync.lineModifiedTaskCheck(filepath as string,lastLineText,lastLine as number,fileContent)
+					await this.obsidianToTodoist.lineModifiedTaskCheck(filepath as string,lastLineText,lastLine as number,fileContent)
 					this.syncLock = false;
 				}catch(error){
 					console.error(`An error occurred while check modified task in line text: ${error}`);
@@ -736,9 +714,9 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
 			try {
 				if (target.checked) {
-					await this.todoistSync.closeTask(taskId);
+					await this.obsidianToTodoist.closeTask(taskId);
 				} else {
-					await this.todoistSync.repoenTask(taskId);
+					await this.obsidianToTodoist.repoenTask(taskId);
 				}
 			} catch(error) {
 				console.error(`An error occurred while toggling task: ${error}`);
@@ -748,7 +726,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		} else {
 			if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
 			try {
-				await this.todoistSync.fullTextModifiedTaskCheck()
+				await this.obsidianToTodoist.fullTextModifiedTaskCheck()
 			} catch(error) {
 				console.error(`An error occurred while check modified tasks in the file: ${error}`);
 			} finally {
@@ -762,7 +740,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 
 	checkModuleClass(){
 		if(this.settings.apiInitialized  === true){
-			if(this.todoistRestAPI === undefined || this.todoistSyncAPI === undefined ||this.cacheOperation === undefined || this.fileOperation === undefined ||this.todoistSync === undefined ||this.taskParser === undefined){
+			if(this.todoistRestAPI === undefined || this.todoistSyncAPI === undefined ||this.cacheOperation === undefined || this.fileOperation === undefined ||this.obsidianToTodoist === undefined ||this.taskParser === undefined){
 				this.initializeModuleClass()
 			}
 			return true
@@ -817,7 +795,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 
 		try {
 			await this.withSyncLock('todoistToObsidian', async () => {
-				await this.todoistSync.syncTodoistToObsidian();
+				await this.todoistToObsidian.syncTodoistToObsidian();
 			});
 
 			await this.saveSettings();
@@ -840,16 +818,16 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				}
 
 				const lockOk = await this.withSyncLock('obsidianToTodoist', async () => {
-					await this.todoistSync.fullTextNewTaskCheck(fileKey);
+					await this.obsidianToTodoist.fullTextNewTaskCheck(fileKey);
 				});
 				if (!lockOk) continue;
 
 				await this.withSyncLock('obsidianToTodoist', async () => {
-					await this.todoistSync.deletedTaskCheck(fileKey);
+					await this.obsidianToTodoist.deletedTaskCheck(fileKey);
 				});
 
 				await this.withSyncLock('obsidianToTodoist', async () => {
-					await this.todoistSync.fullTextModifiedTaskCheck(fileKey);
+					await this.obsidianToTodoist.fullTextModifiedTaskCheck(fileKey);
 				});
 			}
 		} catch (error) {

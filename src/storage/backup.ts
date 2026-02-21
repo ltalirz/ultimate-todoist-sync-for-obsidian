@@ -1,6 +1,6 @@
 import { App } from 'obsidian';
-import UltimateTodoistSyncForObsidian from "../main";
-import { StoragePathManager } from './storagePathManager';
+import UltimateTodoistSyncForObsidian from "../../main";
+import { StoragePathManager } from './pathManager';
 
 export class BackupOperation {
     app: App;

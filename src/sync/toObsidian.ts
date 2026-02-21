@@ -1,6 +1,6 @@
-import UltimateTodoistSyncForObsidian from "../main";
+import UltimateTodoistSyncForObsidian from "../../main";
 import { App, Notice } from 'obsidian';
-import { StoragePathManager } from './storagePathManager';
+import { StoragePathManager } from '../storage/pathManager';
 
 export class TodoistToObsidianSync {
     app: App;

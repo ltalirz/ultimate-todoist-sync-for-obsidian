@@ -1,6 +1,6 @@
 import { App, Notice, requestUrl } from 'obsidian';
-import UltimateTodoistSyncForObsidian from "../main";
-import { DeviceManager } from './deviceManager';
+import UltimateTodoistSyncForObsidian from "../../main";
+import { DeviceManager } from '../utils/deviceManager';
 
 
 type Event = {
