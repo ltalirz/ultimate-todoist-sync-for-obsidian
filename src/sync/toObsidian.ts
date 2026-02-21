@@ -42,6 +42,8 @@ export class TodoistToObsidianSync {
 
             for (const taskId of Object.keys(taskFileMapping)) {
                 const mapping = taskFileMapping[taskId];
+                if (mapping.syncEnabled === false) continue;
+
                 const task = itemMap.get(taskId);
 
                 if (!task || task.is_deleted) {
@@ -130,12 +132,13 @@ export class TodoistToObsidianSync {
     }
 
     private async syncNotesToObsidian(
-        taskFileMapping: Record<string, { note_count?: number }>,
+        taskFileMapping: Record<string, { note_count?: number; syncEnabled?: boolean }>,
         noteMap: Map<string, any[]>
     ): Promise<void> {
         for (const [taskId, notes] of noteMap.entries()) {
             const mapping = taskFileMapping[taskId];
             if (!mapping) continue;
+            if (mapping.syncEnabled === false) continue;
 
             const storedNoteCount = mapping.note_count || 0;
             if (notes.length <= storedNoteCount) continue;

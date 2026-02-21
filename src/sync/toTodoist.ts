@@ -36,7 +36,7 @@ export class ObsidianToTodoistSync {
         const currentFileValueWithOutFrontMatter = currentFileValue.replace(/^---[\s\S]*?---\n/, '');
 
         const deleteTasksPromises = taskIds
-            .filter((taskId: string) => !currentFileValueWithOutFrontMatter.includes(taskId))
+            .filter((taskId: string) => !currentFileValueWithOutFrontMatter.includes(taskId) && this.plugin.cacheOperation.isTaskSyncEnabled(taskId))
             .map(async (taskId: string) => {
                 try {
                     const api = this.plugin.todoistSyncAPI.initializeAPI();
@@ -204,6 +204,10 @@ export class ObsidianToTodoistSync {
                 return;
             }
 
+            if (!this.plugin.cacheOperation.isTaskSyncEnabled(lineTask_todoist_id)) {
+                return;
+            }
+
             const savedTask = await this.plugin.todoistSyncAPI.GetTaskById(lineTask_todoist_id);
 
             const lineTaskContent = lineTask.content;
@@ -343,6 +347,7 @@ export class ObsidianToTodoistSync {
     }
 
     async closeTask(taskId: string): Promise<void> {
+        if (!this.plugin.cacheOperation?.isTaskSyncEnabled(taskId)) return;
         try {
             await this.plugin.todoistSyncAPI.CloseTask(taskId);
             await this.plugin.fileOperation.completeTaskInTheFile(taskId);
@@ -357,6 +362,7 @@ export class ObsidianToTodoistSync {
     }
 
     async repoenTask(taskId: string): Promise<void> {
+        if (!this.plugin.cacheOperation?.isTaskSyncEnabled(taskId)) return;
         try {
             await this.plugin.todoistSyncAPI.OpenTask(taskId);
             await this.plugin.fileOperation.uncompleteTaskInTheFile(taskId);
@@ -414,6 +420,7 @@ export class ObsidianToTodoistSync {
             try {
                 const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId);
                 if (taskMapping) {
+                    if (!this.plugin.cacheOperation.isTaskSyncEnabled(taskId)) continue;
                     const description = `[[${filepath}]]`;
                     await this.plugin.todoistSyncAPI.UpdateTask(taskId, { description });
                     this.plugin.logOperation?.log('TODOIST_TASK_UPDATED', `Updated task description: ${taskId}`, filepath, taskId);

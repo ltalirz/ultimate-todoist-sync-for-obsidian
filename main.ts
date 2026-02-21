@@ -711,6 +711,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		const match = taskElement.textContent?.match(regex) || false;
 		if (match) {
 			const taskId = match[1];
+			if (!this.cacheOperation?.isTaskSyncEnabled(taskId)) return;
 			if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
 			try {
 				if (target.checked) {

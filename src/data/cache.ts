@@ -258,6 +258,13 @@ export class CacheOperation   {
         return this.plugin.settings.taskFileMapping[taskId] ?? null;
     }
 
+    // syncEnabled undefined → true (backward compat with old mappings)
+    isTaskSyncEnabled(taskId: string): boolean {
+        const mapping = this.plugin.settings.taskFileMapping[taskId];
+        if (!mapping) return false;
+        return mapping.syncEnabled !== false;
+    }
+
     /**
      * 设置任务 ID 到文件位置的映射
      * @param taskId - Todoist 任务 ID
