@@ -1,6 +1,5 @@
 import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../main";
-import { LogAction } from './logOperation';
 
 export interface UltimateTodoistSyncSettings {
     initialized: boolean;
@@ -30,15 +29,9 @@ export interface UltimateTodoistSyncSettings {
     syncDataCache: Record<string, any> | null;
     deviceIdGenerated: boolean;
     enableLog: boolean;
-    logs: Array<{
-        timestamp: number;
-        action: LogAction;
-        details: string;
-        filePath?: string;
-        taskId?: string;
-    }>;
     logFileEnabled: boolean;
-    logRetentionDays: number;
+    maxLogFileSize: number;
+    logRetentionPercent: number;
     maxBackupsPerFile: number;
     storageDirectory: string;
     lastStorageDirectory: string | null;
@@ -65,9 +58,9 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
     syncDataCache: null,
     deviceIdGenerated: false,
     enableLog: true,
-    logs: [],
     logFileEnabled: true,
-    logRetentionDays: 365,
+    maxLogFileSize: 1024 * 1024,
+    logRetentionPercent: 80,
     maxBackupsPerFile: 100,
     storageDirectory: 'ultimate-todoist-sync',
     lastStorageDirectory: null,

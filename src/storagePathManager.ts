@@ -24,6 +24,10 @@ export class StoragePathManager {
         return `${this.getBasePath()}/logs`;
     }
 
+    getLogFilePath(): string {
+        return `${this.getLogsBasePath()}/todoist-sync-logs.json`;
+    }
+
     getBackupsBasePath(): string {
         return `${this.getBasePath()}/backups`;
     }
