@@ -22,7 +22,7 @@ export class BackupOperation {
     }
 
     getBackupFolder(): string {
-        return this.plugin.storagePathManager?.getBackupsFilesPath() || StoragePathManager.BACKUPS_FILES_FILE;
+        return this.plugin.storagePathManager?.getBackupsFilesPath() || 'ultimate-todoist-sync/backups/files';
     }
 
     async backupFile(filePath: string): Promise<string | null> {

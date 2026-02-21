@@ -123,7 +123,7 @@ export class TodoistToObsidianSync {
             const now: Date = new Date();
             const timeString = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
 
-            const backupFolder = this.plugin.storagePathManager?.getBackupsTodoistPath() || StoragePathManager.BACKUPS_TODOIST_FILE;
+            const backupFolder = this.plugin.storagePathManager?.getBackupsTodoistPath() || 'ultimate-todoist-sync/backups/todoist';
             const tempFileName = `todoist-data-backup-${timeString}.tmp`;
             const fileName = `todoist-data-backup-${timeString}.json`;
             const tempPath = `${backupFolder}/${tempFileName}`;

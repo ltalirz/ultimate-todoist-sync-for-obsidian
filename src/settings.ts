@@ -47,6 +47,8 @@ export interface UltimateTodoistSyncSettings {
         taskId?: string;
     }>;
     maxBackupsPerFile: number;
+    storageDirectory: string;
+    lastStorageDirectory: string | null;
 }
 
 export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
@@ -75,6 +77,8 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
     logRetentionDays: 365,
     todayLogs: [],
     maxBackupsPerFile: 100,
+    storageDirectory: 'ultimate-todoist-sync',
+    lastStorageDirectory: null,
 }
 
 export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
@@ -463,6 +467,46 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
         // Backup & Recovery Section
         // ============================================
         containerEl.createEl('h3', { text: 'Backup & Recovery' });
+
+        new Setting(containerEl)
+            .setName('Storage Directory')
+            .setDesc('Directory for plugin data storage. Changing this will migrate existing data.')
+            .addText(text => text
+                .setPlaceholder('ultimate-todoist-sync')
+                .setValue(this.plugin.settings.storageDirectory)
+                .onChange(async (value) => {
+                    const newDir = value.trim();
+                    const currentDir = this.plugin.settings.storageDirectory;
+                    
+                    if (!newDir) {
+                        new Notice('Directory name cannot be empty');
+                        return;
+                    }
+                    
+                    if (newDir === currentDir) return;
+                    
+                    const confirmed = confirm(
+                        `Change storage directory from "${currentDir}" to "${newDir}"?\n\n` +
+                        'Existing data will be migrated to the new location.'
+                    );
+                    if (!confirmed) return;
+                    
+                    if (this.plugin.storagePathManager) {
+                        const success = await this.plugin.storagePathManager.migrateToNewDirectory(newDir);
+                        if (success) {
+                            this.plugin.settings.storageDirectory = newDir;
+                            await this.plugin.saveSettings();
+                            new Notice('Storage directory changed. Please reload the plugin.');
+                        } else {
+                            new Notice('Migration failed. Check console for details.');
+                        }
+                    } else {
+                        this.plugin.settings.storageDirectory = newDir;
+                        await this.plugin.saveSettings();
+                        new Notice('Storage directory updated. Please reload the plugin.');
+                    }
+                })
+            );
 
         new Setting(containerEl)
             .setName('Backup Todoist Data')

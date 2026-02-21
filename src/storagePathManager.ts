@@ -4,14 +4,12 @@ import UltimateTodoistSyncForObsidian from '../main';
 export class StoragePathManager {
     private app: App;
     private plugin: UltimateTodoistSyncForObsidian;
-    private basePath = '.ultimate-todoist-sync';
     private appendLock = false;
 
     static readonly SETTINGS_FILE = '.obsidian/plugins/ultimate-todoist-sync-for-obsidian/data.json';
     static readonly SETTINGS_TEMP_FILE = '.obsidian/plugins/ultimate-todoist-sync-for-obsidian/data.json.tmp';
-    static readonly BACKUPS_TODOIST_FILE = '.ultimate-todoist-sync/backups/todoist';
-    static readonly BACKUPS_FILES_FILE = '.ultimate-todoist-sync/backups/files';
-    static readonly BACKUPS_SETTINGS_FILE = '.ultimate-todoist-sync/backups/settings';
+    static readonly DEFAULT_BASE_PATH = 'ultimate-todoist-sync';
+    static readonly LEGACY_BASE_PATH = '.ultimate-todoist-sync';
 
     constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
         this.app = app;
@@ -19,27 +17,27 @@ export class StoragePathManager {
     }
 
     getBasePath(): string {
-        return this.basePath;
+        return this.plugin.settings?.storageDirectory || StoragePathManager.DEFAULT_BASE_PATH;
     }
 
     getLogsBasePath(): string {
-        return `${this.basePath}/logs`;
+        return `${this.getBasePath()}/logs`;
     }
 
     getBackupsBasePath(): string {
-        return `${this.basePath}/backups`;
+        return `${this.getBasePath()}/backups`;
     }
 
     getBackupsFilesPath(): string {
-        return StoragePathManager.BACKUPS_FILES_FILE;
+        return `${this.getBasePath()}/backups/files`;
     }
 
     getBackupsTodoistPath(): string {
-        return StoragePathManager.BACKUPS_TODOIST_FILE;
+        return `${this.getBasePath()}/backups/todoist`;
     }
 
     getBackupsSettingsPath(): string {
-        return StoragePathManager.BACKUPS_SETTINGS_FILE;
+        return `${this.getBasePath()}/backups/settings`;
     }
 
     async getLogsPath(): Promise<string> {
@@ -100,12 +98,13 @@ export class StoragePathManager {
     }
 
     async ensureAllDirs(): Promise<boolean> {
+        const basePath = this.getBasePath();
         const dirs = [
-            this.basePath,
+            basePath,
             this.getLogsBasePath(),
-            StoragePathManager.BACKUPS_TODOIST_FILE,
-            StoragePathManager.BACKUPS_FILES_FILE,
-            StoragePathManager.BACKUPS_SETTINGS_FILE
+            `${basePath}/backups/todoist`,
+            `${basePath}/backups/files`,
+            `${basePath}/backups/settings`
         ];
 
         for (const dir of dirs) {
@@ -129,6 +128,105 @@ export class StoragePathManager {
         }
 
         return true;
+    }
+
+    async migrateToNewDirectory(newDir: string): Promise<boolean> {
+        const oldDir = this.plugin.settings?.lastStorageDirectory 
+            || StoragePathManager.LEGACY_BASE_PATH;
+        
+        if (oldDir === newDir) {
+            console.log('[StoragePathManager] Directory unchanged, no migration needed');
+            return true;
+        }
+
+        console.log(`[StoragePathManager] Starting migration from "${oldDir}" to "${newDir}"`);
+
+        const adapter = this.app.vault.adapter;
+
+        try {
+            const oldExists = await adapter.exists(oldDir);
+            if (!oldExists) {
+                console.log('[StoragePathManager] Old directory does not exist, no migration needed');
+                this.plugin.settings.lastStorageDirectory = newDir;
+                return true;
+            }
+
+            const newExists = await adapter.exists(newDir);
+            if (!newExists) {
+                await adapter.mkdir(newDir);
+            }
+
+            await this.migrateDirectoryContents(oldDir, newDir);
+
+            console.log('[StoragePathManager] Migration completed successfully');
+            this.plugin.settings.lastStorageDirectory = newDir;
+            return true;
+        } catch (error) {
+            console.error('[StoragePathManager] Migration failed:', error);
+            return false;
+        }
+    }
+
+    private async migrateDirectoryContents(srcDir: string, destDir: string): Promise<void> {
+        const adapter = this.app.vault.adapter;
+        
+        try {
+            const result = await adapter.list(srcDir);
+            
+            for (const folder of result.folders) {
+                const newFolderPath = folder.replace(srcDir, destDir);
+                const folderExists = await adapter.exists(newFolderPath);
+                if (!folderExists) {
+                    await adapter.mkdir(newFolderPath);
+                }
+                await this.migrateDirectoryContents(folder, newFolderPath);
+            }
+
+            for (const file of result.files) {
+                const newFilePath = file.replace(srcDir, destDir);
+                const content = await adapter.read(file);
+                
+                const destExists = await adapter.exists(newFilePath);
+                if (destExists) {
+                    const destContent = await adapter.read(newFilePath);
+                    const srcMtime = await this.getFileMtime(file);
+                    const destMtime = await this.getFileMtime(newFilePath);
+                    
+                    if (srcMtime > destMtime) {
+                        await adapter.write(newFilePath, content);
+                        console.log(`[StoragePathManager] Updated file: ${newFilePath}`);
+                    } else {
+                        console.log(`[StoragePathManager] Kept newer file: ${newFilePath}`);
+                    }
+                } else {
+                    await adapter.write(newFilePath, content);
+                    console.log(`[StoragePathManager] Migrated file: ${newFilePath}`);
+                }
+                
+                await adapter.remove(file);
+            }
+
+            const remaining = await adapter.list(srcDir);
+            if (remaining.folders.length === 0 && remaining.files.length === 0) {
+                await adapter.rmdir(srcDir, true);
+                console.log(`[StoragePathManager] Removed empty directory: ${srcDir}`);
+            }
+        } catch (error) {
+            console.error('[StoragePathManager] Error during migration:', error);
+            throw error;
+        }
+    }
+
+    private async getFileMtime(path: string): Promise<number> {
+        try {
+            const file = this.app.vault.getAbstractFileByPath(path);
+            if (file && 'stat' in file) {
+                return file.stat.mtime;
+            }
+            return 0;
+        } catch {
+            return 0;
+        }
     }
 
     async readJsonFile<T>(path: string): Promise<T | null> {
@@ -226,18 +324,27 @@ export class StoragePathManager {
             if (!exists) {
                 return [];
             }
-            
-            const files: string[] = [];
-            const allFiles = this.app.vault.getFiles();
-            const prefix = dirPath + '/';
-            for (const file of allFiles) {
-                if (file.path.startsWith(prefix)) {
-                    files.push(file.path);
-                }
-            }
-            return files;
+
+            const result = await adapter.list(dirPath);
+            return result.files;
         } catch (error) {
             console.error(`[StoragePathManager] Failed to list files in ${dirPath}:`, error);
+            return [];
+        }
+    }
+
+    async listFolders(dirPath: string): Promise<string[]> {
+        try {
+            const adapter = this.app.vault.adapter;
+            const exists = await adapter.exists(dirPath);
+            if (!exists) {
+                return [];
+            }
+
+            const result = await adapter.list(dirPath);
+            return result.folders;
+        } catch (error) {
+            console.error(`[StoragePathManager] Failed to list folders in ${dirPath}:`, error);
             return [];
         }
     }
@@ -301,13 +408,12 @@ export class StoragePathManager {
                 return;
             }
 
-            const fileObjects = files.map(path => {
-                const file = this.app.vault.getAbstractFileByPath(path) as import('obsidian').TFile | null;
-                return {
+            const fileObjects = await Promise.all(
+                files.map(async path => ({
                     path,
-                    mtime: file?.stat.mtime || 0
-                };
-            });
+                    mtime: await this.getFileMtime(path)
+                }))
+            );
 
             fileObjects.sort((a, b) => b.mtime - a.mtime);
 
