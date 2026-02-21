@@ -370,20 +370,20 @@ export class CacheOperation   {
      * @param status - 任务状态（'active' | 'nonActive' | 'conflicted' | 'issue'），默认 'active'
      * @param syncEnabled - 是否启用同步，默认 true
      */
-    setTaskFileMapping(taskId: string, filePath: string, lineNumber: number, status: 'active' | 'nonActive' | 'conflicted' | 'issue' = 'active', syncEnabled: boolean = true): void {
+    async setTaskFileMapping(taskId: string, filePath: string, lineNumber: number, status: 'active' | 'nonActive' | 'conflicted' | 'issue' = 'active', syncEnabled: boolean = true): Promise<void> {
         const mapping = { ...this.plugin.settings.taskFileMapping };
         mapping[taskId] = { filePath, lineNumber, status, syncEnabled };
-        this.plugin.safeSettings?.updateSync({ taskFileMapping: mapping });
+        await this.plugin.safeSettings?.update({ taskFileMapping: mapping });
     }
 
     /**
      * 删除指定任务 ID 的文件映射
      * @param taskId - Todoist 任务 ID
      */
-    deleteTaskFileMapping(taskId: string): void {
+    async deleteTaskFileMapping(taskId: string): Promise<void> {
         const mapping = { ...this.plugin.settings.taskFileMapping };
         delete mapping[taskId];
-        this.plugin.safeSettings?.updateSync({ taskFileMapping: mapping });
+        await this.plugin.safeSettings?.update({ taskFileMapping: mapping });
     }
 
     /**
