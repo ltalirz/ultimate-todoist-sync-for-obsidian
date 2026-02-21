@@ -159,7 +159,7 @@ export class ObsidianToTodoistSync {
                     console.log(newTask);
                     new Notice(`new task ${newTask.content} id is ${newTask.id}`);
 
-                this.plugin.cacheOperation.setTaskFileMapping(todoist_id, filepath || '', line);
+                this.plugin.cacheOperation.setTaskFileMapping(todoist_id, filepath || '', i);
 
                     if (currentTask.isCompleted === true) {
                         await this.plugin.todoistSyncAPI.CloseTask(newTask.id);
@@ -209,19 +209,15 @@ export class ObsidianToTodoistSync {
             const lineTaskContent = lineTask.content;
             const contentModified = !this.plugin.taskParser.taskContentCompare(lineTask, savedTask);
             const tagsModified = !this.plugin.taskParser.taskTagCompare(lineTask, savedTask);
-            const projectModified = !(await this.plugin.taskParser.taskProjectCompare(lineTask, savedTask));
             const statusModified = !this.plugin.taskParser.taskStatusCompare(lineTask, savedTask);
-            const dueDateModified = !(await this.plugin.taskParser.compareTaskDueDate(lineTask, savedTask));
-            const parentIdModified = !(lineTask.parentId === savedTask.parentId);
+            const dueDateModified = !this.plugin.taskParser.compareTaskDueDate(lineTask, savedTask);
             const priorityModified = !(lineTask.priority === savedTask.priority);
 
             try {
                 let contentChanged = false;
                 let tagsChanged = false;
-                const projectChanged = false;
                 let statusChanged = false;
                 let dueDateChanged = false;
-                const parentIdChanged = false;
                 let priorityChanged = false;
 
                 const updatedContent: Record<string, unknown> = {};
@@ -248,20 +244,12 @@ export class ObsidianToTodoistSync {
                     dueDateChanged = true;
                 }
 
-                if (projectModified) {
-                    // Project modification not supported by Todoist REST API
-                }
-
-                if (parentIdModified) {
-                    // Parent ID modification not supported by Todoist REST API
-                }
-
                 if (priorityModified) {
                     updatedContent.priority = lineTask.priority;
                     priorityChanged = true;
                 }
 
-                if (contentChanged || tagsChanged || dueDateChanged || projectChanged || parentIdChanged || priorityChanged) {
+                if (contentChanged || tagsChanged || dueDateChanged || priorityChanged) {
                     const updatedTask = await this.plugin.todoistSyncAPI.UpdateTask(lineTask.todoist_id.toString(), updatedContent);
                     // taskFileMapping already set, no need to update
                     this.plugin.logOperation?.log('OBSIDIAN_TASK_MODIFIED', `Updated task: ${updatedTask.content}`, filepath, lineTask_todoist_id);
@@ -286,7 +274,7 @@ export class ObsidianToTodoistSync {
                     statusChanged = true;
                 }
 
-                if (contentChanged || statusChanged || dueDateChanged || tagsChanged || projectChanged || priorityChanged) {
+                if (contentChanged || statusChanged || dueDateChanged || tagsChanged || priorityChanged) {
                     console.log(lineTask);
                     console.log(savedTask);
                     this.plugin.saveSettings();
@@ -303,9 +291,6 @@ export class ObsidianToTodoistSync {
                     }
                     if (tagsChanged) {
                         message += " Tags were changed.";
-                    }
-                    if (projectChanged) {
-                        message += " Project was changed.";
                     }
                     if (priorityChanged) {
                         message += " Priority was changed.";
@@ -339,7 +324,6 @@ export class ObsidianToTodoistSync {
             }
 
             const content = currentFileValue;
-            let hasModifiedTask = false;
             const lines = content.split('\n');
 
             for (let i = 0; i < lines.length; i++) {
@@ -347,19 +331,10 @@ export class ObsidianToTodoistSync {
                 if (this.plugin.taskParser.hasTodoistId(line) && this.plugin.taskParser.hasTodoistTag(line)) {
                     try {
                         await this.lineModifiedTaskCheck(filepath, line, i, content);
-                        hasModifiedTask = true;
                     } catch (error) {
                         console.error('Error modifying task:', error);
                         continue;
                     }
-                }
-            }
-
-            if (hasModifiedTask) {
-                try {
-                    // Perform necessary actions on the modified content and front matter
-                } catch (error) {
-                    console.error('Error processing modified content:', error);
                 }
             }
         } catch (error) {

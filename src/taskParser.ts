@@ -158,7 +158,7 @@ export class TaskParser   {
         let projectName = (await this.plugin.todoistSyncAPI.getProjectById(projectId))?.name ?? this.plugin.settings.defaultProjectName
 
         if(hasParent){
-            projectId = parentTaskObject.projectId
+            projectId = parentTaskObject.project_id
             projectName =(await this.plugin.todoistSyncAPI.getProjectById(projectId))?.name ?? this.plugin.settings.defaultProjectName
         }
         if(!hasParent){
@@ -298,16 +298,10 @@ export class TaskParser   {
     }
   
   
-    //get all tags from task text
-    getAllTagsFromLineText(lineText:string){
-        let tags = lineText.match(REGEX.ALL_TAGS);
-    
-        if (tags) {
-            // Remove '#' from each tag
-            tags = tags.map(tag => tag.replace('#', ''));
-        }
-    
-        return tags;
+    getAllTagsFromLineText(lineText:string): string[] {
+        const tags = lineText.match(REGEX.ALL_TAGS);
+        if (!tags) return [];
+        return tags.map(tag => tag.replace('#', ''));
     }
   
     //get checkbox status
@@ -330,61 +324,28 @@ export class TaskParser   {
     }
   
   
-    //tag compare
     taskTagCompare(lineTask:Object,todoistTask:Object) {
-    
-    
-        const lineTaskTags = lineTask.labels
-        //console.log(dataviewTaskTags)
-        
-        const todoistTaskTags = todoistTask.labels
-        //console.log(todoistTaskTags)
-    
-        //content 是否修改
-        const tagsModified  = lineTaskTags.length === todoistTaskTags.length && lineTaskTags.sort().every((val, index) => val === todoistTaskTags.sort()[index]);
-        return(tagsModified) 
+        const lineTaskTags = (lineTask as any).labels || [];
+        const todoistTaskTags = (todoistTask as any).labels || [];
+        const sortedLine = [...lineTaskTags].sort();
+        const sortedTodoist = [...todoistTaskTags].sort();
+        return sortedLine.length === sortedTodoist.length && sortedLine.every((val: string, index: number) => val === sortedTodoist[index]);
     }
   
-    //task status compare
     taskStatusCompare(lineTask:Object,todoistTask:Object) {
-        //status 是否修改
-        const statusModified = (lineTask.isCompleted === (todoistTask as any).checked)
-        //console.log(lineTask)
-        //console.log(todoistTask)
-        return(statusModified)
+        return (lineTask as any).isCompleted === !!(todoistTask as any).checked;
     }
   
   
-    //task due date compare
-    async  compareTaskDueDate(lineTask: object, todoistTask: object): boolean {
-        const lineTaskDue = lineTask.dueDate
-        const todoistTaskDue = todoistTask.due ?? "";
-        //console.log(dataviewTaskDue)
-        //console.log(todoistTaskDue)
-        if (lineTaskDue === "" && todoistTaskDue === "") {
-        //console.log('没有due date')
-        return true;
-        }
-    
-        if ((lineTaskDue || todoistTaskDue) === "") {
-        console.log(lineTaskDue);
-        console.log(todoistTaskDue)
-        //console.log('due date 发生了变化')
-        return false;
-        }
-        
-        const oldDueDateUTCString = this.localDateStringToUTCDateString(lineTaskDue)
-        if (oldDueDateUTCString === todoistTaskDue.date) {
-        //console.log('due date 一致')
-        return true;
-        } else if (lineTaskDue.toString() === "Invalid Date" || todoistTaskDue.toString() === "Invalid Date") {
-        console.log('invalid date')
-        return false;
-        } else {
-        //console.log(lineTaskDue);
-        //console.log(todoistTaskDue.date)
-        return false;
-        }
+    compareTaskDueDate(lineTask: object, todoistTask: object): boolean {
+        const lineTaskDue = (lineTask as any).dueDate || "";
+        const todoistDue = (todoistTask as any).due;
+        const todoistDueDate = todoistDue?.date || "";
+
+        if (lineTaskDue === "" && todoistDueDate === "") return true;
+        if (lineTaskDue === "" || todoistDueDate === "") return false;
+
+        return lineTaskDue === todoistDueDate;
     }
     
   
@@ -513,14 +474,10 @@ export class TaskParser   {
     //console.log(dateStr); // 输出 2023-03-27
     localDateStringToUTCDateString(localDateString:string) {
         try {
-          if(localDateString === null){
+          if(localDateString === null || localDateString === ""){
             return null
           }
-          localDateString = localDateString + "T08:00";
-          let localDateObj = new Date(localDateString);
-          let ISOString = localDateObj.toISOString()
-          let utcDateString = ISOString.slice(0,10)
-          return(utcDateString);
+          return localDateString.slice(0, 10);
         } catch (error) {
           console.error(`Error extracting date from string '${localDateString}': ${error}`);
           return null;
