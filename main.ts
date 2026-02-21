@@ -180,7 +180,6 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
 				await this.todoistSync.lineContentNewTaskCheck(editor,view)
 				this.syncLock = false
-				this.saveSettings()
 
 			}catch(error){
 				console.error(`An error occurred while check new task in line: ${error.message}`);
