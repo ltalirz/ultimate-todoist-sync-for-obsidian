@@ -115,9 +115,11 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 						return
 					}
 					if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
-					await this.todoistSync.deletedTaskCheck();
+					const deletedCount = await this.todoistSync.deletedTaskCheck();
 					this.syncLock = false;
-					this.saveSettings()	
+					if (deletedCount > 0) {
+						this.saveSettings();
+					}
 				}catch(error){
 					console.error(`An error occurred while deleting tasks: ${error}`);
 					this.syncLock = false

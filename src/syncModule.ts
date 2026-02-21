@@ -16,7 +16,7 @@ export class TodoistSync {
         this.todoistToObsidian = new TodoistToObsidianSync(app, plugin);
     }
 
-    async deletedTaskCheck(file_path: string): Promise<void> {
+    async deletedTaskCheck(file_path: string): Promise<number> {
         return this.obsidianToTodoist.deletedTaskCheck(file_path);
     }
 

@@ -10,7 +10,7 @@ export class ObsidianToTodoistSync {
         this.plugin = plugin;
     }
 
-    async deletedTaskCheck(file_path: string): Promise<void> {
+    async deletedTaskCheck(file_path: string): Promise<number> {
         let file;
         let currentFileValue;
         let view;
@@ -30,7 +30,7 @@ export class ObsidianToTodoistSync {
         const taskIds = this.plugin.cacheOperation.getTasksInFile(filepath);
         if (taskIds.length === 0) {
             console.log('No tasks in this file');
-            return;
+            return 0;
         }
 
         const currentFileValueWithOutFrontMatter = currentFileValue.replace(/^---[\s\S]*?---\n/, '');
@@ -53,13 +53,17 @@ export class ObsidianToTodoistSync {
             });
 
         const deletedTaskIds = await Promise.all(deleteTasksPromises);
-        if (deletedTaskIds.length === 0) {
-            return;
+        const validDeletedIds = deletedTaskIds.filter((id): id is string => id !== undefined);
+        
+        if (validDeletedIds.length === 0) {
+            return 0;
         }
-        for (const taskId of deletedTaskIds) {
+        
+        for (const taskId of validDeletedIds) {
             this.plugin.cacheOperation.deleteTaskFileMapping(taskId);
         }
-        this.plugin.saveSettings();
+        
+        return validDeletedIds.length;
     }
 
     async lineContentNewTaskCheck(editor: Editor, view: MarkdownView): Promise<void> {
