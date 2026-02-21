@@ -156,7 +156,7 @@ export class StoragePathManager {
             const oldExists = await adapter.exists(oldDir);
             if (!oldExists) {
                 console.log('[StoragePathManager] Old directory does not exist, no migration needed');
-                this.plugin.settings.lastStorageDirectory = newDir;
+                await this.plugin.safeSettings?.update({ lastStorageDirectory: newDir });
                 return true;
             }
 
@@ -168,7 +168,7 @@ export class StoragePathManager {
             await this.migrateDirectoryContents(oldDir, newDir);
 
             console.log('[StoragePathManager] Migration completed successfully');
-            this.plugin.settings.lastStorageDirectory = newDir;
+            await this.plugin.safeSettings?.update({ lastStorageDirectory: newDir });
             return true;
         } catch (error) {
             console.error('[StoragePathManager] Migration failed:', error);

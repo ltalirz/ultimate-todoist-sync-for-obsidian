@@ -308,8 +308,9 @@ export class CacheOperation   {
      */
     //delete filepath from filemetadata
     async deleteFilepathFromMetadata(filepath:string){
-        Reflect.deleteProperty(this.plugin.settings.fileMetadata, filepath);
-        this.plugin.saveSettings()
+        const metadatas = { ...this.plugin.settings.fileMetadata };
+        delete metadatas[filepath];
+        await this.plugin.safeSettings?.update({ fileMetadata: metadatas }, true)
         this.plugin.logOperation?.log('CACHE_FILE_METADATA_DELETED', `Deleted file metadata for: ${filepath}`, filepath);
         console.log(`${filepath} is deleted from file metadatas.`)
     }

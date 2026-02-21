@@ -107,8 +107,7 @@ export class TodoistSyncAPI   {
 		this.syncData = data;
 		
 		// Save to cache
-		this.plugin.settings.syncDataCache = data;
-		await this.plugin.saveSettings();
+		await this.plugin.safeSettings?.update({ syncDataCache: data }, true);
 		console.log('[TodoistSyncAPI] Sync initialized with full data and cached');
 	}
 
@@ -123,8 +122,7 @@ export class TodoistSyncAPI   {
 			this.mergeSyncData(changes);
 			
 			// Save updated syncData to cache
-			this.plugin.settings.syncDataCache = this.syncData;
-			await this.plugin.saveSettings();
+			await this.plugin.safeSettings?.update({ syncDataCache: this.syncData }, true);
 			console.log('[TodoistSyncAPI] Incremental sync completed and cached');
 		} catch (error) {
 			console.error('[TodoistSyncAPI] Incremental sync failed:', error);

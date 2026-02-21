@@ -1,3 +1,4 @@
+import { DEFAULT_SETTINGS } from "./settings";
 import UltimateTodoistSyncForObsidian from "../main";
 
 export class SafeSettings {
@@ -21,11 +22,28 @@ export class SafeSettings {
             if (shouldSave) {
                 await this.plugin.saveSettings();
             }
-
-            console.log('[SafeSettings] Update completed successfully');
         } catch (error) {
             console.error('[SafeSettings] Update failed:', error);
             // 尝试恢复（如果 settingsBackup 存在）
+            if (this.plugin.settingsBackup) {
+                await this.plugin.settingsBackup.restore();
+            }
+            throw error;
+        }
+    }
+
+    async reset(): Promise<void> {
+        if (!this.plugin.settingsBackup) {
+            console.warn('[SafeSettings] settingsBackup not initialized, resetting without backup');
+        } else {
+            await this.plugin.settingsBackup.backup();
+        }
+
+        try {
+            this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS);
+            await this.plugin.saveSettings();
+        } catch (error) {
+            console.error('[SafeSettings] Reset failed:', error);
             if (this.plugin.settingsBackup) {
                 await this.plugin.settingsBackup.restore();
             }

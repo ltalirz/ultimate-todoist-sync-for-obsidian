@@ -416,14 +416,6 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				return false;
 			}
 
-			if (this.settingsBackup) {
-				const backupSuccess = await this.settingsBackup.backup();
-				if (!backupSuccess) {
-					console.warn('[Settings] Backup failed, proceeding with save anyway');
-					new Notice('Warning: Settings backup failed');
-				}
-			}
-
 			const settingsJson = JSON.stringify(this.settings, null, 2);
 			const adapter = this.app.vault.adapter;
 
@@ -511,9 +503,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			this.todoistSync = undefined
 			this.logOperation = undefined
 			this.backupOperation = undefined
-			this.settings.initialized = false
-			this.settings.apiInitialized = false
-			await this.saveSettings()
+			await this.safeSettings?.update({ initialized: false, apiInitialized: false }, true)
 			new Notice(`Ultimate Todoist Sync plugin initialization failed, please check the todoist api`)
 			return;		
 		}
@@ -529,17 +519,14 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 
 			}catch(error){
 				console.log(`error creating user data folder: ${error}`)
-				this.settings.initialized = false
-				this.settings.apiInitialized = false
-				await this.saveSettings()
+				await this.safeSettings?.update({ initialized: false, apiInitialized: false }, true)
 				new Notice(`error creating user data folder`)
 				return;
 			}
 
 
 			//初始化settings
-			this.settings.initialized = true
-			this.saveSettings()
+			await this.safeSettings?.update({ initialized: true }, true)
 			new Notice(`Ultimate Todoist Sync initialization successful. Todoist data has been backed up.`)
 
 		} else {
@@ -550,7 +537,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		
 		//get user plan resources
 		//const rsp = await this.todoistSyncAPI.getUserResource()
-		this.settings.apiInitialized = true
+		await this.safeSettings?.update({ apiInitialized: true })
 		this.syncLock = false
 		new Notice(`Ultimate Todoist Sync loaded successfully.`)
 		this.logOperation?.log('PLUGIN_INITIALIZED', 'Plugin initialized successfully');
@@ -574,15 +561,15 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			console.log('Running startup database check...');
 			const result = await this.databaseChecker.checkDatabase();
 
-			this.settings.lastDatabaseCheckPassed = result.success;
-			this.settings.lastDatabaseCheckTime = Date.now();
-			await this.saveSettings();
+			await this.safeSettings?.update({
+				lastDatabaseCheckPassed: result.success,
+				lastDatabaseCheckTime: Date.now()
+			}, true);
 
 			if (result.success) {
 				console.log('Startup database check passed');
 			} else {
-				this.settings.syncEnabled = false;
-				await this.saveSettings();
+				await this.safeSettings?.update({ syncEnabled: false }, true);
 				new Notice(`Found ${result.totalIssues} database issues. Sync has been disabled until issues are fixed.`);
 			}
 		} catch (error) {
@@ -633,8 +620,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				// No cache, do full sync
 				await this.todoistSyncAPI?.initializeSync();
 			}
-			this.settings.deviceIdGenerated = true;
-			await this.saveSettings();
+			await this.safeSettings?.update({ deviceIdGenerated: true }, true);
 		} catch (error) {
 			console.error('[Plugin] Failed to initialize sync:', error);
 		}

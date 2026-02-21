@@ -94,8 +94,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                     .setPlaceholder('Enter your API token')
                     .setValue(this.plugin.settings.todoistAPIToken)
                     .onChange(async (value) => {
-                        this.plugin.settings.todoistAPIToken = value;
-                        this.plugin.settings.apiInitialized = false;
+                        await this.plugin.safeSettings?.update({ todoistAPIToken: value, apiInitialized: false });
                     })
             )
             .addExtraButton((button) => {
@@ -132,8 +131,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                             new Notice('Please enter an integer.');
                             return;
                         }
-                        this.plugin.settings.automaticSynchronizationInterval = intervalNum;
-                        this.plugin.saveSettings()
+                        await this.plugin.safeSettings?.update({ automaticSynchronizationInterval: intervalNum }, true)
                         new Notice('Sync interval updated.');
                     })
             );
@@ -147,11 +145,12 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                 component
                     .addOption(this.plugin.settings.defaultProjectId, this.plugin.settings.defaultProjectName)
                     .addOptions(myProjectsOptions)
-                    .onChange((value) => {
-                        this.plugin.settings.defaultProjectId = value
+                    .onChange(async (value) => {
                         const project = this.plugin.todoistSyncAPI?.getSyncData()?.projects?.find((p: any) => p.id === value);
-                        this.plugin.settings.defaultProjectName = project?.name || value;
-                        this.plugin.saveSettings()
+                        await this.plugin.safeSettings?.update({
+                            defaultProjectId: value,
+                            defaultProjectName: project?.name || value
+                        }, true)
                     })
             );
 
@@ -161,9 +160,8 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
             .addToggle(component =>
                 component
                     .setValue(this.plugin.settings.enableFullVaultSync)
-                    .onChange((value) => {
-                        this.plugin.settings.enableFullVaultSync = value
-                        this.plugin.saveSettings()
+                    .onChange(async (value) => {
+                        await this.plugin.safeSettings?.update({ enableFullVaultSync: value }, true)
                         new Notice(`Full vault sync ${value ? 'enabled' : 'disabled'}.`)
                     })
             );
@@ -174,9 +172,8 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
             .addToggle(component =>
                 component
                     .setValue(this.plugin.settings.useAppURI)
-                    .onChange((value) => {
-                        this.plugin.settings.useAppURI = value
-                        this.plugin.saveSettings()
+                    .onChange(async (value) => {
+                        await this.plugin.safeSettings?.update({ useAppURI: value }, true)
                     })
             );
 
@@ -220,8 +217,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                 component
                     .setValue(this.plugin.settings.syncEnabled)
                     .onChange(async (value) => {
-                        this.plugin.settings.syncEnabled = value;
-                        await this.plugin.saveSettings();
+                        await this.plugin.safeSettings?.update({ syncEnabled: value }, true);
                         updateSyncStatus();
                         new Notice(`Sync ${value ? 'enabled' : 'disabled'}`);
                     })
@@ -234,8 +230,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                 component
                     .setValue(this.plugin.settings.obsidianToTodoistEnabled)
                     .onChange(async (value) => {
-                        this.plugin.settings.obsidianToTodoistEnabled = value;
-                        await this.plugin.saveSettings();
+                        await this.plugin.safeSettings?.update({ obsidianToTodoistEnabled: value }, true);
                         updateSyncStatus();
                         new Notice(`Obsidian → Todoist ${value ? 'enabled' : 'disabled'}`);
                     })
@@ -248,8 +243,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                 component
                     .setValue(this.plugin.settings.todoistToObsidianEnabled)
                     .onChange(async (value) => {
-                        this.plugin.settings.todoistToObsidianEnabled = value;
-                        await this.plugin.saveSettings();
+                        await this.plugin.safeSettings?.update({ todoistToObsidianEnabled: value }, true);
                         updateSyncStatus();
                         new Notice(`Todoist → Obsidian ${value ? 'enabled' : 'disabled'}`);
                     })
@@ -329,18 +323,21 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         });
 
                         checkNotice.hide();
-                        this.plugin.settings.lastDatabaseCheckTime = Date.now();
 
                         if (result.success) {
-                            this.plugin.settings.lastDatabaseCheckPassed = true;
-                            this.plugin.settings.syncEnabled = true;
-                            await this.plugin.saveSettings();
+                            await this.plugin.safeSettings?.update({
+                                lastDatabaseCheckTime: Date.now(),
+                                lastDatabaseCheckPassed: true,
+                                syncEnabled: true
+                            }, true);
                             updateSyncStatus();
                             new Notice('✅ Database check passed! No issues found.');
                         } else {
-                            this.plugin.settings.lastDatabaseCheckPassed = false;
-                            this.plugin.settings.syncEnabled = false;
-                            await this.plugin.saveSettings();
+                            await this.plugin.safeSettings?.update({
+                                lastDatabaseCheckTime: Date.now(),
+                                lastDatabaseCheckPassed: false,
+                                syncEnabled: false
+                            }, true);
                             updateSyncStatus();
                             new Notice(`⚠️ Found ${result.totalIssues} issues. Sync disabled.`);
                         }
@@ -375,18 +372,20 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         const result = await this.plugin.databaseChecker.checkDatabase();
                         checkNotice.hide();
 
-                        this.plugin.settings.lastDatabaseCheckTime = Date.now();
-
                         if (result.success) {
-                            this.plugin.settings.lastDatabaseCheckPassed = true;
-                            this.plugin.settings.syncEnabled = true;
-                            await this.plugin.saveSettings();
+                            await this.plugin.safeSettings?.update({
+                                lastDatabaseCheckTime: Date.now(),
+                                lastDatabaseCheckPassed: true,
+                                syncEnabled: true
+                            }, true);
                             updateSyncStatus();
                             new Notice('✅ Issues fixed! Sync enabled.');
                         } else {
-                            this.plugin.settings.lastDatabaseCheckPassed = false;
-                            this.plugin.settings.syncEnabled = false;
-                            await this.plugin.saveSettings();
+                            await this.plugin.safeSettings?.update({
+                                lastDatabaseCheckTime: Date.now(),
+                                lastDatabaseCheckPassed: false,
+                                syncEnabled: false
+                            }, true);
                             updateSyncStatus();
                             new Notice(`⚠️ Found ${result.totalIssues} issues. Please fix manually.`);
                         }
@@ -408,9 +407,8 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
             .addToggle(component =>
                 component
                     .setValue(this.plugin.settings.enableLog)
-                    .onChange((value) => {
-                        this.plugin.settings.enableLog = value
-                        this.plugin.saveSettings()
+                    .onChange(async (value) => {
+                        await this.plugin.safeSettings?.update({ enableLog: value }, true)
                     })
             );
 
@@ -420,9 +418,8 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
             .addToggle(component =>
                 component
                     .setValue(this.plugin.settings.debugMode)
-                    .onChange((value) => {
-                        this.plugin.settings.debugMode = value
-                        this.plugin.saveSettings()
+                    .onChange(async (value) => {
+                        await this.plugin.safeSettings?.update({ debugMode: value }, true)
                     })
             );
 
@@ -479,15 +476,13 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                     if (this.plugin.storagePathManager) {
                         const success = await this.plugin.storagePathManager.migrateToNewDirectory(newDir);
                         if (success) {
-                            this.plugin.settings.storageDirectory = newDir;
-                            await this.plugin.saveSettings();
+                            await this.plugin.safeSettings?.update({ storageDirectory: newDir }, true);
                             new Notice('Storage directory changed. Please reload the plugin.');
                         } else {
                             new Notice('Migration failed. Check console for details.');
                         }
                     } else {
-                        this.plugin.settings.storageDirectory = newDir;
-                        await this.plugin.saveSettings();
+                        await this.plugin.safeSettings?.update({ storageDirectory: newDir }, true);
                         new Notice('Storage directory updated. Please reload the plugin.');
                     }
                 })
@@ -572,8 +567,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                     const confirmed = confirm('Reset ALL settings to defaults? All task mappings will be lost!');
                     if (!confirmed) return;
 
-                    this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS);
-                    await this.plugin.saveSettings();
+                    await this.plugin.safeSettings?.reset();
                     new Notice('Settings reset. Please reload the plugin.');
                 });
             });
