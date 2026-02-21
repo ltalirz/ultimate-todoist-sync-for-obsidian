@@ -321,13 +321,28 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 	}
 
 	async loadSettings(): Promise<boolean> {
+		this.settingsBackup = new SettingsBackup(this.app, this);
+
 		try {
+			if (await this.settingsBackup.hasTempFile()) {
+				console.warn('[Settings] Found temp file, attempting recovery...');
+				new Notice('Found unsaved changes, attempting recovery...');
+				
+				const recovered = await this.settingsBackup.recoverFromTempFile();
+				if (recovered) {
+					new Notice('Settings recovered from unsaved changes');
+				} else {
+					new Notice('Failed to recover from unsaved changes, using backup');
+					await this.settingsBackup.restore();
+				}
+			}
+
 			const data = await this.loadData();
 
 			if (!this.validateLoadedSettings(data)) {
 				console.warn('[Settings] Settings corrupted, attempting recovery...');
+				new Notice('Settings corrupted, attempting recovery...');
 				
-				this.settingsBackup = new SettingsBackup(this.app, this);
 				const recovered = await this.settingsBackup.restore();
 				if (recovered) {
 					new Notice('Settings recovered from backup');
@@ -344,7 +359,6 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			}
 
 			this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
-			this.settingsBackup = new SettingsBackup(this.app, this);
 			return true;
 		} catch (error) {
 			console.error('[Settings] Failed to load data:', error);
@@ -388,6 +402,9 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		}
 
 		this.saveLock = true;
+		const settingsPath = StoragePathManager.SETTINGS_FILE;
+		const tempPath = StoragePathManager.SETTINGS_TEMP_FILE;
+
 		try {
 			if (!this.settings || Object.keys(this.settings).length === 0) {
 				console.error('[Settings] Settings are empty or invalid, not saving to avoid data loss.');
@@ -405,19 +422,38 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				const backupSuccess = await this.settingsBackup.backup();
 				if (!backupSuccess) {
 					console.warn('[Settings] Backup failed, proceeding with save anyway');
+					new Notice('Warning: Settings backup failed');
 				}
 			}
 
-			await this.saveData(this.settings);
+			const settingsJson = JSON.stringify(this.settings, null, 2);
+			const adapter = this.app.vault.adapter;
+
+			await adapter.write(tempPath, settingsJson);
+			console.log('[Settings] Written to temp file:', tempPath);
+
+			const tempExists = await adapter.exists(tempPath);
+			if (!tempExists) {
+				throw new Error('Temp file was not created');
+			}
+
+			await adapter.write(settingsPath, settingsJson);
+			console.log('[Settings] Written to actual file:', settingsPath);
+
+			try {
+				await adapter.remove(tempPath);
+				console.log('[Settings] Temp file cleaned up');
+			} catch (cleanupError) {
+				console.warn('[Settings] Failed to cleanup temp file:', cleanupError);
+			}
 
 			console.log('[Settings] Settings saved successfully');
 			this.saveLock = false;
 			return true;
 		} catch (error) {
 			console.error('[Settings] Error saving settings:', error);
-			if (this.settingsBackup) {
-				await this.settingsBackup.restore();
-			}
+			console.error('[Settings] Temp file preserved for recovery at:', tempPath);
+			new Notice('Settings save failed, temp file preserved for recovery');
 			this.saveLock = false;
 			return false;
 		}

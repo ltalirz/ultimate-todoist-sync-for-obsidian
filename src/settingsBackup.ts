@@ -1,5 +1,6 @@
 import { App, Notice } from 'obsidian';
 import UltimateTodoistSyncForObsidian from '../main';
+import { StoragePathManager } from './storagePathManager';
 
 export class SettingsBackup {
     private app: App;
@@ -24,7 +25,7 @@ export class SettingsBackup {
         try {
             await this.ensureBackupDir();
 
-            const settingsPath = '.obsidian/plugins/ultimate-todoist-sync-for-obsidian/data.json';
+            const settingsPath = StoragePathManager.SETTINGS_FILE;
             const adapter = this.app.vault.adapter;
             
             const exists = await adapter.exists(settingsPath);
@@ -36,6 +37,13 @@ export class SettingsBackup {
             const data = await adapter.read(settingsPath);
             if (!data) {
                 console.warn('[SettingsBackup] No settings data to backup');
+                return false;
+            }
+
+            try {
+                JSON.parse(data);
+            } catch {
+                console.error('[SettingsBackup] Settings file contains invalid JSON, skipping backup');
                 return false;
             }
 
@@ -72,7 +80,15 @@ export class SettingsBackup {
                 return false;
             }
 
-            const settingsPath = '.obsidian/plugins/ultimate-todoist-sync-for-obsidian/data.json';
+            try {
+                JSON.parse(data);
+            } catch {
+                console.error('[SettingsBackup] Backup contains invalid JSON, cannot restore');
+                new Notice('Backup file is corrupted, cannot restore');
+                return false;
+            }
+
+            const settingsPath = StoragePathManager.SETTINGS_FILE;
             await adapter.write(settingsPath, data);
             
             console.log('[SettingsBackup] Settings restored from:', latestBackup);
@@ -140,7 +156,15 @@ export class SettingsBackup {
                 return false;
             }
 
-            const settingsPath = '.obsidian/plugins/ultimate-todoist-sync-for-obsidian/data.json';
+            try {
+                JSON.parse(data);
+            } catch {
+                console.error('[SettingsBackup] Backup contains invalid JSON');
+                new Notice('Backup file is corrupted');
+                return false;
+            }
+
+            const settingsPath = StoragePathManager.SETTINGS_FILE;
             await adapter.write(settingsPath, data);
             
             console.log('[SettingsBackup] Settings restored from specific backup:', backupPath);
@@ -172,6 +196,49 @@ export class SettingsBackup {
         } catch (error) {
             console.error('[SettingsBackup] Failed to clean old backups:', error);
         }
+    }
+
+    async recoverFromTempFile(): Promise<boolean> {
+        try {
+            const tempPath = StoragePathManager.SETTINGS_TEMP_FILE;
+            const adapter = this.app.vault.adapter;
+            
+            const exists = await adapter.exists(tempPath);
+            if (!exists) {
+                console.log('[SettingsBackup] No temp file found');
+                return false;
+            }
+
+            const data = await adapter.read(tempPath);
+            if (!data) {
+                console.error('[SettingsBackup] Failed to read temp file');
+                return false;
+            }
+
+            try {
+                JSON.parse(data);
+            } catch {
+                console.error('[SettingsBackup] Temp file contains invalid JSON');
+                await adapter.remove(tempPath);
+                return false;
+            }
+
+            const settingsPath = StoragePathManager.SETTINGS_FILE;
+            await adapter.write(settingsPath, data);
+            
+            await adapter.remove(tempPath);
+            
+            console.log('[SettingsBackup] Recovered from temp file');
+            new Notice('Settings recovered from temp file');
+            return true;
+        } catch (error) {
+            console.error('[SettingsBackup] Failed to recover from temp file:', error);
+            return false;
+        }
+    }
+
+    async hasTempFile(): Promise<boolean> {
+        return await this.app.vault.adapter.exists(StoragePathManager.SETTINGS_TEMP_FILE);
     }
 
     async clearAllBackups(): Promise<boolean> {

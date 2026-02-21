@@ -6,6 +6,9 @@ export class StoragePathManager {
     private plugin: UltimateTodoistSyncForObsidian;
     private basePath = '.ultimate-todoist-sync';
 
+    static readonly SETTINGS_FILE = '.obsidian/plugins/ultimate-todoist-sync-for-obsidian/data.json';
+    static readonly SETTINGS_TEMP_FILE = '.obsidian/plugins/ultimate-todoist-sync-for-obsidian/data.json.tmp';
+
     constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
         this.app = app;
         this.plugin = plugin;
