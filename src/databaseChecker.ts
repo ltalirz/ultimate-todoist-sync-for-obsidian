@@ -960,9 +960,12 @@ Generated: ${new Date().toLocaleString()}
 `;
 
         try {
-            // 在 Vault 根目录创建报告文件
-            const reportPath = reportFilename;
-            await this.app.vault.create(reportPath, markdown);
+            const reportsDir = this.plugin.storagePathManager?.getReportsPath() 
+                || `${this.plugin.settings.storageDirectory}/reports`;
+            await this.plugin.storagePathManager?.ensureDir(reportsDir);
+            
+            const reportPath = `${reportsDir}/${reportFilename}`;
+            await this.app.vault.adapter.write(reportPath, markdown);
 
             this.plugin.logOperation?.log('DATABASE_CHECK', `Report saved to ${reportPath}`);
             return reportPath;
