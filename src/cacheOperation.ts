@@ -5,13 +5,13 @@
  * 
  * 【模块职责】
  * 本模块负责管理 Obsidian 与 Todoist 之间的任务缓存数据，包括：
- * 1. fileMetadata - 每个文件的元数据（包含该文件的 Todoist 任务列表）
+ * 1. fileMetadata - 每个文件的元数据（仅保存 defaultProjectId）
  * 2. taskFileMapping - 任务ID到文件路径的映射（taskId -> {filePath, lineNumber, status, syncEnabled}）
  * 3. rebuildCache - 重建缓存的核心方法，用于扫描 Vault 并与 Todoist 同步
  * 
  * 【数据结构】
- * - fileMetadata: { [filepath]: { todoistTasks: string[], todoistCount: number, defaultProjectId?: string } }
- *   存储每个 markdown 文件的 Todoist 任务列表
+ * - fileMetadata: { [filepath]: { defaultProjectId?: string } }
+ *   存储每个 markdown 文件的默认项目 ID（任务列表从 taskFileMapping 推导）
  * 
  * - taskFileMapping: { [taskId]: { 
  *     filePath: string, 
@@ -195,11 +195,13 @@ export class CacheOperation   {
  * 【fileMetadata 数据结构】
  * {
  *   "filepath.md": {
- *     todoistTasks: ["taskId1", "taskId2"],  // 该文件包含的 Todoist 任务 ID 列表
- *     todoistCount: 2,                        // 任务数量
  *     defaultProjectId: "project123"         // 可选，默认项目 ID
  *   }
  * }
+ * 
+ * 【注意】
+ * - 任务列表从 taskFileMapping 推导，不存储在 fileMetadata 中
+ * - 使用 getTasksInFile() 和 getTaskCountInFile() 获取文件的任务信息
  * 
  * 【作用】
  * - 记录每个 Markdown 文件包含哪些 Todoist 任务
@@ -217,17 +219,16 @@ export class CacheOperation   {
      * @param filepath - 文件路径
      * @returns 文件元数据对象，如果不存在则返回 null
      */
-    async getFileMetadata(filepath:string) {
-        // 从插件设置中获取 fileMetadata，然后查找对应 filepath 的元数据
-        return this.plugin.settings.fileMetadata[filepath] ?? null
+    async getFileMetadata(filepath: string): Promise<{ defaultProjectId?: string } | null> {
+        return this.plugin.settings.fileMetadata?.[filepath] ?? null;
     }
 
     /**
      * 获取所有文件的元数据
      * @returns 全部 fileMetadata 对象
      */
-    async getFileMetadatas(){
-        return this.plugin.settings.fileMetadata ?? null
+    async getFileMetadatas(): Promise<Record<string, { defaultProjectId?: string }> | null> {
+        return this.plugin.settings.fileMetadata ?? null;
     }
 
     /**
@@ -236,77 +237,66 @@ export class CacheOperation   {
      * 
      * 【使用场景】
      * - 当首次在文件中添加 Todoist 任务时调用
-     * - 初始化 todoistTasks 为空数组，todoistCount 为 0
+     * - 初始化 defaultProjectId
      */
-    async newEmptyFileMetadata(filepath:string){
-        const metadatas = this.plugin.settings.fileMetadata
-        // 如果元数据已存在，则不创建
-        if(metadatas[filepath]) {
-            return
+    async newEmptyFileMetadata(filepath: string): Promise<void> {
+        const metadatas = this.plugin.settings.fileMetadata;
+        if (metadatas[filepath]) {
+            return;
         }
-        else{
-            metadatas[filepath] = {}
-        }
-        // 初始化空任务列表
-        metadatas[filepath].todoistTasks = [];
-        metadatas[filepath].todoistCount = 0;
-        // 将更新后的 metadatas 对象保存回设置对象中
-        this.plugin.settings.fileMetadata = metadatas
-
+        metadatas[filepath] = {};
+        this.plugin.settings.fileMetadata = metadatas;
     }
 
     /**
      * 更新指定文件的元数据
      * @param filepath - 文件路径
-     * @param newMetadata - 新的元数据对象（必须包含 todoistTasks 和 todoistCount）
+     * @param newMetadata - 新的元数据对象（只需包含 defaultProjectId）
      * 
      * 【使用场景】
-     * - 当文件中的任务列表发生变化时调用（添加/删除任务）
-     * - 同时会记录操作日志
+     * - 当需要更新文件的默认项目时调用
      */
-    async updateFileMetadata(filepath:string,newMetadata) {
-        const metadatas = this.plugin.settings.fileMetadata
+    async updateFileMetadata(filepath: string, newMetadata: { defaultProjectId?: string }): Promise<void> {
+        const metadatas = this.plugin.settings.fileMetadata;
     
-        // 如果元数据对象不存在，则创建一个新的对象并添加到 metadatas 中
         if (!metadatas[filepath]) {
-            metadatas[filepath] = {}
+            metadatas[filepath] = {};
         }
     
-        // 更新元数据对象中的属性值
-        metadatas[filepath].todoistTasks = newMetadata.todoistTasks;
-        metadatas[filepath].todoistCount = newMetadata.todoistCount;
+        if (newMetadata.defaultProjectId !== undefined) {
+            metadatas[filepath].defaultProjectId = newMetadata.defaultProjectId;
+        }
     
-        // 将更新后的 metadatas 对象保存回设置对象中
-        this.plugin.settings.fileMetadata = metadatas
+        this.plugin.settings.fileMetadata = metadatas;
         this.plugin.logOperation?.log('CACHE_FILE_METADATA_UPDATED', `Updated file metadata for: ${filepath}`, filepath);
-        
+    }
+
+    // ==========================================================================================
+    // Helper Methods - 从 taskFileMapping 推导文件任务信息
+    // ==========================================================================================
+
+    /**
+     * 从 taskFileMapping 推导指定文件的所有任务 ID
+     * @param filepath - 文件路径
+     * @returns 任务 ID 数组
+     */
+    getTasksInFile(filepath: string): string[] {
+        const mapping = this.plugin.settings.taskFileMapping;
+        return Object.entries(mapping)
+            .filter(([_, value]) => value.filePath === filepath)
+            .map(([taskId]) => taskId);
     }
 
     /**
-     * 从文件元数据中删除指定任务 ID
+     * 从 taskFileMapping 推导指定文件的任务数量
      * @param filepath - 文件路径
-     * @param taskId - 要删除的任务 ID
-     * 
-     * 【注意】
-     * 此方法只是从 todoistTasks 数组中过滤掉指定 ID，
-     * 但并没有调用 saveSettings() 保存更改，可能需要调用者手动保存
+     * @returns 任务数量
      */
-    async deleteTaskIdFromMetadata(filepath:string, taskId:string){
-        console.log(filepath)
-        const metadata = await this.getFileMetadata(filepath)
-        console.log(metadata)
-        // 过滤掉指定的任务 ID
-        const newTodoistTasks = metadata.todoistTasks.filter(function(element){
-            return element !== taskId
-        })
-        const newTodoistCount = metadata.todoistCount - 1
-        let newMetadata = {}
-        newMetadata.todoistTasks = newTodoistTasks
-        newMetadata.todoistCount = newTodoistCount
-        console.log(`new metadata ${newMetadata}`)
-        
-
+    getTaskCountInFile(filepath: string): number {
+        return this.getTasksInFile(filepath).length;
     }
+
+    // ==========================================================================================
 
     /**
      * 删除指定文件的元数据
@@ -425,23 +415,21 @@ export class CacheOperation   {
      * - 用户可能删除了 Vault 中的文件
      * - 用户可能重命名了文件
      * 此方法用于清理无效的元数据并更新重命名的文件
-     */
+      */
     async checkFileMetadata(){
         const metadatas =  await this.getFileMetadatas()
         for (const key in metadatas) {
             let filepath = key
-            const value = metadatas[key];
+            const tasks = this.getTasksInFile(key);
             let file = this.app.vault.getAbstractFileByPath(key)
-            // 情况1: 文件不存在且元数据为空 -> 直接删除
-            if(!file && (value.todoistTasks?.length === 0 || !value.todoistTasks)){
-                console.log(`${key} is not existed and metadata is empty.`)
+            // 情况1: 文件不存在且没有关联任务 -> 直接删除
+            if(!file && tasks.length === 0){
+                console.log(`${key} is not existed and has no tasks.`)
                 await this.deleteFilepathFromMetadata(key)
                 continue
             }
-            // 情况2: 元数据为空 -> 跳过（可能是待处理的文件）
-            if(value.todoistTasks?.length === 0 || !value.todoistTasks){
-                //todo 
-                //delelte empty metadata
+            // 情况2: 没有关联任务 -> 跳过
+            if(tasks.length === 0){
                 continue
             }
             //check if file exist
@@ -449,7 +437,7 @@ export class CacheOperation   {
             if(!file){
                 //search new filepath
                 console.log(`file ${filepath} is not exist`) 
-                const todoistId1 = value.todoistTasks[0]
+                const todoistId1 = tasks[0]
                 console.log(todoistId1)
                 const searchResult = await this.plugin.fileOperation.searchFilepathsByTaskidInVault(todoistId1)
                 console.log(`new file path is`)
@@ -467,7 +455,7 @@ export class CacheOperation   {
 
 
             /*
-            value.todoistTasks.forEach(async(taskId) => {
+            tasks.forEach(async(taskId) => {
                 const taskObject = await this.plugin.cacheOperation.loadTaskFromCacheyID(taskId)
 
 

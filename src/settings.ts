@@ -9,7 +9,7 @@ export interface UltimateTodoistSyncSettings {
     defaultProjectName: string;
     defaultProjectId: string;
     automaticSynchronizationInterval: number;
-    fileMetadata: Record<string, any>;
+    fileMetadata: Record<string, { defaultProjectId?: string }>;
     taskFileMapping: {
         [taskId: string]: {
             filePath: string;
