@@ -185,12 +185,6 @@ export class FileOperation   {
             await this.app.vault.modify(file, newContent)
             this.plugin.logOperation?.log('FILE_TODOIST_TAG_ADDED', `Added todoist tag to file: ${filepath}`, filepath);
 
-            //update filemetadate
-            const metadata = await this.plugin.cacheOperation.getFileMetadata(filepath)
-            if(!metadata){
-                await this.plugin.cacheOperation.newEmptyFileMetadata(filepath)
-            }
-
         }
     }
 
@@ -280,12 +274,6 @@ export class FileOperation   {
             console.log(newContent)
             await this.plugin.backupOperation?.backupFile(filepath);
             await this.app.vault.modify(file, newContent)
-
-            //update filemetadate
-            const metadata = await this.plugin.cacheOperation.getFileMetadata(filepath)
-            if(!metadata){
-                await this.plugin.cacheOperation.newEmptyFileMetadata(filepath)
-            }
 
         }
     }

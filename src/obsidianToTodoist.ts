@@ -27,17 +27,15 @@ export class ObsidianToTodoistSync {
             currentFileValue = view?.data;
         }
 
-        const frontMatter = await this.plugin.cacheOperation.getFileMetadata(filepath);
-        if (!frontMatter || !frontMatter.todoistTasks) {
-            console.log('frontmatter has no task');
+        const taskIds = this.plugin.cacheOperation.getTasksInFile(filepath);
+        if (taskIds.length === 0) {
+            console.log('No tasks in this file');
             return;
         }
 
         const currentFileValueWithOutFrontMatter = currentFileValue.replace(/^---[\s\S]*?---\n/, '');
-        const frontMatter_todoistTasks = frontMatter.todoistTasks;
-        const frontMatter_todoistCount = frontMatter.todoistCount;
 
-        const deleteTasksPromises = frontMatter_todoistTasks
+        const deleteTasksPromises = taskIds
             .filter((taskId: string) => !currentFileValueWithOutFrontMatter.includes(taskId))
             .map(async (taskId: string) => {
                 try {
@@ -55,21 +53,13 @@ export class ObsidianToTodoistSync {
             });
 
         const deletedTaskIds = await Promise.all(deleteTasksPromises);
-        const deletedTaskAmount = deletedTaskIds.length;
-        if (!deletedTaskIds.length) {
+        if (deletedTaskIds.length === 0) {
             return;
         }
         for (const taskId of deletedTaskIds) {
             this.plugin.cacheOperation.deleteTaskFileMapping(taskId);
         }
         this.plugin.saveSettings();
-
-        const newFrontMatter_todoistTasks = frontMatter_todoistTasks.filter(
-            (taskId: string) => !deletedTaskIds.includes(taskId)
-        );
-
-        const newFileMetadata = { todoistTasks: newFrontMatter_todoistTasks, todoistCount: (frontMatter_todoistCount - deletedTaskAmount) };
-        await this.plugin.cacheOperation.updateFileMetadata(filepath, newFileMetadata);
     }
 
     async lineContentNewTaskCheck(editor: Editor, view: MarkdownView): Promise<void> {
@@ -101,7 +91,6 @@ export class ObsidianToTodoistSync {
                     this.plugin.logOperation?.log('OBSIDIAN_TASK_COMPLETED', `Completed task in Obsidian: ${newTask.content}`, filepath, todoist_id);
                     this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Completed task in Todoist: ${newTask.content}`, filepath, todoist_id);
                 }
-                this.plugin.saveSettings();
 
                 const text_with_out_link = `${linetxt} %%[todoist_id:: ${todoist_id}]%%`;
                 const link = this.plugin.settings.useAppURI ? `[link](todoist://task?id=${newTask.id})` : `[link](${newTask.url})`;
@@ -111,18 +100,7 @@ export class ObsidianToTodoistSync {
                 view.app.workspace.activeEditor?.editor?.replaceRange(text, from, to);
 
                 try {
-                    const frontMatter = await this.plugin.cacheOperation.getFileMetadata(filepath);
-
-                    if (!frontMatter) {
-                        // empty
-                    }
-
-                    const newFrontMatter = { ...frontMatter };
-                    newFrontMatter.todoistCount = (newFrontMatter.todoistCount ?? 0) + 1;
-                    newFrontMatter.todoistTasks = [...(newFrontMatter.todoistTasks || []), todoist_id];
-
-                    await this.plugin.cacheOperation.updateFileMetadata(filepath, newFrontMatter);
-
+                    this.plugin.saveSettings();
                 } catch (error) {
                     console.error(error);
                 }
@@ -158,16 +136,6 @@ export class ObsidianToTodoistSync {
 
         const content = currentFileValue;
 
-        let newFrontMatter;
-        const frontMatter = await this.plugin.cacheOperation.getFileMetadata(filepath);
-
-        if (!frontMatter) {
-            console.log('frontmatter is empty');
-            newFrontMatter = {};
-        } else {
-            newFrontMatter = { ...frontMatter };
-        }
-
         let hasNewTask = false;
         const lines = content.split('\n');
 
@@ -200,9 +168,6 @@ export class ObsidianToTodoistSync {
                     const text = this.plugin.taskParser.addTodoistLink(text_with_out_link, link);
                     lines[i] = text;
 
-                    newFrontMatter.todoistCount = (newFrontMatter.todoistCount ?? 0) + 1;
-                    newFrontMatter.todoistTasks = [...(newFrontMatter.todoistTasks || []), todoist_id];
-
                     hasNewTask = true;
 
                 } catch (error) {
@@ -216,9 +181,6 @@ export class ObsidianToTodoistSync {
                 const newContent = lines.join('\n');
                 await this.plugin.backupOperation?.backupFile(filepath);
                 await this.app.vault.modify(file, newContent);
-
-                await this.plugin.cacheOperation.updateFileMetadata(filepath, newFrontMatter);
-
             } catch (error) {
                 console.error(error);
             }
@@ -226,14 +188,6 @@ export class ObsidianToTodoistSync {
     }
 
     async lineModifiedTaskCheck(filepath: string, lineText: string, lineNumber: number, fileContent: string): Promise<void> {
-        if (this.plugin.settings.enableFullVaultSync) {
-            const metadata = await this.plugin.cacheOperation.getFileMetadata(filepath);
-            if (!metadata) {
-                await this.plugin.cacheOperation.newEmptyFileMetadata(filepath);
-            }
-            this.plugin.saveSettings();
-        }
-
         if (this.plugin.taskParser.hasTodoistId(lineText) && this.plugin.taskParser.hasTodoistTag(lineText)) {
             const lineTask = await this.plugin.taskParser.convertTextToTodoistTaskObject(lineText, filepath, lineNumber, fileContent);
             const lineTask_todoist_id = (lineTask.todoist_id).toString();
@@ -471,15 +425,13 @@ export class ObsidianToTodoistSync {
     }
 
     async updateTaskDescription(filepath: string): Promise<void> {
-        const metadata = await this.plugin.cacheOperation.getFileMetadata(filepath);
+        const taskIds = this.plugin.cacheOperation.getTasksInFile(filepath);
 
-        if (!metadata || !metadata.todoistTasks) {
+        if (taskIds.length === 0) {
             return;
         }
 
-        const todoistTasks = metadata.todoistTasks;
-
-        for (const taskId of todoistTasks) {
+        for (const taskId of taskIds) {
             try {
                 const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId);
                 if (taskMapping) {

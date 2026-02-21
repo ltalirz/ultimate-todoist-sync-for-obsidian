@@ -183,53 +183,15 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 
 
 
-/* 使用其他文件管理器移动，obsidian触发了删除事件，删除了所有的任务
-		//监听删除事件，当文件被删除后，读取frontMatter中的tasklist,批量删除
-		this.registerEvent(this.app.metadataCache.on('deleted', async(file,prevCache) => {
-			try{
-				if(!this.settings.apiInitialized){
-					return
-				}
-				//console.log('a new file has modified')
-				console.log(`file deleted`)
-				//读取frontMatter
-				const frontMatter = await this.cacheOperation.getFileMetadata(file.path)
-				if(frontMatter === null || frontMatter.todoistTasks === undefined){
-					console.log('There is no task in the deleted files.')
-					return
-				}
-				//判断todoistTasks是否为null
-				console.log(frontMatter.todoistTasks)
-				if(!( this.checkModuleClass())){
-						return
-				}
-				if (!await this.checkAndHandleSyncLock('obsidianToTodoist')) return;
-				await this.todoistSync.deleteTasksByIds(frontMatter.todoistTasks)
-				this.syncLock = false
-				this.saveSettings()
-			}catch(error){
-				console.error(`An error occurred while deleting task in the file: ${error}`);
-				this.syncLock = false
-			}
-
-			
-			
-		}));
-*/
-
-
-		//监听 rename 事件,更新 task data 中的 path
+ 		//监听 rename 事件,更新 task data 中的 path
 		this.registerEvent(this.app.vault.on('rename', async (file,oldpath) => {
 			if(!this.settings.apiInitialized){
 				return
 			}
 			console.log(`${oldpath} is renamed`)
-			//读取frontMatter
-			//const frontMatter = await this.fileOperation.getFrontMatter(file)
-			const frontMatter =  await this.cacheOperation.getFileMetadata(oldpath)
-			console.log(frontMatter)
-			if(frontMatter === null || frontMatter.todoistTasks === undefined){
-				//console.log('删除的文件中没有task')
+			const taskCount = this.cacheOperation.getTaskCountInFile(oldpath)
+			if(taskCount === 0){
+				console.log('The renamed file has no tasks.')
 				return
 			}
 			if(!(this.checkModuleClass())){
