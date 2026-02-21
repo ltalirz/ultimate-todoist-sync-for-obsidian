@@ -9,7 +9,6 @@ export class SafeSettings {
 
     async update(changes: Partial<typeof this.plugin.settings>, shouldSave = false): Promise<void> {
         await this.plugin.settingsBackup?.backup();
-        const backup = JSON.parse(JSON.stringify(this.plugin.settings));
 
         try {
             Object.assign(this.plugin.settings, changes);
@@ -20,8 +19,7 @@ export class SafeSettings {
 
             console.log('[SafeSettings] Update completed successfully');
         } catch (error) {
-            console.error('[SafeSettings] Update failed, rolling back...', error);
-            this.plugin.settings = backup;
+            console.error('[SafeSettings] Update failed, restoring from backup...', error);
             await this.plugin.settingsBackup?.restore();
             throw error;
         }
@@ -29,7 +27,6 @@ export class SafeSettings {
 
     updateSync(changes: Partial<typeof this.plugin.settings>, shouldSave = false): void {
         this.plugin.settingsBackup?.backup();
-        const backup = JSON.parse(JSON.stringify(this.plugin.settings));
 
         try {
             Object.assign(this.plugin.settings, changes);
@@ -40,8 +37,7 @@ export class SafeSettings {
 
             console.log('[SafeSettings] UpdateSync completed successfully');
         } catch (error) {
-            console.error('[SafeSettings] UpdateSync failed, rolling back...', error);
-            this.plugin.settings = backup;
+            console.error('[SafeSettings] UpdateSync failed, restoring from backup...', error);
             this.plugin.settingsBackup?.restore();
             throw error;
         }
