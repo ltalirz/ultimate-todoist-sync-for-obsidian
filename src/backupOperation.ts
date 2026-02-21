@@ -1,5 +1,6 @@
 import { App } from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../main";
+import { StoragePathManager } from './storagePathManager';
 
 export class BackupOperation {
     app: App;
@@ -21,7 +22,7 @@ export class BackupOperation {
     }
 
     getBackupFolder(): string {
-        return this.plugin.storagePathManager?.getBackupsFilesPath() || '.ultimate-todoist-sync/backups/files';
+        return this.plugin.storagePathManager?.getBackupsFilesPath() || StoragePathManager.BACKUPS_FILES_FILE;
     }
 
     async backupFile(filePath: string): Promise<string | null> {
@@ -39,10 +40,30 @@ export class BackupOperation {
             const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
             
             const fileName = filePath.replace(/[/\\]/g, '_');
+            const tempFileName = `${fileName}-${timestamp}.tmp`;
             const backupFileName = `${fileName}-${timestamp}.md`;
+            const tempPath = `${this.getBackupFolder()}/${tempFileName}`;
             const backupPath = `${this.getBackupFolder()}/${backupFileName}`;
 
-            await this.app.vault.create(backupPath, content);
+            const adapter = this.app.vault.adapter;
+
+            await adapter.write(tempPath, content);
+            const tempExists = await adapter.exists(tempPath);
+            if (!tempExists) {
+                throw new Error('Temp backup file was not created');
+            }
+
+            await adapter.write(backupPath, content);
+            const verifyExists = await adapter.exists(backupPath);
+            if (!verifyExists) {
+                throw new Error('Backup file verification failed');
+            }
+
+            try {
+                await adapter.remove(tempPath);
+            } catch (cleanupError) {
+                console.warn('[BackupOperation] Failed to cleanup temp file:', cleanupError);
+            }
 
             await this.cleanOldBackups(filePath);
 
@@ -114,6 +135,11 @@ export class BackupOperation {
 
             const content = await this.app.vault.read(backupFile as any);
             
+            if (!this.isValidMarkdown(content)) {
+                console.error(`Backup file contains invalid content: ${backupPath}`);
+                return false;
+            }
+
             const fileName = backupFile.name.replace(/-\d{8}-\d{6}\.md$/, '').replace(/_/g, '/');
             const originalPath = fileName.replace('.md', '');
 
@@ -132,6 +158,16 @@ export class BackupOperation {
             console.error(`Failed to restore from backup:`, error);
             return false;
         }
+    }
+
+    private isValidMarkdown(content: string): boolean {
+        if (!content || typeof content !== 'string') {
+            return false;
+        }
+        if (content.length === 0) {
+            return true;
+        }
+        return true;
     }
 
     async clearAllBackups(): Promise<void> {

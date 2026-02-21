@@ -1,5 +1,6 @@
 import UltimateTodoistSyncForObsidian from "../main";
 import { App, Notice } from 'obsidian';
+import { StoragePathManager } from './storagePathManager';
 
 export class TodoistToObsidianSync {
     app: App;
@@ -120,23 +121,47 @@ export class TodoistToObsidianSync {
             const resources = await this.plugin.todoistSyncAPI.getAllResources();
 
             const now: Date = new Date();
-            const timeString = `${now.getFullYear()}${now.getMonth() + 1}${now.getDate()}-${now.getHours()}${now.getMinutes()}${now.getSeconds()}`;
+            const timeString = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
 
-            const backupFolder = this.plugin.storagePathManager?.getBackupsTodoistPath() || '.ultimate-todoist-sync/backups/todoist';
+            const backupFolder = this.plugin.storagePathManager?.getBackupsTodoistPath() || StoragePathManager.BACKUPS_TODOIST_FILE;
+            const tempFileName = `todoist-data-backup-${timeString}.tmp`;
             const fileName = `todoist-data-backup-${timeString}.json`;
+            const tempPath = `${backupFolder}/${tempFileName}`;
             const fullPath = `${backupFolder}/${fileName}`;
 
-            const folderExists = this.app.vault.getAbstractFileByPath(backupFolder);
+            const adapter = this.app.vault.adapter;
+            const folderExists = await adapter.exists(backupFolder);
             if (!folderExists) {
-                await this.app.vault.createFolder(backupFolder);
+                await adapter.mkdir(backupFolder);
             }
 
-            await this.app.vault.create(fullPath, JSON.stringify(resources, null, 2));
+            const jsonContent = JSON.stringify(resources, null, 2);
+            
+            await adapter.write(tempPath, jsonContent);
+            const tempExists = await adapter.exists(tempPath);
+            if (!tempExists) {
+                throw new Error('Temp backup file was not created');
+            }
+
+            await adapter.write(fullPath, jsonContent);
+            
+            const verifyExists = await adapter.exists(fullPath);
+            if (!verifyExists) {
+                throw new Error('Backup file verification failed');
+            }
+
+            try {
+                await adapter.remove(tempPath);
+            } catch (cleanupError) {
+                console.warn('[TodoistBackup] Failed to cleanup temp file:', cleanupError);
+            }
+
             new Notice(`Todoist backup saved to ${fullPath}`);
             this.plugin.logOperation?.log('BACKUP_CREATED', `Todoist backup created: ${fullPath}`);
         } catch (error) {
             console.error("An error occurred while creating Todoist backup:", error);
             this.plugin.logOperation?.log('BACKUP_CREATED', `Backup failed: ${(error as Error).message}`);
+            new Notice('Todoist backup failed');
         }
     }
 }

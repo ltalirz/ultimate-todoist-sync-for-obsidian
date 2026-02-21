@@ -616,6 +616,33 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 				});
 				return component;
 			});
+
+		new Setting(containerEl)
+			.setName('View Backup History')
+			.setDesc('View and restore from previous settings backups')
+			.addButton(component => {
+				component.setButtonText('Show Backups');
+				component.onClick(async () => {
+					if (!this.plugin.settingsBackup) {
+						new Notice('Settings backup not initialized');
+						return;
+					}
+					const backups = await this.plugin.settingsBackup.getBackupList();
+					if (backups.length === 0) {
+						new Notice('No backups found');
+						return;
+					}
+					let message = 'Available backups:\n';
+					backups.slice(0, 5).forEach((backup, index) => {
+						const fileName = backup.split('/').pop() || backup;
+						message += `${index + 1}. ${fileName}\n`;
+					});
+					message += '\nTo restore, click "Restore from Backup" button.';
+					new Notice(message, 10000);
+					console.log('[Settings] Available backups:', backups);
+				});
+				return component;
+			});
 	}
 }
 

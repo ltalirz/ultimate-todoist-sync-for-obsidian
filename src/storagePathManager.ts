@@ -8,6 +8,8 @@ export class StoragePathManager {
 
     static readonly SETTINGS_FILE = '.obsidian/plugins/ultimate-todoist-sync-for-obsidian/data.json';
     static readonly SETTINGS_TEMP_FILE = '.obsidian/plugins/ultimate-todoist-sync-for-obsidian/data.json.tmp';
+    static readonly BACKUPS_TODOIST_FILE = '.ultimate-todoist-sync/backups/todoist';
+    static readonly BACKUPS_FILES_FILE = '.ultimate-todoist-sync/backups/files';
 
     constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
         this.app = app;

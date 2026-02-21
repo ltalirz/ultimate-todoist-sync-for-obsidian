@@ -513,6 +513,9 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			this.todoistSync = undefined
 			this.logOperation = undefined
 			this.backupOperation = undefined
+			this.settings.initialized = false
+			this.settings.apiInitialized = false
+			await this.saveSettings()
 			new Notice(`Ultimate Todoist Sync plugin initialization failed, please check the todoist api`)
 			return;		
 		}
@@ -528,6 +531,9 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 
 			}catch(error){
 				console.log(`error creating user data folder: ${error}`)
+				this.settings.initialized = false
+				this.settings.apiInitialized = false
+				await this.saveSettings()
 				new Notice(`error creating user data folder`)
 				return;
 			}
