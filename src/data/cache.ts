@@ -279,11 +279,14 @@ export class CacheOperation   {
         await this.plugin.safeSettings?.update({ taskFileMapping: mapping });
     }
 
-    updateTaskMappingSyncMeta(taskId: string, meta: { updated_at?: string; note_count?: number }): void {
+    async updateTaskMappingSyncMeta(taskId: string, meta: { updated_at?: string; note_count?: number }): Promise<void> {
         const existing = this.plugin.settings.taskFileMapping[taskId];
         if (!existing) return;
-        if (meta.updated_at !== undefined) existing.updated_at = meta.updated_at;
-        if (meta.note_count !== undefined) existing.note_count = meta.note_count;
+        const mapping = { ...this.plugin.settings.taskFileMapping };
+        mapping[taskId] = { ...existing };
+        if (meta.updated_at !== undefined) mapping[taskId].updated_at = meta.updated_at;
+        if (meta.note_count !== undefined) mapping[taskId].note_count = meta.note_count;
+        await this.plugin.safeSettings?.update({ taskFileMapping: mapping });
     }
 
     /**
@@ -628,7 +631,8 @@ export class CacheOperation   {
             // 
             // ==========================================================================================
             
-            // Step 1: Clear taskFileMapping (keep fileMetadata for other uses)
+            // Step 1: Backup old mapping, then clear (restore on failure)
+            const backupMapping = { ...this.plugin.settings.taskFileMapping };
             await this.plugin.safeSettings?.update({ taskFileMapping: {} }, true);
 
             // ==========================================================================================
@@ -946,6 +950,9 @@ export class CacheOperation   {
         } catch (error) {
             console.error('Cache rebuild failed:', error);
             this.plugin.logOperation?.log('CACHE_REBUILT', `Cache rebuild failed: ${(error as Error).message}`);
+            // Restore backup mapping to avoid data loss
+            console.warn('[rebuildCache] Restoring backup mapping due to failure...');
+            await this.plugin.safeSettings?.update({ taskFileMapping: backupMapping }, true);
             const message = `Cache rebuild failed: ${(error as Error).message}`;
             if (noticeCallback) {
                 noticeCallback(message);
