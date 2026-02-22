@@ -190,9 +190,6 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
             const mainEnabled = this.plugin.settings.syncEnabled;
             const o2tEnabled = this.plugin.settings.obsidianToTodoistEnabled;
             const t2oEnabled = this.plugin.settings.todoistToObsidianEnabled;
-            const lastCheck = this.plugin.settings.lastDatabaseCheckTime
-                ? new Date(this.plugin.settings.lastDatabaseCheckTime).toLocaleString()
-                : 'Never';
 
             let statusText = '';
             if (!passed) {
@@ -205,10 +202,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                 statusText = `✅ Enabled (O→T: ${o2t}, T→O: ${t2o})`;
             }
 
-            syncStatusEl.innerHTML = `
-                <div style="margin-bottom: 8px;"><strong>Status:</strong> ${statusText}</div>
-                <div><strong>Last Check:</strong> ${lastCheck}</div>
-            `;
+            syncStatusEl.innerHTML = `<div><strong>Status:</strong> ${statusText}</div>`;
         };
         updateSyncStatus();
 
@@ -304,6 +298,15 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                 })
             );
 
+        const checkStatusEl = containerEl.createEl('div', { cls: 'setting-item-description' });
+        const updateCheckStatus = () => {
+            const lastCheck = this.plugin.settings.lastDatabaseCheckTime
+                ? new Date(this.plugin.settings.lastDatabaseCheckTime).toLocaleString()
+                : 'Never';
+            checkStatusEl.innerHTML = `<div><strong>Last Check:</strong> ${lastCheck}</div>`;
+        };
+        updateCheckStatus();
+
         new Setting(containerEl)
             .setName('Check Database')
             .setDesc('Check for sync issues, conflicts, and data inconsistencies.')
@@ -331,6 +334,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                                 syncEnabled: true
                             }, true);
                             updateSyncStatus();
+                            updateCheckStatus();
                             new Notice('✅ Database check passed! No issues found.');
                         } else {
                             await this.plugin.safeSettings?.update({
@@ -339,6 +343,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                                 syncEnabled: false
                             }, true);
                             updateSyncStatus();
+                            updateCheckStatus();
                             new Notice(`⚠️ Found ${result.totalIssues} issues. Sync disabled.`);
                         }
 
@@ -379,6 +384,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                                 syncEnabled: true
                             }, true);
                             updateSyncStatus();
+                            updateCheckStatus();
                             new Notice('✅ Issues fixed! Sync enabled.');
                         } else {
                             await this.plugin.safeSettings?.update({
@@ -387,6 +393,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                                 syncEnabled: false
                             }, true);
                             updateSyncStatus();
+                            updateCheckStatus();
                             new Notice(`⚠️ Found ${result.totalIssues} issues. Please fix manually.`);
                         }
                     } catch (error) {
