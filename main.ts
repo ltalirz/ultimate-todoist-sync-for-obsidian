@@ -625,6 +625,11 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			console.error('[Plugin] Failed to create storage directories:', error);
 		});
 
+		// load historical logs now that storagePathManager is ready
+		this.logOperation?.loadFromFile().catch(error => {
+			console.error('[Plugin] Failed to load logs from file:', error);
+		});
+
 		//initialize sync data (load from cache or full sync on startup)
 		try {
 			const loaded = this.todoistSyncAPI?.loadFromCache();

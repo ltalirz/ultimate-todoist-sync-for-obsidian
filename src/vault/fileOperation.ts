@@ -1,6 +1,5 @@
 import { App} from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../../main";
-import { LogAction } from '../storage/log';
 
 export interface VaultTask {
     taskId: string;

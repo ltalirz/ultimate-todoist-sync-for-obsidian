@@ -208,7 +208,7 @@ export class TodoistToObsidianSync {
             this.plugin.logOperation?.log('BACKUP_CREATED', `Todoist backup created: ${fullPath}`);
         } catch (error) {
             console.error("An error occurred while creating Todoist backup:", error);
-            this.plugin.logOperation?.log('BACKUP_CREATED', `Backup failed: ${(error as Error).message}`);
+            this.plugin.logOperation?.log('BACKUP_FAILED', `Backup failed: ${(error as Error).message}`);
             new Notice('Todoist backup failed');
         }
     }
