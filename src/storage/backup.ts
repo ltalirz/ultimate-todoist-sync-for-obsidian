@@ -30,7 +30,7 @@ export class BackupOperation {
             await this.ensureBackupFolderExists();
 
             const file = this.app.vault.getAbstractFileByPath(filePath);
-            if (!file || !(file instanceof this.app.vault.getFiles().constructor)) {
+            if (!file) {
                 console.log(`File not found: ${filePath}`);
                 return null;
             }

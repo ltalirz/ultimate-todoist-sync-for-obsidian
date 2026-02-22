@@ -467,18 +467,19 @@ export class DatabaseChecker {
                     // Priority is stored as !!<n> in task text, not as labels
                     // Skip priority check here — vault scan doesn't extract priority from text
                     const vaultPriority = todoistTask!.priority;
-                    if (false && vaultPriority !== todoistTask!.priority) {
-                        issues.push({
-                            type: 'priority_mismatch',
-                            filePath: vaultTask!.filePath,
-                            taskId,
-                            lineNumber: vaultTask!.lineNumber,
-                            details: `Priority mismatch: Vault is ${vaultPriority}, Todoist is ${todoistTask!.priority}`,
-                            obsidianPriority: vaultPriority,
-                            todoistPriority: todoistTask!.priority
-                        });
-                        summary.priorityMismatch++;
-                    }
+                    // Priority check disabled: vault scan doesn't extract priority from text
+                    // if (vaultPriority !== todoistTask!.priority) {
+                    //     issues.push({
+                    //         type: 'priority_mismatch',
+                    //         filePath: vaultTask!.filePath,
+                    //         taskId,
+                    //         lineNumber: vaultTask!.lineNumber,
+                    //         details: `Priority mismatch: Vault is ${vaultPriority}, Todoist is ${todoistTask!.priority}`,
+                    //         obsidianPriority: vaultPriority,
+                    //         todoistPriority: todoistTask!.priority
+                    //     });
+                    //     summary.priorityMismatch++;
+                    // }
 
                     // ---- 检查标签一致性 ----
                     // vaultTask.labels 现在已经不带 # 前缀（由 fileOperation.extractLabelsFromLine 处理）
