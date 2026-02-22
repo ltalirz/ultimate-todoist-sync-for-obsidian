@@ -365,6 +365,43 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                 })
             );
 
+        new Setting(containerEl)
+            .setName('Verify Database')
+            .setDesc('Scan vault and Todoist, generate a full report showing task counts and all inconsistencies. No changes made.')
+            .addButton(button => button
+                .setButtonText('Verify')
+                .onClick(async () => {
+                    if (!this.plugin.settings.apiInitialized) {
+                        new Notice('Please set the Todoist API first');
+                        return;
+                    }
+                    if (!this.plugin.databaseChecker) {
+                        new Notice('Database checker not initialized');
+                        return;
+                    }
+                    const verifyNotice = new Notice('Verifying database...', 0);
+                    try {
+                        const result = await this.plugin.databaseChecker.checkDatabase((msg) => {
+                            verifyNotice.setMessage(msg);
+                        });
+                        verifyNotice.hide();
+                        const todoistCount = this.plugin.todoistSyncAPI?.getSyncData()?.items?.length ?? 0;
+                        const vaultCount = Object.keys(this.plugin.settings.taskFileMapping).length;
+                        const status = result.success ? '✅ Healthy' : `⚠️ ${result.totalIssues} issues`;
+                        new Notice(
+                            `Verify complete — ${status}\nTodoist: ${todoistCount} tasks | Vault: ${vaultCount} mapped tasks`,
+                            8000
+                        );
+                        if (result.reportPath) {
+                            new Notice(`Report: ${result.reportPath}`, 5000);
+                        }
+                    } catch (error) {
+                        verifyNotice.hide();
+                        new Notice(`Verify error: ${error.message}`);
+                    }
+                })
+            );
+
         // ============================================
         // Logs & Debug Section
         // ============================================
