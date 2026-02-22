@@ -1,5 +1,6 @@
 import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../../main";
+import { LogViewerModal } from '../ui/modals';
 
 export interface UltimateTodoistSyncSettings {
     initialized: boolean;
@@ -430,23 +431,11 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('View Logs')
-            .setDesc('View operation logs.')
+            .setDesc('Browse, search and filter operation logs.')
             .addButton(button => button
                 .setButtonText('View')
                 .onClick(() => {
-                    const logsText = this.plugin.logOperation?.getLogsAsText() || 'No logs.';
-                    new Notice(logsText, 10000);
-                })
-            );
-
-        new Setting(containerEl)
-            .setName('Clear Logs')
-            .setDesc('Clear all operation logs.')
-            .addButton(button => button
-                .setButtonText('Clear')
-                .onClick(() => {
-                    this.plugin.logOperation?.clearLogs();
-                    new Notice('Logs cleared.');
+                    new LogViewerModal(this.app, this.plugin).open();
                 })
             );
 

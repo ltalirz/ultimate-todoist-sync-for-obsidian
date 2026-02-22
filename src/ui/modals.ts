@@ -1,4 +1,4 @@
-import { App, Modal, Setting } from "obsidian";
+import { App, Modal, Setting, TextComponent } from "obsidian";
 import UltimateTodoistSyncForObsidian from "../../main";
 
 
@@ -195,6 +195,131 @@ export class ConflictResolutionModal extends Modal {
     complete() {
         this.onComplete(this.resolutions);
         this.close();
+    }
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
+    }
+}
+
+
+// ==========================================================================================
+// LogViewerModal - 日志查看器
+// ==========================================================================================
+
+export class LogViewerModal extends Modal {
+    plugin: UltimateTodoistSyncForObsidian;
+    private filterDirection: 'all' | 'obsidian→todoist' | 'todoist→obsidian' = 'all';
+    private searchQuery = '';
+    private logListEl: HTMLElement;
+
+    constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
+        super(app);
+        this.plugin = plugin;
+    }
+
+    onOpen() {
+        const { contentEl, modalEl } = this;
+        contentEl.empty();
+        modalEl.style.width = '800px';
+        modalEl.style.maxWidth = '90vw';
+
+        contentEl.createEl('h4', { text: 'Sync Logs' });
+
+        // Toolbar
+        const toolbar = contentEl.createDiv({ cls: 'log-viewer-toolbar' });
+        toolbar.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;';
+
+        // Search
+        const searchInput = toolbar.createEl('input', {
+            type: 'text',
+            placeholder: 'Search logs…',
+        }) as HTMLInputElement;
+        searchInput.style.cssText = 'flex:1;min-width:160px;padding:4px 8px;border-radius:4px;border:1px solid var(--background-modifier-border);background:var(--background-primary);color:var(--text-normal);';
+        searchInput.addEventListener('input', () => {
+            this.searchQuery = searchInput.value.toLowerCase();
+            this.renderLogs();
+        });
+
+        // Direction filter
+        const filterSelect = toolbar.createEl('select') as HTMLSelectElement;
+        filterSelect.style.cssText = 'padding:4px 8px;border-radius:4px;border:1px solid var(--background-modifier-border);background:var(--background-primary);color:var(--text-normal);';
+        [['all', 'All directions'], ['obsidian→todoist', 'obsidian → todoist'], ['todoist→obsidian', 'todoist → obsidian']]
+            .forEach(([val, label]) => {
+                const opt = filterSelect.createEl('option', { text: label });
+                opt.value = val;
+            });
+        filterSelect.addEventListener('change', () => {
+            this.filterDirection = filterSelect.value as typeof this.filterDirection;
+            this.renderLogs();
+        });
+
+        // Clear button
+        const clearBtn = toolbar.createEl('button', { text: 'Clear Logs' });
+        clearBtn.style.cssText = 'padding:4px 10px;border-radius:4px;cursor:pointer;background:var(--interactive-normal);color:var(--text-normal);border:1px solid var(--background-modifier-border);';
+        clearBtn.addEventListener('click', () => {
+            this.plugin.logOperation?.clearLogs();
+            this.renderLogs();
+        });
+
+        // Log list container
+        this.logListEl = contentEl.createDiv({ cls: 'log-viewer-list' });
+        this.logListEl.style.cssText = 'height:500px;overflow-y:auto;font-family:var(--font-monospace);font-size:12px;border:1px solid var(--background-modifier-border);border-radius:4px;padding:8px;background:var(--background-secondary);';
+
+        this.renderLogs();
+    }
+
+    private renderLogs() {
+        const logs = this.plugin.logOperation?.getLogs() || [];
+        this.logListEl.empty();
+
+        const filtered = logs.filter(entry => {
+            if (this.filterDirection !== 'all' && entry.direction !== this.filterDirection) return false;
+            if (this.searchQuery) {
+                const haystack = `${entry.action} ${entry.details} ${entry.filePath || ''} ${entry.taskId || ''}`.toLowerCase();
+                if (!haystack.includes(this.searchQuery)) return false;
+            }
+            return true;
+        }).reverse(); // newest first
+
+        if (filtered.length === 0) {
+            this.logListEl.createEl('p', { text: 'No logs match the current filter.', cls: 'log-empty' });
+            (this.logListEl.querySelector('.log-empty') as HTMLElement).style.cssText = 'color:var(--text-muted);text-align:center;margin-top:40px;';
+            return;
+        }
+
+        for (const entry of filtered) {
+            const row = this.logListEl.createDiv({ cls: 'log-row' });
+            row.style.cssText = 'display:flex;gap:8px;align-items:baseline;padding:3px 0;border-bottom:1px solid var(--background-modifier-border-hover);';
+
+            // Timestamp
+            const ts = row.createSpan();
+            ts.style.cssText = 'color:var(--text-muted);white-space:nowrap;flex-shrink:0;';
+            ts.textContent = new Date(entry.timestamp).toLocaleString();
+
+            // Direction badge
+            if (entry.direction) {
+                const badge = row.createSpan({ text: entry.direction });
+                const isToObsidian = entry.direction === 'todoist→obsidian';
+                badge.style.cssText = `white-space:nowrap;flex-shrink:0;padding:1px 6px;border-radius:10px;font-size:10px;font-weight:600;background:${isToObsidian ? 'var(--color-green)' : 'var(--color-blue)'};color:#fff;opacity:0.85;`;
+            }
+
+            // Action
+            const action = row.createSpan({ text: entry.action });
+            action.style.cssText = 'font-weight:600;color:var(--text-accent);white-space:nowrap;flex-shrink:0;';
+
+            // Details
+            const details = row.createSpan({ text: entry.details });
+            details.style.cssText = 'color:var(--text-normal);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;';
+            details.title = entry.details; // full text on hover
+
+            // Task ID
+            if (entry.taskId) {
+                const tid = row.createSpan({ text: entry.taskId });
+                tid.style.cssText = 'color:var(--text-muted);font-size:11px;white-space:nowrap;flex-shrink:0;';
+            }
+        }
     }
 
     onClose() {
