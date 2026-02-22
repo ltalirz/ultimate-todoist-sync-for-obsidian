@@ -591,7 +591,7 @@ export class TodoistSyncAPI   {
 
 		this.rateLimitState.partialSyncCount++;
 
-		this.incrementalSync();
+		this.incrementalSync().catch(err => console.error('[TodoistSyncAPI] Background incremental sync failed:', err));
 
       return data;
     } catch (error: any) {

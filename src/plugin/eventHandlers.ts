@@ -26,13 +26,13 @@ export class EventHandlers {
 
 		const arrowKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'];
 		if (arrowKeys.includes(evt.key)) {
-			if (!this.plugin.checkModuleClass()) return;
+			if (!await this.plugin.checkModuleClass()) return;
 			this.lineNumberCheck();
 		}
 
 		if (evt.key === 'Delete' || evt.key === 'Backspace') {
 			try {
-				if (!this.plugin.checkModuleClass()) return;
+				if (!await this.plugin.checkModuleClass()) return;
 				const filepath = this.plugin.app.workspace.getActiveFile()?.path;
 				if (!filepath) return;
 				if (!await this.plugin.syncLockManager.acquire('obsidianToTodoist')) return;
@@ -57,7 +57,7 @@ export class EventHandlers {
 
 		const target = evt.target as HTMLInputElement;
 		if (target.type === 'checkbox') {
-			if (!this.plugin.checkModuleClass()) return;
+			if (!await this.plugin.checkModuleClass()) return;
 			this.checkboxEventHandle(evt);
 		}
 	}
@@ -66,7 +66,7 @@ export class EventHandlers {
 		try {
 			if (!this.plugin.settings.apiInitialized) return;
 			this.lineNumberCheck();
-			if (!this.plugin.checkModuleClass()) return;
+			if (!await this.plugin.checkModuleClass()) return;
 			if (!await this.plugin.syncLockManager.acquire('obsidianToTodoist')) return;
 			await this.plugin.obsidianToTodoist!.lineContentNewTaskCheck(editor, view);
 			this.plugin.syncLockManager.release();
@@ -85,7 +85,7 @@ export class EventHandlers {
 			console.log('The renamed file has no tasks.');
 			return;
 		}
-		if (!this.plugin.checkModuleClass()) return;
+		if (!await this.plugin.checkModuleClass()) return;
 
 		await this.plugin.cacheOperation!.updateRenamedFilePath(oldpath, file.path);
 		this.plugin.saveSettings();
@@ -159,7 +159,7 @@ export class EventHandlers {
 			}
 
 			const lastLineText = view.editor.getLine(lastLine as number);
-			if (!this.plugin.checkModuleClass()) return;
+			if (!await this.plugin.checkModuleClass()) return;
 			this.plugin.lastLines.set(fileName as string, line as number);
 
 			try {
@@ -174,7 +174,7 @@ export class EventHandlers {
 	}
 
 	async checkboxEventHandle(evt: MouseEvent): Promise<void> {
-		if (!this.plugin.checkModuleClass()) return;
+		if (!await this.plugin.checkModuleClass()) return;
 
 		const target = evt.target as HTMLInputElement;
 		const taskElement = target.closest('div');

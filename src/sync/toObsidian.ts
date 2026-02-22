@@ -74,7 +74,7 @@ export class TodoistToObsidianSync {
                 });
             }
 
-            this.syncNotesToObsidian(taskFileMapping, noteMap);
+			await this.syncNotesToObsidian(taskFileMapping, noteMap);
 
             if (syncedCount > 0) {
                 this.plugin.logOperation?.log('SYNC_COMPLETED', `Synced ${syncedCount} tasks from Todoist to Obsidian`);
