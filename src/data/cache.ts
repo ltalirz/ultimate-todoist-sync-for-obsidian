@@ -956,6 +956,8 @@ export class CacheOperation   {
             const message = `Cache rebuild failed: ${(error as Error).message}`;
             if (noticeCallback) {
                 noticeCallback(message);
+            } else {
+                new Notice(message);
             }
             return { success: false, tasksProcessed: 0 };
         }
