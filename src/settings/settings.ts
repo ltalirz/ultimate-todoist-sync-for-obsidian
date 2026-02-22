@@ -209,14 +209,15 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
             const t2oEnabled = this.plugin.settings.todoistToObsidianEnabled;
 
             let statusText = '';
-            if (!passed) {
-                statusText = '⚠️ Blocked - database issues detected';
-            } else if (!mainEnabled) {
+            if (!mainEnabled) {
                 statusText = '❌ Disabled';
             } else {
                 const o2t = o2tEnabled ? '✅' : '❌';
                 const t2o = t2oEnabled ? '✅' : '❌';
                 statusText = `✅ Enabled (O→T: ${o2t}, T→O: ${t2o})`;
+            }
+            if (!passed) {
+                statusText += ' ⚠️ (database issues detected — some tasks may be skipped)';
             }
 
             syncStatusEl.innerHTML = `<div><strong>Status:</strong> ${statusText}</div>`;
@@ -319,12 +320,11 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                             progressNotice.hide();
                             await this.plugin.safeSettings?.update({
                                 lastDatabaseCheckTime: Date.now(),
-                                lastDatabaseCheckPassed: true,
-                                syncEnabled: true
+                                lastDatabaseCheckPassed: true
                             }, true);
                             updateSyncStatus();
                             updateCheckStatus();
-                            new Notice('✅ Database is healthy. Sync enabled.');
+                            new Notice('✅ Database is healthy.');
                             return;
                         }
                         // Step 2: Rebuild cache to fix what can be fixed
@@ -342,16 +342,15 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         const remainingCount = after.totalIssues;
                         await this.plugin.safeSettings?.update({
                             lastDatabaseCheckTime: Date.now(),
-                            lastDatabaseCheckPassed: after.success,
-                            syncEnabled: after.success
+                            lastDatabaseCheckPassed: after.success
                         }, true);
                         updateSyncStatus();
                         updateCheckStatus();
                         if (after.success) {
-                            new Notice(`✅ Fixed ${fixedCount} issues. Database is healthy. Sync enabled.`);
+                            new Notice(`✅ Fixed ${fixedCount} issues. Database is healthy.`);
                         } else {
                             new Notice(
-                                `⚠️ Fixed ${fixedCount} issues. ${remainingCount} remain (content conflicts, missing files — manual fix needed). Sync disabled.`,
+                                `⚠️ Fixed ${fixedCount} issues. ${remainingCount} remain (content conflicts, missing files — manual fix needed).`,
                                 8000
                             );
                         }
