@@ -286,35 +286,6 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                 })
             );
 
-        new Setting(containerEl)
-            .setName('Rebuild Cache')
-            .setDesc('Scan vault and Todoist to rebuild task cache. Use when cache is corrupted.')
-            .addButton(button => button
-                .setButtonText('Rebuild')
-                .onClick(async () => {
-                    if (!this.plugin.settings.apiInitialized) {
-                        new Notice('Please set the Todoist API first')
-                        return
-                    }
-
-                    const rebuildNotice = new Notice('Starting cache rebuild...', 0);
-
-                    try {
-                        const result = await this.plugin.cacheOperation.rebuildCache((message: string) => {
-                            rebuildNotice.setMessage(message);
-                        });
-
-                        if (result.success) {
-                            new Notice(`Cache rebuilt! ${result.tasksProcessed} tasks processed.`);
-                        } else {
-                            new Notice('Cache rebuild failed!');
-                        }
-                    } catch (error) {
-                        new Notice(`Rebuild error: ${error.message}`);
-                    }
-                })
-            );
-
         const checkStatusEl = containerEl.createEl('div', { cls: 'setting-item-description' });
         const updateCheckStatus = () => {
             const lastCheck = this.plugin.settings.lastDatabaseCheckTime
@@ -325,76 +296,27 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
         updateCheckStatus();
 
         new Setting(containerEl)
-            .setName('Check Database')
-            .setDesc('Check for sync issues, conflicts, and data inconsistencies.')
+            .setName('Fix Database')
+            .setDesc('Check for inconsistencies, auto-fix what can be fixed (missing mappings, orphan records), then report what was fixed and what still needs manual attention.')
             .addButton(button => button
-                .setButtonText('Check')
+                .setButtonText('Fix Database')
                 .onClick(async () => {
                     if (!this.plugin.settings.apiInitialized) {
-                        new Notice('Please set the Todoist API first')
-                        return
-                    }
-
-                    const checkNotice = new Notice('Checking database...', 0);
-
-                    try {
-                        const result = await this.plugin.databaseChecker!.checkDatabase((message: string) => {
-                            checkNotice.setMessage(message);
-                        });
-
-                        checkNotice.hide();
-
-                        if (result.success) {
-                            await this.plugin.safeSettings?.update({
-                                lastDatabaseCheckTime: Date.now(),
-                                lastDatabaseCheckPassed: true,
-                                syncEnabled: true
-                            }, true);
-                            updateSyncStatus();
-                            updateCheckStatus();
-                            new Notice('✅ Database check passed! No issues found.');
-                        } else {
-                            await this.plugin.safeSettings?.update({
-                                lastDatabaseCheckTime: Date.now(),
-                                lastDatabaseCheckPassed: false,
-                                syncEnabled: false
-                            }, true);
-                            updateSyncStatus();
-                            updateCheckStatus();
-                            new Notice(`⚠️ Found ${result.totalIssues} issues. Sync disabled.`);
-                        }
-
-                        if (result.reportPath) {
-                            new Notice(`Report: ${result.reportPath}`, 5000);
-                        }
-                    } catch (error) {
-                        checkNotice.hide();
-                        new Notice(`Check failed: ${error.message}`);
-                    }
-                })
-            );
-
-        new Setting(containerEl)
-            .setName('Fix & Enable Sync')
-            .setDesc('Run database check and auto-enable sync if no issues.')
-            .addButton(button => button
-                .setButtonText('Fix & Enable')
-                .onClick(async () => {
-                    if (!this.plugin.settings.apiInitialized) {
-                        new Notice('Please set the Todoist API first')
-                        return
+                        new Notice('Please set the Todoist API first');
+                        return;
                     }
                     if (!this.plugin.databaseChecker) {
-                        new Notice('Database checker not initialized')
-                        return
+                        new Notice('Database checker not initialized');
+                        return;
                     }
-
-                    const checkNotice = new Notice('Running database check...', 0);
+                    const progressNotice = new Notice('Step 1/3: Checking database...', 0);
                     try {
-                        const result = await this.plugin.databaseChecker.checkDatabase();
-                        checkNotice.hide();
-
-                        if (result.success) {
+                        // Step 1: Initial check
+                        const before = await this.plugin.databaseChecker.checkDatabase((msg) => {
+                            progressNotice.setMessage(`Step 1/3: ${msg}`);
+                        });
+                        if (before.success) {
+                            progressNotice.hide();
                             await this.plugin.safeSettings?.update({
                                 lastDatabaseCheckTime: Date.now(),
                                 lastDatabaseCheckPassed: true,
@@ -402,20 +324,43 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                             }, true);
                             updateSyncStatus();
                             updateCheckStatus();
-                            new Notice('✅ Issues fixed! Sync enabled.');
+                            new Notice('✅ Database is healthy. Sync enabled.');
+                            return;
+                        }
+                        // Step 2: Rebuild cache to fix what can be fixed
+                        progressNotice.setMessage(`Step 2/3: Found ${before.totalIssues} issues. Rebuilding cache...`);
+                        await this.plugin.cacheOperation.rebuildCache((msg) => {
+                            progressNotice.setMessage(`Step 2/3: ${msg}`);
+                        });
+                        // Step 3: Re-check to see what remains
+                        progressNotice.setMessage('Step 3/3: Re-checking database...');
+                        const after = await this.plugin.databaseChecker.checkDatabase((msg) => {
+                            progressNotice.setMessage(`Step 3/3: ${msg}`);
+                        });
+                        progressNotice.hide();
+                        const fixedCount = Math.max(0, before.totalIssues - after.totalIssues);
+                        const remainingCount = after.totalIssues;
+                        await this.plugin.safeSettings?.update({
+                            lastDatabaseCheckTime: Date.now(),
+                            lastDatabaseCheckPassed: after.success,
+                            syncEnabled: after.success
+                        }, true);
+                        updateSyncStatus();
+                        updateCheckStatus();
+                        if (after.success) {
+                            new Notice(`✅ Fixed ${fixedCount} issues. Database is healthy. Sync enabled.`);
                         } else {
-                            await this.plugin.safeSettings?.update({
-                                lastDatabaseCheckTime: Date.now(),
-                                lastDatabaseCheckPassed: false,
-                                syncEnabled: false
-                            }, true);
-                            updateSyncStatus();
-                            updateCheckStatus();
-                            new Notice(`⚠️ Found ${result.totalIssues} issues. Please fix manually.`);
+                            new Notice(
+                                `⚠️ Fixed ${fixedCount} issues. ${remainingCount} remain (content conflicts, missing files — manual fix needed). Sync disabled.`,
+                                8000
+                            );
+                        }
+                        if (after.reportPath) {
+                            new Notice(`Report: ${after.reportPath}`, 5000);
                         }
                     } catch (error) {
-                        checkNotice.hide();
-                        new Notice(`Error: ${error.message}`);
+                        progressNotice.hide();
+                        new Notice(`Fix Database error: ${error.message}`);
                     }
                 })
             );
