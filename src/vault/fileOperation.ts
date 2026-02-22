@@ -107,7 +107,7 @@ export class FileOperation   {
         const newContent = lines.join('\n')
         await this.plugin.backupOperation?.backupFile(filepath);
         await this.app.vault.modify(file, newContent)
-        this.plugin.logOperation?.log('FILE_TASK_COMPLETED', `Completed task in file: ${taskId}`, filepath, taskId);
+        this.plugin.logOperation?.log('FILE_TASK_COMPLETED', `Completed task in file: ${taskId}`, filepath, taskId, this.plugin.isSyncingFromTodoist ? 'todoist→obsidian' : 'obsidian→todoist');
         }
     }
   
@@ -141,7 +141,7 @@ export class FileOperation   {
         const newContent = lines.join('\n')
         await this.plugin.backupOperation?.backupFile(filepath);
         await this.app.vault.modify(file, newContent)
-        this.plugin.logOperation?.log('FILE_TASK_UNCOMPLETED', `Reopened task in file: ${taskId}`, filepath, taskId);
+        this.plugin.logOperation?.log('FILE_TASK_UNCOMPLETED', `Reopened task in file: ${taskId}`, filepath, taskId, this.plugin.isSyncingFromTodoist ? 'todoist→obsidian' : 'obsidian→todoist');
         }
     }
 
@@ -271,7 +271,7 @@ export class FileOperation   {
         //console.log(newContent)
         await this.plugin.backupOperation?.backupFile(filepath);
         await this.app.vault.modify(file, newContent)
-        this.plugin.logOperation?.log('FILE_TASK_CONTENT_SYNCED', `Synced task content from Todoist: ${taskId}`, filepath, taskId);
+        this.plugin.logOperation?.log('FILE_TASK_CONTENT_SYNCED', `Synced task content from Todoist: ${taskId}`, filepath, taskId, this.plugin.isSyncingFromTodoist ? 'todoist→obsidian' : 'obsidian→todoist');
         }
         
     }
@@ -329,7 +329,7 @@ export class FileOperation   {
         //console.log(newContent)
         await this.plugin.backupOperation?.backupFile(filepath);
         await this.app.vault.modify(file, newContent)
-        this.plugin.logOperation?.log('FILE_TASK_DUEDATE_SYNCED', `Synced task due date from Todoist: ${taskId}`, filepath, taskId);
+        this.plugin.logOperation?.log('FILE_TASK_DUEDATE_SYNCED', `Synced task due date from Todoist: ${taskId}`, filepath, taskId, this.plugin.isSyncingFromTodoist ? 'todoist→obsidian' : 'obsidian→todoist');
         }
         
     }
@@ -373,7 +373,7 @@ export class FileOperation   {
         //console.log(newContent)
         await this.plugin.backupOperation?.backupFile(filepath);
         await this.app.vault.modify(file, newContent)
-        this.plugin.logOperation?.log('FILE_TASK_NOTE_ADDED', `Synced task note from Todoist: ${taskId}`, filepath, taskId);
+        this.plugin.logOperation?.log('FILE_TASK_NOTE_ADDED', `Synced task note from Todoist: ${taskId}`, filepath, taskId, this.plugin.isSyncingFromTodoist ? 'todoist→obsidian' : 'obsidian→todoist');
         }
         
     }
@@ -405,7 +405,7 @@ export class FileOperation   {
             const newFileContent = lines.join('\n');
             await this.plugin.backupOperation?.backupFile(filepath);
             await this.app.vault.modify(file, newFileContent);
-            this.plugin.logOperation?.log('FILE_TASK_CONTENT_SYNCED', `Synced content from Todoist: ${taskId}`, filepath, taskId);
+            this.plugin.logOperation?.log('FILE_TASK_CONTENT_SYNCED', `Synced content from Todoist: ${taskId}`, filepath, taskId, this.plugin.isSyncingFromTodoist ? 'todoist→obsidian' : 'obsidian→todoist');
         }
         return modified;
     }
@@ -447,7 +447,7 @@ export class FileOperation   {
             const newFileContent = lines.join('\n');
             await this.plugin.backupOperation?.backupFile(filepath);
             await this.app.vault.modify(file, newFileContent);
-            this.plugin.logOperation?.log('FILE_TASK_DUEDATE_SYNCED', `Synced due date from Todoist: ${taskId}`, filepath, taskId);
+            this.plugin.logOperation?.log('FILE_TASK_DUEDATE_SYNCED', `Synced due date from Todoist: ${taskId}`, filepath, taskId, this.plugin.isSyncingFromTodoist ? 'todoist→obsidian' : 'obsidian→todoist');
         }
         return modified;
     }
@@ -479,7 +479,7 @@ export class FileOperation   {
             const newFileContent = lines.join('\n');
             await this.plugin.backupOperation?.backupFile(filepath);
             await this.app.vault.modify(file, newFileContent);
-            this.plugin.logOperation?.log('FILE_TASK_NOTE_ADDED', `Synced note from Todoist: ${taskId}`, filepath, taskId);
+            this.plugin.logOperation?.log('FILE_TASK_NOTE_ADDED', `Synced note from Todoist: ${taskId}`, filepath, taskId, this.plugin.isSyncingFromTodoist ? 'todoist→obsidian' : 'obsidian→todoist');
         }
         return modified;
     }

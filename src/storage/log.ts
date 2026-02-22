@@ -1,12 +1,15 @@
 import { App } from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../../main";
 
+export type SyncDirection = 'obsidian→todoist' | 'todoist→obsidian';
+
 export interface LogEntry {
     timestamp: number;
     action: string;
     details: string;
     filePath?: string;
     taskId?: string;
+    direction?: SyncDirection;
 }
 
 export class LogOperation {
@@ -51,7 +54,7 @@ export class LogOperation {
         }
     }
 
-    log(action: string, details: string, filePath?: string, taskId?: string): void {
+    log(action: string, details: string, filePath?: string, taskId?: string, direction?: SyncDirection): void {
         if (!this.plugin.settings.enableLog) {
             return;
         }
@@ -61,7 +64,8 @@ export class LogOperation {
             action,
             details,
             filePath,
-            taskId
+            taskId,
+            direction
         };
 
         this.memoryLogs.push(logEntry);
@@ -168,9 +172,10 @@ export class LogOperation {
 
         return this.memoryLogs.map(log => {
             const date = new Date(log.timestamp).toLocaleString();
+            const dirInfo = log.direction ? ` [${log.direction}]` : '';
             const fileInfo = log.filePath ? ` [${log.filePath}]` : '';
             const taskInfo = log.taskId ? ` (task: ${log.taskId})` : '';
-            return `[${date}] ${log.action}: ${log.details}${fileInfo}${taskInfo}`;
+            return `[${date}]${dirInfo} ${log.action}: ${log.details}${fileInfo}${taskInfo}`;
         }).join('\n');
     }
 }
