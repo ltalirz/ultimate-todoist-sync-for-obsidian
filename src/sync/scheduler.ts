@@ -13,7 +13,7 @@ export class SyncScheduler {
 			console.log('Scheduled sync already in progress, skipping');
 			return;
 		}
-		if (!this.plugin.checkModuleClass()) return;
+		if (!await this.plugin.checkModuleClass()) return;
 
 		this.inProgress = true;
 		console.log('Todoist scheduled synchronization task started at', new Date().toLocaleString());
