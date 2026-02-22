@@ -40,6 +40,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 	statusBar: ReturnType<Plugin['addStatusBarItem']>;
 	saveLock: boolean;
 	isProcessingModify: boolean;
+	isSyncingFromTodoist: boolean;
 
 	syncLockManager: SyncLockManager;
 
@@ -49,6 +50,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 
 	async onload() {
 		this.saveLock = false;
+		this.isSyncingFromTodoist = false;
 		this.syncLockManager = new SyncLockManager(this);
 		this.safeSettings = new SafeSettings(this);
 

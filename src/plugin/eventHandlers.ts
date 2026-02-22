@@ -65,6 +65,7 @@ export class EventHandlers {
 	private async onEditorChange(editor: Editor, view: MarkdownView): Promise<void> {
 		try {
 			if (!this.plugin.settings.apiInitialized) return;
+			if (this.plugin.isSyncingFromTodoist) return;
 			this.lineNumberCheck();
 			if (!await this.plugin.checkModuleClass()) return;
 			if (!await this.plugin.syncLockManager.acquire('obsidianToTodoist')) return;
@@ -103,6 +104,7 @@ export class EventHandlers {
 	private async onFileModify(file: TFile): Promise<void> {
 		try {
 			if (!this.plugin.settings.apiInitialized) return;
+			if (this.plugin.isSyncingFromTodoist) return;
 			if (this.plugin.isProcessingModify) return;
 			this.plugin.isProcessingModify = true;
 
@@ -138,6 +140,7 @@ export class EventHandlers {
 	}
 
 	async lineNumberCheck(): Promise<void> {
+		if (this.plugin.isSyncingFromTodoist) return;
 		const view = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!view) return;
 

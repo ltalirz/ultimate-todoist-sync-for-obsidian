@@ -40,40 +40,46 @@ export class TodoistToObsidianSync {
             const taskFileMapping = this.plugin.settings.taskFileMapping || {};
             let syncedCount = 0;
 
-            for (const taskId of Object.keys(taskFileMapping)) {
-                const mapping = taskFileMapping[taskId];
-                if (mapping.syncEnabled === false) continue;
+            // Set flag: file writes below are from Todoist pull, not user edits
+            this.plugin.isSyncingFromTodoist = true;
+            try {
+                for (const taskId of Object.keys(taskFileMapping)) {
+                    const mapping = taskFileMapping[taskId];
+                    if (mapping.syncEnabled === false) continue;
 
-                const task = itemMap.get(taskId);
+                    const task = itemMap.get(taskId);
 
-                if (!task || task.is_deleted) {
-                    if (this.plugin.settings.debugMode) {
-                        console.log(`[Todoist→Obsidian] Task ${taskId} deleted or not found in sync data`);
+                    if (!task || task.is_deleted) {
+                        if (this.plugin.settings.debugMode) {
+                            console.log(`[Todoist→Obsidian] Task ${taskId} deleted or not found in sync data`);
+                        }
+                        continue;
                     }
-                    continue;
+
+                    if (task.updated_at === mapping.updated_at) {
+                        continue;
+                    }
+
+                    if (this.plugin.settings.debugMode) {
+                        console.log(`[Todoist→Obsidian] Task ${taskId} changed: ${mapping.updated_at} → ${task.updated_at}`);
+                    }
+
+                    try {
+                        await this.syncSingleTaskToObsidian(taskId, task);
+                        syncedCount++;
+                        await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, {
+                            updated_at: task.updated_at,
+                            note_count: task.note_count || 0
+                        });
+                    } catch (error) {
+                        console.error(`[Todoist→Obsidian] Error syncing task ${taskId}:`, error);
+                    }
                 }
 
-                if (task.updated_at === mapping.updated_at) {
-                    continue;
-                }
-
-                if (this.plugin.settings.debugMode) {
-                    console.log(`[Todoist→Obsidian] Task ${taskId} changed: ${mapping.updated_at} → ${task.updated_at}`);
-                }
-
-                try {
-                    await this.syncSingleTaskToObsidian(taskId, task);
-                    syncedCount++;
-                    await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, {
-                        updated_at: task.updated_at,
-                        note_count: task.note_count || 0
-                    });
-                } catch (error) {
-                    console.error(`[Todoist→Obsidian] Error syncing task ${taskId}:`, error);
-                }
+                await this.syncNotesToObsidian(taskFileMapping, noteMap);
+            } finally {
+                this.plugin.isSyncingFromTodoist = false;
             }
-
-			await this.syncNotesToObsidian(taskFileMapping, noteMap);
 
             if (syncedCount > 0) {
                 this.plugin.logOperation?.log('SYNC_COMPLETED', `Synced ${syncedCount} tasks from Todoist to Obsidian`);
