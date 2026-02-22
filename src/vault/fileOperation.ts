@@ -508,7 +508,7 @@ export class FileOperation   {
     }
   
     //search todoist_id by content
-    async searchTodoistIdFromFilePath(filepath: string, searchTerm: string): string | null {
+    async searchTodoistIdFromFilePath(filepath: string, searchTerm: string): Promise<string | null> {
         const file = this.app.vault.getAbstractFileByPath(filepath)
         const fileContent = await this.app.vault.read(file)
         const fileLines = fileContent.split('\n');

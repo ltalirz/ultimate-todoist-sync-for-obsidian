@@ -417,7 +417,6 @@ export class TaskParser   {
           let date = dateObj.getDate().toString().padStart(2, '0');
           let localDateString = `${year}-${month}-${date}`;
           return localDateString;
-          return(localDateString);
         } catch (error) {
           console.error(`Error extracting date from string '${utcTimeString}': ${error}`);
           return null;
@@ -457,7 +456,7 @@ export class TaskParser   {
           if(localDateString === null){
             return null
           }
-          localDateString = localDateString + "T08:00";
+          localDateString = localDateString + "T00:00:00";
           let localDateObj = new Date(localDateString);
           let ISOString = localDateObj.toISOString()
           return(ISOString);
