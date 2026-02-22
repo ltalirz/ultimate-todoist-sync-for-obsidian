@@ -1,6 +1,7 @@
 import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../../main";
 import { LogViewerModal } from '../ui/modals';
+import { RebuildCacheResult } from '../data/cache';
 
 export interface UltimateTodoistSyncSettings {
     initialized: boolean;
@@ -330,9 +331,19 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         }
                         // Step 2: Rebuild cache to fix what can be fixed
                         progressNotice.setMessage(`Step 2/3: Found ${before.totalIssues} issues. Rebuilding cache...`);
-                        await this.plugin.cacheOperation.rebuildCache((msg) => {
+                        const rebuildResult: RebuildCacheResult = await this.plugin.cacheOperation.rebuildCache((msg) => {
                             progressNotice.setMessage(`Step 2/3: ${msg}`);
                         });
+                        // Show rebuild summary
+                        if (rebuildResult.success) {
+                            const parts: string[] = [`✅ Rebuilt: ${rebuildResult.tasksProcessed} active`];
+                            if (rebuildResult.nonActiveCount > 0) parts.push(`${rebuildResult.nonActiveCount} completed/archived`);
+                            if (rebuildResult.issueCount > 0) parts.push(`${rebuildResult.issueCount} issues (not in Todoist)`);
+                            if (rebuildResult.conflictsCount > 0) parts.push(`${rebuildResult.conflictsCount} conflicts (sync disabled)`);
+                            if (rebuildResult.convertedCount > 0) parts.push(`${rebuildResult.convertedCount} legacy IDs converted`);
+                            if (rebuildResult.tasksWithoutIdCount > 0) parts.push(`${rebuildResult.tasksWithoutIdCount} unsynced tasks`);
+                            new Notice(parts.join(' · '), 8000);
+                        }
                         // Step 3: Re-check to see what remains
                         progressNotice.setMessage('Step 3/3: Re-checking database...');
                         const after = await this.plugin.databaseChecker.checkDatabase((msg) => {

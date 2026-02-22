@@ -47,6 +47,16 @@ import { App, TFile} from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../../main";
 import { TaskConflict, ConflictResolution, ConflictResolutionModal } from '../ui/modals';
 
+export interface RebuildCacheResult {
+    success: boolean;
+    tasksProcessed: number;
+    conflictsCount: number;
+    nonActiveCount: number;
+    issueCount: number;
+    convertedCount: number;
+    tasksWithoutIdCount: number;
+}
+
 /**
  * ==========================================================================================
  * CacheOperation 类
@@ -609,9 +619,9 @@ export class CacheOperation   {
     /**
      * 重建缓存 - 扫描 Vault 并与 Todoist 同步
      * @param noticeCallback - 可选的进度回调函数
-     * @returns Promise<{ success: boolean; tasksProcessed: number }>
+     * @returns Promise<RebuildCacheResult>
      */
-    async rebuildCache(noticeCallback?: (message: string) => void): Promise<{ success: boolean; tasksProcessed: number }> {
+    async rebuildCache(noticeCallback?: (message: string) => void): Promise<RebuildCacheResult> {
         try {
             if (noticeCallback) {
                 noticeCallback('Starting cache rebuild...');
@@ -828,6 +838,8 @@ export class CacheOperation   {
             const nextMapping: Record<string, { filePath: string; lineNumber: number; status?: 'active' | 'nonActive' | 'conflicted' | 'issue'; syncEnabled?: boolean }> = {};
             const conflicts: TaskConflict[] = [];
             let processedCount = 0;
+            let nonActiveCount = 0;
+            let issueCount = 0;
             const totalTasks = Array.from(fileTaskMap.values())
                 .reduce((sum, tasks) => sum + tasks.length, 0);
             const invalidTaskIds: string[] = [];
@@ -840,6 +852,8 @@ export class CacheOperation   {
                         
                         if (!task) {
                             const status = taskInfo.isCompleted ? 'nonActive' : 'issue';
+                            if (status === 'nonActive') nonActiveCount++;
+                            else issueCount++;
                             nextMapping[taskInfo.taskId] = {
                                 filePath, lineNumber: taskInfo.lineNumber,
                                 status, syncEnabled: false
@@ -947,7 +961,15 @@ export class CacheOperation   {
                 this.plugin.debugLog(message);
             }
             
-            return { success: true, tasksProcessed: processedCount };
+            return {
+                success: true,
+                tasksProcessed: processedCount,
+                conflictsCount: conflicts.length,
+                nonActiveCount,
+                issueCount,
+                convertedCount,
+                tasksWithoutIdCount: tasksWithoutId.length,
+            };
             
         } catch (error) {
             console.error('Cache rebuild failed:', error);
@@ -961,7 +983,7 @@ export class CacheOperation   {
             } else {
                 new Notice(message);
             }
-            return { success: false, tasksProcessed: 0 };
+            return { success: false, tasksProcessed: 0, conflictsCount: 0, nonActiveCount: 0, issueCount: 0, convertedCount: 0, tasksWithoutIdCount: 0 };
         }
     }
 
