@@ -883,7 +883,8 @@ export class CacheOperation   {
                         } else {
                             nextMapping[mappingTaskId] = {
                                 filePath, lineNumber: taskInfo.lineNumber,
-                                status: 'active', syncEnabled: true
+                                status: 'active', syncEnabled: true,
+                                updated_at: task.updated_at ?? undefined
                             };
                         }
                         
