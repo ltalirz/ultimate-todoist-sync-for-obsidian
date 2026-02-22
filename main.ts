@@ -43,7 +43,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 
 	syncLockManager: SyncLockManager;
 
-	private scheduler: SyncScheduler;
+	scheduler: SyncScheduler;
 	private eventHandlers: EventHandlers;
 	private lastApiNoticeTime = 0;
 
@@ -135,8 +135,8 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 
 		if (!this.settings.initialized) {
 			try {
-				this.initializeModuleClass();
-				this.todoistToObsidian!.backupTodoistAllResources();
+				await this.initializeModuleClass();
+				await this.todoistToObsidian!.backupTodoistAllResources();
 			} catch (error) {
 				console.log(`error creating user data folder: ${error}`);
 				await this.safeSettings?.update({ initialized: false, apiInitialized: false }, true);
@@ -146,7 +146,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			await this.safeSettings?.update({ initialized: true }, true);
 			new Notice(`Ultimate Todoist Sync initialization successful. Todoist data has been backed up.`);
 		} else {
-			this.initializeModuleClass();
+			await this.initializeModuleClass();
 		}
 
 		await this.safeSettings?.update({ apiInitialized: true });
@@ -215,7 +215,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		}
 	}
 
-	checkModuleClass(): boolean {
+	async checkModuleClass(): Promise<boolean> {
 		if (this.settings.apiInitialized === true) {
 			if (
 				this.todoistRestAPI === undefined ||
@@ -225,7 +225,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				this.obsidianToTodoist === undefined ||
 				this.taskParser === undefined
 			) {
-				this.initializeModuleClass();
+				await this.initializeModuleClass();
 			}
 			return true;
 		} else {
@@ -239,7 +239,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 	}
 
 	async setStatusBarText() {
-		if (!this.checkModuleClass()) return;
+		if (!await this.checkModuleClass()) return;
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!view) {
 			this.statusBar.setText('');
