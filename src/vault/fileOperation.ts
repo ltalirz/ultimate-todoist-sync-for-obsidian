@@ -672,7 +672,7 @@ export class FileOperation   {
 
         for (const file of files) {
             try {
-                const content = await this.app.vault.cachedRead(file);
+                const content = await this.app.vault.read(file);
                 const lines = content.split('\n');
 
                 for (let i = 0; i < lines.length; i++) {
@@ -691,6 +691,7 @@ export class FileOperation   {
                         const taskId = match[1];
                         
                         if (tasksWithId.has(taskId)) {
+                            console.warn(`[scanVaultTasks] Duplicate taskId ${taskId} found in ${file.path} (line ${i}), already mapped — skipping`);
                             continue;
                         }
 

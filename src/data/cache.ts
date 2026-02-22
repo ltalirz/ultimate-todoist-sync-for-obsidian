@@ -784,7 +784,7 @@ export class CacheOperation   {
                     convertedCount = Object.keys(idMapping).length;
                     this.plugin.debugLog(`[rebuildCache] Converted ${convertedCount} legacy IDs`);
                 } catch (error) {
-                    console.error(`[rebuildCache] Legacy ID conversion failed: ${(error as Error).message}`);
+                    console.warn(`[rebuildCache] Legacy ID conversion failed: ${(error as Error).message}. These tasks will remain with their old IDs and may trigger conversion again on next rebuild.`);
                     this.plugin.debugLog('[rebuildCache] Will continue without converting legacy IDs');
                     // 继续执行，不使用转换后的 ID
                     idMapping = {};
@@ -919,6 +919,7 @@ export class CacheOperation   {
                     this.plugin.debugLog(`    Todoist: "${conflict.todoistContent}"`);
                 }
                 this.plugin.logOperation?.log('CACHE_REBUILT', `Found ${conflicts.length} conflicts during rebuild`);
+                new Notice(`Cache rebuild: found ${conflicts.length} conflicted task(s). Sync disabled for those tasks. Use "Fix Database" in settings to resolve.`);
             }
             
             // ==========================================================================================
