@@ -81,6 +81,7 @@ export class TodoistToObsidianSync {
         } catch (err) {
             console.error('An error occurred while synchronizing:', err);
             this.plugin.logOperation?.log('SYNC_ERROR', `Sync failed: ${(err as Error).message}`);
+            new Notice(`Todoist sync failed: ${(err as Error).message}`);
         }
     }
 

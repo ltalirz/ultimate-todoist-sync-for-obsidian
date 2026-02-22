@@ -49,6 +49,7 @@ export class ObsidianToTodoistSync {
                     }
                 } catch (error) {
                     console.error(`Failed to delete task ${taskId}: ${error}`);
+                    new Notice(`Failed to delete task ${taskId}. Check console for details.`);
                 }
             });
 
@@ -135,6 +136,7 @@ export class ObsidianToTodoistSync {
             } catch (error) {
                 console.error('Error adding task:', error);
                 console.log(`The error occurred in the file: ${filepath}`);
+                new Notice(`Failed to create task. Check console for details.`);
                 return;
             }
         }
@@ -182,12 +184,16 @@ export class ObsidianToTodoistSync {
                     newTask.path = filepath;
                     console.log(newTask);
                     new Notice(`new task ${newTask.content} id is ${newTask.id}`);
+                    this.plugin.logOperation?.log('OBSIDIAN_TASK_CREATED', `Created task in Obsidian: ${newTask.content}`, filepath, todoist_id);
+                    this.plugin.logOperation?.log('TODOIST_TASK_CREATED', `Created task in Todoist: ${newTask.content}`, filepath, todoist_id);
 
                 this.plugin.cacheOperation.setTaskFileMapping(todoist_id, filepath || '', i);
 
                     if (currentTask.isCompleted === true) {
                         await this.plugin.todoistSyncAPI.CloseTask(newTask.id);
                         // taskFileMapping already set above
+                        this.plugin.logOperation?.log('OBSIDIAN_TASK_COMPLETED', `Completed task in Obsidian: ${newTask.content}`, filepath, todoist_id);
+                        this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Completed task in Todoist: ${newTask.content}`, filepath, todoist_id);
                     }
 
                     const text_with_out_link = `${line} %%[todoist_id:: ${todoist_id}]%%`;
@@ -199,6 +205,7 @@ export class ObsidianToTodoistSync {
 
                 } catch (error) {
                     console.error('Error adding task:', error);
+                    new Notice(`Failed to create task. Check console for details.`);
                     continue;
                 }
             }
@@ -338,6 +345,7 @@ export class ObsidianToTodoistSync {
 
             } catch (error) {
                 console.error('Error updating task:', error);
+                new Notice(`Failed to update task ${lineTask_todoist_id}. Check console for details.`);
             }
         }
     }
