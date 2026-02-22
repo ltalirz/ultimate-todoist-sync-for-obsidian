@@ -174,8 +174,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			if (result.success) {
 				console.log('Startup database check passed');
 			} else {
-				await this.safeSettings?.update({ syncEnabled: false }, true);
-				new Notice(`Found ${result.totalIssues} database issues. Sync has been disabled until issues are fixed.`);
+				new Notice(`Found ${result.totalIssues} database issue(s). Please use "Fix Database" in settings to resolve them.`);
 			}
 		} catch (error) {
 			console.error('Startup database check failed:', error);
