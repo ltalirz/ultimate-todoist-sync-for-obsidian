@@ -253,7 +253,7 @@ export class TodoistSyncAPI   {
         console.log(data)
         return data;
       } catch (error) {
-        console.error(error);
+        console.error(error)
         throw new Error('Failed to fetch user resources due to network error');
       }
       }
@@ -293,7 +293,7 @@ export class TodoistSyncAPI   {
           console.log(data)
           return data;
         } catch (error) {
-          console.error(error);
+          console.error('[updateUserTimezone] Failed:', error);
           throw new Error('Failed to fetch user resources due to network error');
         }
         }
