@@ -821,8 +821,11 @@ Generated: ${new Date().toLocaleString()}
                     const issue = issues[i];
                     // 截取任务内容
                     const taskContent = issue.taskContent?.substring(0, 30) || issue.obsidianContent?.substring(0, 30) || '-';
-                    // 提取文件名
-                    const filePath = issue.filePath ? issue.filePath.split('/').pop() : '-';
+                    // 生成 Obsidian wiki link，显示文件名但链接到完整路径
+                    const fileBaseName = issue.filePath ? (issue.filePath.split('/').pop()?.replace(/\.md$/, '') || issue.filePath) : null;
+                    const filePath = issue.filePath
+                        ? `[[${issue.filePath.replace(/\.md$/, '')}|${fileBaseName}]]`
+                        : '-';
                     // 行号格式化
                     const lineNum = issue.lineNumber !== undefined ? String(issue.lineNumber + 1) : '-';
                     
