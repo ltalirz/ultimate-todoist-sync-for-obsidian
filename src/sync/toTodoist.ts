@@ -241,13 +241,38 @@ export class ObsidianToTodoistSync {
 
             const savedTask = await this.plugin.todoistSyncAPI.GetTaskById(lineTask_todoist_id);
 
-            // Conflict detection: if Todoist was updated since our last sync, skip push and mark conflicted
-            if (taskMapping.updated_at && savedTask.updated_at && savedTask.updated_at !== taskMapping.updated_at) {
-                console.warn(`[lineModifiedTaskCheck] Conflict detected for task ${lineTask_todoist_id}: Todoist updated_at=${savedTask.updated_at}, cached=${taskMapping.updated_at}`);
-                await this.plugin.cacheOperation.setTaskFileMapping(lineTask_todoist_id, taskMapping.filePath, taskMapping.lineNumber, 'conflicted', false);
-                new Notice(`Task ${lineTask_todoist_id} has a conflict: modified in both Obsidian and Todoist. Sync disabled until resolved.`);
-                this.plugin.logOperation?.log('CONFLICT_DETECTED', `Conflict on task ${lineTask_todoist_id}`, filepath, lineTask_todoist_id);
+            // Handle deleted task: task exists in cache but not in Todoist
+            if (!savedTask) {
+                console.warn(`[lineModifiedTaskCheck] Task ${lineTask_todoist_id} not found in Todoist (deleted?), marking as issue`);
+                await this.plugin.cacheOperation.setTaskFileMapping(lineTask_todoist_id, taskMapping.filePath, taskMapping.lineNumber, 'issue', false);
+                new Notice(`Task ${lineTask_todoist_id} no longer exists in Todoist. Sync disabled.`);
+                this.plugin.logOperation?.log('CONFLICT_DETECTED', `Task ${lineTask_todoist_id} missing in Todoist`, filepath, lineTask_todoist_id);
                 return;
+            }
+
+            // Conflict detection: if Todoist was updated since our last sync
+            if (taskMapping.updated_at && savedTask.updated_at && savedTask.updated_at !== taskMapping.updated_at) {
+                const strategy = this.plugin.settings.conflictResolutionStrategy;
+                console.warn(`[lineModifiedTaskCheck] Conflict on task ${lineTask_todoist_id}: strategy=${strategy}`);
+                this.plugin.logOperation?.log('CONFLICT_DETECTED', `Conflict on task ${lineTask_todoist_id} (strategy: ${strategy})`, filepath, lineTask_todoist_id);
+
+                if (strategy === 'todoist-wins') {
+                    // Let toObsidian pull overwrite Obsidian on next sync — just update cached updated_at
+                    await this.plugin.cacheOperation.updateTaskMappingSyncMeta(lineTask_todoist_id, { updated_at: undefined });
+                    new Notice(`Conflict on task ${lineTask_todoist_id}: Todoist wins — Obsidian will be updated on next sync.`);
+                    return;
+                } else if (strategy === 'obsidian-wins') {
+                    // Force-update Todoist with Obsidian content — fall through to normal update logic below
+                    new Notice(`Conflict on task ${lineTask_todoist_id}: Obsidian wins — pushing to Todoist.`);
+                    // Reset cached updated_at so toObsidian won't overwrite back
+                    await this.plugin.cacheOperation.updateTaskMappingSyncMeta(lineTask_todoist_id, { updated_at: savedTask.updated_at });
+                    // fall through
+                } else {
+                    // manual: disable sync until user resolves
+                    await this.plugin.cacheOperation.setTaskFileMapping(lineTask_todoist_id, taskMapping.filePath, taskMapping.lineNumber, 'conflicted', false);
+                    new Notice(`Task ${lineTask_todoist_id} has a conflict: modified in both Obsidian and Todoist. Sync disabled until resolved.`);
+                    return;
+                }
             }
 
             const lineTaskContent = lineTask.content;
@@ -390,9 +415,32 @@ export class ObsidianToTodoistSync {
     async closeTask(taskId: string): Promise<void> {
         if (!this.plugin.cacheOperation?.isTaskSyncEnabled(taskId)) return;
         try {
+            const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId);
+            const savedTask = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
+
+            if (!savedTask) {
+                await this.plugin.cacheOperation.setTaskFileMapping(taskId, taskMapping?.filePath || '', taskMapping?.lineNumber || 0, 'issue', false);
+                new Notice(`Task ${taskId} no longer exists in Todoist. Sync disabled.`);
+                return;
+            }
+
+            if (taskMapping?.updated_at && savedTask.updated_at && savedTask.updated_at !== taskMapping.updated_at) {
+                const strategy = this.plugin.settings.conflictResolutionStrategy;
+                this.plugin.logOperation?.log('CONFLICT_DETECTED', `Conflict on closeTask ${taskId} (strategy: ${strategy})`, undefined, taskId);
+                if (strategy === 'todoist-wins') {
+                    await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, { updated_at: undefined });
+                    new Notice(`Conflict on task ${taskId}: Todoist wins — Obsidian will be updated on next sync.`);
+                    return;
+                } else if (strategy === 'manual') {
+                    await this.plugin.cacheOperation.setTaskFileMapping(taskId, taskMapping.filePath, taskMapping.lineNumber, 'conflicted', false);
+                    new Notice(`Task ${taskId} has a conflict. Sync disabled until resolved.`);
+                    return;
+                }
+                // obsidian-wins: fall through and close
+            }
+
             await this.plugin.todoistSyncAPI.CloseTask(taskId);
             await this.plugin.fileOperation.completeTaskInTheFile(taskId);
-            // taskFileMapping already set, no need to update
             this.plugin.saveSettings();
             new Notice(`Task ${taskId} is closed.`);
             this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Closed task via checkbox: ${taskId}`, undefined, taskId);
@@ -405,11 +453,34 @@ export class ObsidianToTodoistSync {
     async repoenTask(taskId: string): Promise<void> {
         if (!this.plugin.cacheOperation?.isTaskSyncEnabled(taskId)) return;
         try {
+            const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId);
+            const savedTask = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
+
+            if (!savedTask) {
+                await this.plugin.cacheOperation.setTaskFileMapping(taskId, taskMapping?.filePath || '', taskMapping?.lineNumber || 0, 'issue', false);
+                new Notice(`Task ${taskId} no longer exists in Todoist. Sync disabled.`);
+                return;
+            }
+
+            if (taskMapping?.updated_at && savedTask.updated_at && savedTask.updated_at !== taskMapping.updated_at) {
+                const strategy = this.plugin.settings.conflictResolutionStrategy;
+                this.plugin.logOperation?.log('CONFLICT_DETECTED', `Conflict on repoenTask ${taskId} (strategy: ${strategy})`, undefined, taskId);
+                if (strategy === 'todoist-wins') {
+                    await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, { updated_at: undefined });
+                    new Notice(`Conflict on task ${taskId}: Todoist wins — Obsidian will be updated on next sync.`);
+                    return;
+                } else if (strategy === 'manual') {
+                    await this.plugin.cacheOperation.setTaskFileMapping(taskId, taskMapping.filePath, taskMapping.lineNumber, 'conflicted', false);
+                    new Notice(`Task ${taskId} has a conflict. Sync disabled until resolved.`);
+                    return;
+                }
+                // obsidian-wins: fall through and reopen
+            }
+
             await this.plugin.todoistSyncAPI.OpenTask(taskId);
             await this.plugin.fileOperation.uncompleteTaskInTheFile(taskId);
-            // taskFileMapping already set, no need to update
             this.plugin.saveSettings();
-            new Notice(`Task ${taskId} is reopend.`);
+            new Notice(`Task ${taskId} is reopened.`);
             this.plugin.logOperation?.log('TODOIST_TASK_REOPENED', `Reopened task via checkbox: ${taskId}`, undefined, taskId);
         } catch (error) {
             console.error('Error opening task:', error);

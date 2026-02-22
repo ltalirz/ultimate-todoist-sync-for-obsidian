@@ -359,11 +359,11 @@ export class SettingsBackup {
 				JSON.parse(data);
 			} catch {
 				console.error('[SettingsBackup] Temp file contains invalid JSON');
-				await adapter.remove(tempPath);
+				await adapter.remove(tempPath).catch(() => {});
 				return false;
 			}
 			await adapter.write(StoragePathManager.SETTINGS_FILE, data);
-			await adapter.remove(tempPath);
+			await adapter.remove(tempPath).catch(() => {});
 			console.log('[SettingsBackup] Recovered from temp file');
 			new Notice('Settings recovered from temp file');
 			return true;

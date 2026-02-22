@@ -35,6 +35,7 @@ export interface UltimateTodoistSyncSettings {
     maxBackupsPerFile: number;
     storageDirectory: string;
     lastStorageDirectory: string | null;
+    conflictResolutionStrategy: 'todoist-wins' | 'obsidian-wins' | 'manual';
 }
 
 export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
@@ -62,6 +63,7 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
     maxBackupsPerFile: 100,
     storageDirectory: 'ultimate-todoist-sync',
     lastStorageDirectory: null,
+    conflictResolutionStrategy: 'manual',
 }
 
 export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
@@ -176,6 +178,21 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                     .setValue(this.plugin.settings.useAppURI)
                     .onChange(async (value) => {
                         await this.plugin.safeSettings?.update({ useAppURI: value }, true)
+                    })
+            );
+
+        new Setting(containerEl)
+            .setName('Conflict Resolution Strategy')
+            .setDesc('When a task is modified in both Obsidian and Todoist: todoist-wins overwrites Obsidian, obsidian-wins pushes Obsidian to Todoist, manual disables sync until resolved.')
+            .addDropdown(component =>
+                component
+                    .addOption('manual', 'Manual (disable sync until resolved)')
+                    .addOption('todoist-wins', 'Todoist wins (overwrite Obsidian)')
+                    .addOption('obsidian-wins', 'Obsidian wins (overwrite Todoist)')
+                    .setValue(this.plugin.settings.conflictResolutionStrategy)
+                    .onChange(async (value: 'todoist-wins' | 'obsidian-wins' | 'manual') => {
+                        await this.plugin.safeSettings?.update({ conflictResolutionStrategy: value }, true);
+                        new Notice(`Conflict strategy set to: ${value}`);
                     })
             );
 
