@@ -5,7 +5,7 @@ import UltimateTodoistSyncForObsidian from "../../main";
     // 使用示例
     //const str = "2023-03-27";
     //const utcStr = localDateStringToUTCDatetimeString(str);
-    //console.log(dateStr); // 输出 2023-03-27T00:00:00.000Z
+    //this.plugin.debugLog(dateStr); // 输出 2023-03-27T00:00:00.000Z
 function  localDateStringToUTCDatetimeString(localDateString:string) {
         try {
           if(localDateString === null){
@@ -86,10 +86,10 @@ export class TodoistRestAPI  {
         }
         try {
         if(updates.dueDate){
-            console.log(updates.dueDate)
+            this.plugin.debugLog(updates.dueDate)
             updates.dueDatetime = localDateStringToUTCDatetimeString(updates.dueDate)
             updates.dueDate = null
-            console.log(updates.dueDatetime)
+            this.plugin.debugLog(updates.dueDatetime)
           }  
         const updatedTask = await api.updateTask(taskId, updates);
         return updatedTask;
@@ -107,7 +107,7 @@ export class TodoistRestAPI  {
         try {
     
         const isSuccess = await api.reopenTask(taskId);
-        console.log(`Task ${taskId} is reopend`)
+        this.plugin.debugLog(`Task ${taskId} is reopend`)
         return(isSuccess)
     
         } catch (error) {
@@ -121,7 +121,7 @@ export class TodoistRestAPI  {
         const api = await this.initializeAPI()
         try {
         const isSuccess = await api.closeTask(taskId);
-        console.log(`Task ${taskId} is closed`)
+        this.plugin.debugLog(`Task ${taskId} is closed`)
         return isSuccess;
         } catch (error) {
         console.error('Error closing task:', error);

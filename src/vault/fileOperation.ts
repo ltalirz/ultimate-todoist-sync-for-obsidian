@@ -57,7 +57,7 @@ export class FileOperation   {
     file:TFile,
     updater: (frontMatter: FrontMatter) => void
     ): Promise<void> {
-        //console.log(`prepare to update front matter`)
+        //this.plugin.debugLog(`prepare to update front matter`)
         this.app.fileManager.processFrontMatter(file, (frontMatter) => {
         if (frontMatter !== null) {
         const updatedFrontMatter = { ...frontMatter } as FrontMatter;
@@ -157,29 +157,29 @@ export class FileOperation   {
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i]
             if(!this.plugin.taskParser.isMarkdownTask(line)){
-                //console.log(line)
-                //console.log("It is not a markdown task.")
+                //this.plugin.debugLog(line)
+                //this.plugin.debugLog("It is not a markdown task.")
                 continue;
             }
             //if content is empty
             if(this.plugin.taskParser.getTaskContentFromLineText(line) == ""){
-                //console.log("Line content is empty")
+                //this.plugin.debugLog("Line content is empty")
                 continue;
             }
             if (!this.plugin.taskParser.hasTodoistId(line) && !this.plugin.taskParser.hasTodoistTag(line)) {
-                //console.log(line)
-                //console.log('prepare to add todoist tag')
+                //this.plugin.debugLog(line)
+                //this.plugin.debugLog('prepare to add todoist tag')
                 const newLine = this.plugin.taskParser.addTodoistTag(line);
-                //console.log(newLine)
+                //this.plugin.debugLog(newLine)
                 lines[i] = newLine
                 modified = true
             }
         }
         
         if (modified) {
-            console.log(`New task found in files ${filepath}`)
+            this.plugin.debugLog(`New task found in files ${filepath}`)
             const newContent = lines.join('\n')
-            //console.log(newContent)
+            //this.plugin.debugLog(newContent)
             await this.plugin.backupOperation?.backupFile(filepath);
             await this.app.vault.modify(file, newContent)
             this.plugin.logOperation?.log('FILE_TODOIST_TAG_ADDED', `Added todoist tag to file: ${filepath}`, filepath);
@@ -204,8 +204,8 @@ export class FileOperation   {
                 if(this.plugin.taskParser.hasTodoistLink(line)){
                     return
                 }
-                console.log(line)
-                //console.log('prepare to add todoist link')
+                this.plugin.debugLog(line)
+                //this.plugin.debugLog('prepare to add todoist link')
                 const taskID = this.plugin.taskParser.getTodoistIdFromLineText(line)
                 const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskID)
                 if (!taskMapping) {
@@ -216,7 +216,7 @@ export class FileOperation   {
                 const todoistLink = todoistTask?.url || ''
                 const link = `[link](${todoistLink})`
                 const newLine = this.plugin.taskParser.addTodoistLink(line,link)
-                console.log(newLine)
+                this.plugin.debugLog(newLine)
                 lines[i] = newLine
                 modified = true
             }else{
@@ -226,7 +226,7 @@ export class FileOperation   {
         
         if (modified) {
             const newContent = lines.join('\n')
-            //console.log(newContent)
+            //this.plugin.debugLog(newContent)
             await this.plugin.backupOperation?.backupFile(filepath);
             await this.app.vault.modify(file, newContent)
 
@@ -268,7 +268,7 @@ export class FileOperation   {
     
         if (modified) {
         const newContent = lines.join('\n')
-        //console.log(newContent)
+        //this.plugin.debugLog(newContent)
         await this.plugin.backupOperation?.backupFile(filepath);
         await this.app.vault.modify(file, newContent)
         this.plugin.logOperation?.log('FILE_TASK_CONTENT_SYNCED', `Synced task content from Todoist: ${taskId}`, filepath, taskId, this.plugin.isSyncingFromTodoist ? 'todoist→obsidian' : 'obsidian→todoist');
@@ -300,11 +300,11 @@ export class FileOperation   {
             const oldTaskDueDate = this.plugin.taskParser.getDueDateFromLineText(line) || ""
             const newTaskDueDate = this.plugin.taskParser.ISOStringToLocalDateString(evt.extra_data.due_date) || ""
             
-            //console.log(`${taskId} duedate is updated`)
-            console.log(oldTaskDueDate)
-            console.log(newTaskDueDate)
+            //this.plugin.debugLog(`${taskId} duedate is updated`)
+            this.plugin.debugLog(oldTaskDueDate)
+            this.plugin.debugLog(newTaskDueDate)
             if(oldTaskDueDate === ""){
-                //console.log(this.plugin.taskParser.insertDueDateBeforeTodoist(line,newTaskDueDate))
+                //this.plugin.debugLog(this.plugin.taskParser.insertDueDateBeforeTodoist(line,newTaskDueDate))
                 lines[i] = this.plugin.taskParser.insertDueDateBeforeTodoist(line,newTaskDueDate)
                 modified = true
 
@@ -326,7 +326,7 @@ export class FileOperation   {
     
         if (modified) {
         const newContent = lines.join('\n')
-        //console.log(newContent)
+        //this.plugin.debugLog(newContent)
         await this.plugin.backupOperation?.backupFile(filepath);
         await this.app.vault.modify(file, newContent)
         this.plugin.logOperation?.log('FILE_TASK_DUEDATE_SYNCED', `Synced task due date from Todoist: ${taskId}`, filepath, taskId, this.plugin.isSyncingFromTodoist ? 'todoist→obsidian' : 'obsidian→todoist');
@@ -370,7 +370,7 @@ export class FileOperation   {
     
         if (modified) {
         const newContent = lines.join('\n')
-        //console.log(newContent)
+        //this.plugin.debugLog(newContent)
         await this.plugin.backupOperation?.backupFile(filepath);
         await this.app.vault.modify(file, newContent)
         this.plugin.logOperation?.log('FILE_TASK_NOTE_ADDED', `Synced task note from Todoist: ${taskId}`, filepath, taskId, this.plugin.isSyncingFromTodoist ? 'todoist→obsidian' : 'obsidian→todoist');
@@ -539,9 +539,9 @@ export class FileOperation   {
 
     //search filepath by taskid in vault
     async searchFilepathsByTaskidInVault(taskId:string){
-        console.log(`preprare to search task ${taskId}`)
+        this.plugin.debugLog(`preprare to search task ${taskId}`)
         const files = await this.getAllFilesInTheVault()
-        //console.log(files)
+        //this.plugin.debugLog(files)
         const tasks = files.map(async (file) => {
             if (!this.isMarkdownFile(file.path)) {
                 return;
@@ -587,7 +587,7 @@ export class FileOperation   {
             const file = this.app.vault.getAbstractFileByPath(filePath);
             if (!file) {
                 console.error(`[updateTaskIdInVault] File not found: ${filePath}`);
-                console.log(filePath)
+                this.plugin.debugLog(filePath)
                 return;
             }
             
@@ -639,7 +639,7 @@ export class FileOperation   {
                 filePath, 
                 newId
             );
-            console.log(`[updateTaskIdInVault] Updated task ID ${oldId} -> ${newId} in ${filePath}`);
+            this.plugin.debugLog(`[updateTaskIdInVault] Updated task ID ${oldId} -> ${newId} in ${filePath}`);
         } catch (error) {
             console.error(`[updateTaskIdInVault] Failed to update task ID in vault:`, error);
         }

@@ -60,7 +60,7 @@ export class DeviceManager {
 
             await adapter.write(deviceIdPath, this.deviceId);
 
-            console.log(`[DeviceManager] Created new device ID: ${this.deviceId}`);
+            this.plugin.debugLog(`[DeviceManager] Created new device ID: ${this.deviceId}`);
             return this.deviceId;
 
         } catch (error) {

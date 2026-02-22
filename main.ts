@@ -48,6 +48,12 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 	private eventHandlers: EventHandlers;
 	private lastApiNoticeTime = 0;
 
+	debugLog(...args: unknown[]): void {
+		if (this.settings?.debugMode) {
+			this.debugLog($$$);
+		}
+	}
+
 	async onload() {
 		this.saveLock = false;
 		this.isSyncingFromTodoist = false;
@@ -93,7 +99,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 	}
 
 	async onunload() {
-		console.log(`Ultimate Todoist Sync for Obsidian id unloaded!`);
+		this.debugLog($$$);
 		try {
 			await this.logOperation?.flushToFile();
 		} catch (error) {
@@ -140,7 +146,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				await this.initializeModuleClass();
 				await this.todoistToObsidian!.backupTodoistAllResources();
 			} catch (error) {
-				console.log(`error creating user data folder: ${error}`);
+				this.debugLog($$$);
 				await this.safeSettings?.update({ initialized: false, apiInitialized: false }, true);
 				new Notice(`error creating user data folder`);
 				return;
@@ -162,17 +168,17 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 	async runStartupDatabaseCheck(): Promise<void> {
 		try {
 			if (!this.databaseChecker) {
-				console.log('Database checker not initialized, skipping startup check');
+				this.debugLog($$$);
 				return;
 			}
-			console.log('Running startup database check...');
+			this.debugLog($$$);
 			const result = await this.databaseChecker.checkDatabase();
 			await this.safeSettings?.update({
 				lastDatabaseCheckPassed: result.success,
 				lastDatabaseCheckTime: Date.now()
 			}, true);
 			if (result.success) {
-				console.log('Startup database check passed');
+				this.debugLog($$$);
 			} else {
 				new Notice(`Found ${result.totalIssues} database issue(s). Please use "Fix Database" in settings to resolve them.`);
 			}
@@ -247,12 +253,12 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		} else {
 			const filepath = view.file?.path;
 			if (filepath === undefined) {
-				console.log(`file path undefined`);
+				this.debugLog($$$);
 				return;
 			}
 			const defaultProjectName = await this.cacheOperation!.getDefaultProjectNameForFilepath(filepath);
 			if (defaultProjectName === undefined) {
-				console.log(`projectName undefined`);
+				this.debugLog($$$);
 				return;
 			}
 			this.statusBar.setText(defaultProjectName);

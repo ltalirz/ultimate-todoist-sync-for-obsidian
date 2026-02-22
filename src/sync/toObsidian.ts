@@ -19,7 +19,7 @@ export class TodoistToObsidianSync {
 
             const syncData = this.plugin.todoistSyncAPI.getSyncData();
             if (!syncData?.items) {
-                console.log('[Todoist→Obsidian] No sync data available');
+                this.plugin.debugLog('[Todoist→Obsidian] No sync data available');
                 return;
             }
 
@@ -51,7 +51,7 @@ export class TodoistToObsidianSync {
 
                     if (!task || task.is_deleted) {
                         if (this.plugin.settings.debugMode) {
-                            console.log(`[Todoist→Obsidian] Task ${taskId} deleted or not found in sync data`);
+                            this.plugin.debugLog(`[Todoist→Obsidian] Task ${taskId} deleted or not found in sync data`);
                         }
                         continue;
                     }
@@ -61,7 +61,7 @@ export class TodoistToObsidianSync {
                     }
 
                     if (this.plugin.settings.debugMode) {
-                        console.log(`[Todoist→Obsidian] Task ${taskId} changed: ${mapping.updated_at} → ${task.updated_at}`);
+                        this.plugin.debugLog(`[Todoist→Obsidian] Task ${taskId} changed: ${mapping.updated_at} → ${task.updated_at}`);
                     }
 
                     try {

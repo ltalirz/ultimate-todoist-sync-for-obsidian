@@ -81,7 +81,7 @@ export class LogOperation {
         }
 
         if (this.plugin.settings.debugMode) {
-            console.log(`[Log] ${action}: ${details}`, { filePath, taskId });
+            this.plugin.debugLog(`[Log] ${action}: ${details}`, { filePath, taskId });
         }
     }
 

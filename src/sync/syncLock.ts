@@ -33,31 +33,31 @@ export class SyncLockManager {
 
 	async acquire(direction?: SyncDirection): Promise<boolean> {
 		if (!this.plugin.settings.lastDatabaseCheckPassed) {
-			console.log('Sync is disabled due to database issues');
+			this.plugin.debugLog('Sync is disabled due to database issues');
 			new Notice('Sync is blocked due to database issues. Please fix the issues first.');
 			return false;
 		}
 
 		if (!this.plugin.settings.syncEnabled) {
-			console.log('Sync is disabled by user (main switch off)');
+			this.plugin.debugLog('Sync is disabled by user (main switch off)');
 			return false;
 		}
 
 		if (direction === 'obsidianToTodoist' && !this.plugin.settings.obsidianToTodoistEnabled) {
-			console.log('Obsidian → Todoist sync is disabled by user');
+			this.plugin.debugLog('Obsidian → Todoist sync is disabled by user');
 			return false;
 		}
 
 		if (direction === 'todoistToObsidian' && !this.plugin.settings.todoistToObsidianEnabled) {
-			console.log('Todoist → Obsidian sync is disabled by user');
+			this.plugin.debugLog('Todoist → Obsidian sync is disabled by user');
 			return false;
 		}
 
 		if (this.locked) {
-			console.log('sync locked.');
+			this.plugin.debugLog('sync locked.');
 			const released = await this.waitForRelease();
 			if (!released) return false;
-			console.log('sync unlocked.');
+			this.plugin.debugLog('sync unlocked.');
 		}
 
 		this.locked = true;

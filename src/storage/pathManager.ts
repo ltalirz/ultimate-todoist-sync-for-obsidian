@@ -144,18 +144,18 @@ export class StoragePathManager {
             || StoragePathManager.LEGACY_BASE_PATH;
         
         if (oldDir === newDir) {
-            console.log('[StoragePathManager] Directory unchanged, no migration needed');
+            this.plugin.debugLog('[StoragePathManager] Directory unchanged, no migration needed');
             return true;
         }
 
-        console.log(`[StoragePathManager] Starting migration from "${oldDir}" to "${newDir}"`);
+        this.plugin.debugLog(`[StoragePathManager] Starting migration from "${oldDir}" to "${newDir}"`);
 
         const adapter = this.app.vault.adapter;
 
         try {
             const oldExists = await adapter.exists(oldDir);
             if (!oldExists) {
-                console.log('[StoragePathManager] Old directory does not exist, no migration needed');
+                this.plugin.debugLog('[StoragePathManager] Old directory does not exist, no migration needed');
                 await this.plugin.safeSettings?.update({ lastStorageDirectory: newDir });
                 return true;
             }
@@ -167,7 +167,7 @@ export class StoragePathManager {
 
             await this.migrateDirectoryContents(oldDir, newDir);
 
-            console.log('[StoragePathManager] Migration completed successfully');
+            this.plugin.debugLog('[StoragePathManager] Migration completed successfully');
             await this.plugin.safeSettings?.update({ lastStorageDirectory: newDir });
             return true;
         } catch (error) {
@@ -203,13 +203,13 @@ export class StoragePathManager {
                     
                     if (srcMtime > destMtime) {
                         await adapter.write(newFilePath, content);
-                        console.log(`[StoragePathManager] Updated file: ${newFilePath}`);
+                        this.plugin.debugLog(`[StoragePathManager] Updated file: ${newFilePath}`);
                     } else {
-                        console.log(`[StoragePathManager] Kept newer file: ${newFilePath}`);
+                        this.plugin.debugLog(`[StoragePathManager] Kept newer file: ${newFilePath}`);
                     }
                 } else {
                     await adapter.write(newFilePath, content);
-                    console.log(`[StoragePathManager] Migrated file: ${newFilePath}`);
+                    this.plugin.debugLog(`[StoragePathManager] Migrated file: ${newFilePath}`);
                 }
                 
                 await adapter.remove(file);
@@ -218,7 +218,7 @@ export class StoragePathManager {
             const remaining = await adapter.list(srcDir);
             if (remaining.folders.length === 0 && remaining.files.length === 0) {
                 await adapter.rmdir(srcDir, true);
-                console.log(`[StoragePathManager] Removed empty directory: ${srcDir}`);
+                this.plugin.debugLog(`[StoragePathManager] Removed empty directory: ${srcDir}`);
             }
         } catch (error) {
             console.error('[StoragePathManager] Error during migration:', error);
@@ -429,7 +429,7 @@ export class StoragePathManager {
             const filesToDelete = fileObjects.slice(maxCount);
             for (const file of filesToDelete) {
                 await this.deleteFile(file.path);
-                console.log(`[StoragePathManager] Deleted old backup: ${file.path}`);
+                this.plugin.debugLog(`[StoragePathManager] Deleted old backup: ${file.path}`);
             }
         } catch (error) {
             console.error(`[StoragePathManager] Failed to clean old backups in ${dirPath}:`, error);

@@ -102,7 +102,7 @@ export class TodoistSyncAPI   {
 		
 		// Save to cache
 		await this.plugin.safeSettings?.update({ syncDataCache: data }, true);
-		console.log('[TodoistSyncAPI] Sync initialized with full data and cached');
+		this.plugin.debugLog('[TodoistSyncAPI] Sync initialized with full data and cached');
 	}
 
 	async incrementalSync(): Promise<void> {
@@ -117,7 +117,7 @@ export class TodoistSyncAPI   {
 			
 			// Save updated syncData to cache
 			await this.plugin.safeSettings?.update({ syncDataCache: this.syncData }, true);
-			console.log('[TodoistSyncAPI] Incremental sync completed and cached');
+			this.plugin.debugLog('[TodoistSyncAPI] Incremental sync completed and cached');
 		} catch (error) {
 			console.error('[TodoistSyncAPI] Incremental sync failed:', error);
 		}
@@ -168,7 +168,7 @@ export class TodoistSyncAPI   {
 	loadFromCache(): boolean {
 		if (this.plugin.settings.syncDataCache) {
 			this.syncData = this.plugin.settings.syncDataCache;
-			console.log('[TodoistSyncAPI] Loaded sync data from cache');
+			this.plugin.debugLog('[TodoistSyncAPI] Loaded sync data from cache');
 			return true;
 		}
 		return false;
@@ -250,7 +250,7 @@ export class TodoistSyncAPI   {
         }
     
         const data = response.json;
-        console.log(data)
+        this.plugin.debugLog(data)
         return data;
       } catch (error) {
         console.error(error)
@@ -290,7 +290,7 @@ export class TodoistSyncAPI   {
           }
       
           const data = response.json;
-          console.log(data)
+          this.plugin.debugLog(data)
           return data;
         } catch (error) {
           console.error('[updateUserTimezone] Failed:', error);
@@ -332,7 +332,7 @@ export class TodoistSyncAPI   {
 	  const clientId = await this.getClientHeader();
       try{
         const allActivity = await this.getAllActivityEvents()
-        //console.log(allActivity)
+        //this.plugin.debugLog(allActivity)
         const allActivityEvents = allActivity.events
         //过滤掉当前设备产生的 activity
         const filteredArray = allActivityEvents.filter((obj: Event) => {
@@ -897,7 +897,7 @@ export class TodoistSyncAPI   {
         );
         
         if (matches.length === 0) {
-          console.log(`[convertLegacyIds] No match found for: ${taskInfo.content}`);
+          this.plugin.debugLog(`[convertLegacyIds] No match found for: ${taskInfo.content}`);
           continue;
         }
         
@@ -907,10 +907,10 @@ export class TodoistSyncAPI   {
         }
         
         mapping[taskInfo.taskId] = matches[0].id;
-        console.log(`[convertLegacyIds] Mapped ${taskInfo.taskId} -> ${matches[0].id} (${taskInfo.content})`);
+        this.plugin.debugLog(`[convertLegacyIds] Mapped ${taskInfo.taskId} -> ${matches[0].id} (${taskInfo.content})`);
       }
       
-      console.log(`[convertLegacyIds] Converted ${Object.keys(mapping).length} IDs`);
+      this.plugin.debugLog(`[convertLegacyIds] Converted ${Object.keys(mapping).length} IDs`);
     } catch (error) {
       console.error('[convertLegacyIds] Error converting legacy IDs:', error);
       throw error;

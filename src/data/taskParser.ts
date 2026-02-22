@@ -97,7 +97,7 @@ export class TaskParser   {
   
     //convert line text to a task object
     async convertTextToTodoistTaskObject(lineText:string,filepath:string,lineNumber?:number,fileContent?:string) {
-        //console.log(`linetext is:${lineText}`)
+        //this.plugin.debugLog(`linetext is:${lineText}`)
     
         let hasParent = false
         let parentId = null
@@ -105,34 +105,34 @@ export class TaskParser   {
         // 检测 parentID
         let textWithoutIndentation = lineText
         if(this.getTabIndentation(lineText) > 0){
-        //console.log(`缩进为 ${this.getTabIndentation(lineText)}`)
+        //this.plugin.debugLog(`缩进为 ${this.getTabIndentation(lineText)}`)
         textWithoutIndentation = this.removeTaskIndentation(lineText)
-        //console.log(textWithoutIndentation)
-        //console.log(`这是子任务`)
+        //this.plugin.debugLog(textWithoutIndentation)
+        //this.plugin.debugLog(`这是子任务`)
         //读取filepath
         //const fileContent = await this.plugin.fileOperation.readContentFromFilePath(filepath)
         //遍历 line
         const lines = fileContent.split('\n')
-        //console.log(lines)
+        //this.plugin.debugLog(lines)
         for (let i = (lineNumber - 1 ); i >= 0; i--) {
-            //console.log(`正在check${i}行的缩进`)
+            //this.plugin.debugLog(`正在check${i}行的缩进`)
             const line = lines[i]
-            //console.log(line)
+            //this.plugin.debugLog(line)
             //如果是空行说明没有parent
             if(this.isLineBlank(line)){
                 break
             }
             //如果tab数量大于等于当前line,跳过
             if (this.getTabIndentation(line) >= this.getTabIndentation(lineText)) {
-                    //console.log(`缩进为 ${this.getTabIndentation(line)}`)
+                    //this.plugin.debugLog(`缩进为 ${this.getTabIndentation(line)}`)
                     continue       
             }
                 if((this.getTabIndentation(line) < this.getTabIndentation(lineText))){
-                //console.log(`缩进为 ${this.getTabIndentation(line)}`)
+                //this.plugin.debugLog(`缩进为 ${this.getTabIndentation(line)}`)
                 if(this.hasTodoistId(line)){
                     parentId = this.getTodoistIdFromLineText(line)
                     hasParent = true
-                    //console.log(`parent id is ${parentId}`)
+                    //this.plugin.debugLog(`parent id is ${parentId}`)
                     parentTaskObject = await this.plugin.todoistSyncAPI.GetTaskById(parentId)
                     break
                 }
@@ -147,7 +147,7 @@ export class TaskParser   {
         
         const dueDate = this.getDueDateFromLineText(textWithoutIndentation)
         const labels =  this.getAllTagsFromLineText(textWithoutIndentation)
-        //console.log(`labels is ${labels}`)
+        //this.plugin.debugLog(`labels is ${labels}`)
 
         //dataview format metadata
         //const projectName = this.getProjectNameFromLineText(textWithoutIndentation) ?? this.plugin.settings.defaultProjectName
@@ -165,15 +165,15 @@ export class TaskParser   {
                     //匹配 tag 和 peoject
             for (const label of labels){
         
-                //console.log(label)
+                //this.plugin.debugLog(label)
                 let labelName = label.replace(/#/g, "");
-                //console.log(labelName)
+                //this.plugin.debugLog(labelName)
                 let hasProjectId = (await this.plugin.todoistSyncAPI.getProjectByName(labelName))?.id
                 if(!hasProjectId){
                     continue
                 }
                 projectName = labelName
-                //console.log(`project is ${projectName} ${label}`)
+                //this.plugin.debugLog(`project is ${projectName} ${label}`)
                 projectId = hasProjectId
                 break
             }
@@ -202,8 +202,8 @@ export class TaskParser   {
         hasParent:hasParent,
         priority:priority
         };
-        //console.log(`converted task `)
-        //console.log(todoistTask)
+        //this.plugin.debugLog(`converted task `)
+        //this.plugin.debugLog(todoistTask)
         return todoistTask;
     }
   
@@ -211,8 +211,8 @@ export class TaskParser   {
   
   
     hasTodoistTag(text:string){
-        //console.log("检查是否包含 todoist tag")
-        //console.log(text)
+        //this.plugin.debugLog("检查是否包含 todoist tag")
+        //this.plugin.debugLog(text)
         return(REGEX.TODOIST_TAG.test(text))
     }
     
@@ -220,8 +220,8 @@ export class TaskParser   {
   
     hasTodoistId(text:string){
         const result = REGEX.TODOIST_ID.test(text)
-        //console.log("检查是否包含 todoist id")
-        //console.log(text)
+        //this.plugin.debugLog("检查是否包含 todoist id")
+        //this.plugin.debugLog(text)
         return(result)
     }
   
@@ -245,9 +245,9 @@ export class TaskParser   {
   
   
     getTodoistIdFromLineText(text:string){
-        //console.log(text)
+        //this.plugin.debugLog(text)
         const result = REGEX.TODOIST_ID_NUM.exec(text);
-        //console.log(result)
+        //this.plugin.debugLog(result)
         return result ? result[1] : null;
     }
   
@@ -270,11 +270,11 @@ export class TaskParser   {
         //const tasks = this.app.plugins.plugins.dataview.api.pages(`"${filepath}"`).file.tasks
         const tasks = await getAPI(this.app).pages(`"${filepath}"`).file.tasks
         const tasksValues = tasks.values
-        //console.log(`dataview filepath is ${filepath}`)
-        //console.log(`dataview line is ${line}`)
-        //console.log(tasksValues)
+        //this.plugin.debugLog(`dataview filepath is ${filepath}`)
+        //this.plugin.debugLog(`dataview line is ${line}`)
+        //this.plugin.debugLog(tasksValues)
         const currentLineTask = tasksValues.find(obj => obj.line === line )	
-        console.log(currentLineTask)
+        this.plugin.debugLog(currentLineTask)
         return(currentLineTask)
     
     }
@@ -313,10 +313,10 @@ export class TaskParser   {
     //task content compare
     taskContentCompare(lineTask:Object,todoistTask:Object) {
         const lineTaskContent = lineTask.content
-        //console.log(dataviewTaskContent)
+        //this.plugin.debugLog(dataviewTaskContent)
         
         const todoistTaskContent = todoistTask.content
-        //console.log(todoistTask.content)
+        //this.plugin.debugLog(todoistTask.content)
 
         //content 是否修改
         const contentModified = (lineTaskContent === todoistTaskContent)
@@ -352,8 +352,8 @@ export class TaskParser   {
     //task project id compare
     async  taskProjectCompare(lineTask:Object,todoistTask:Object) {
         //project 是否修改
-        //console.log(dataviewTaskProjectId)
-        //console.log(todoistTask.projectId)
+        //this.plugin.debugLog(dataviewTaskProjectId)
+        //this.plugin.debugLog(todoistTask.projectId)
         return(lineTask.projectId === todoistTask.projectId)
     }
   
@@ -365,8 +365,8 @@ export class TaskParser   {
   
   
     //判断制表符的数量
-    //console.log(getTabIndentation("\t\t- [x] This is a task with two tabs")); // 2
-    //console.log(getTabIndentation("  - [x] This is a task without tabs")); // 0
+    //this.plugin.debugLog(getTabIndentation("\t\t- [x] This is a task with two tabs")); // 2
+    //this.plugin.debugLog(getTabIndentation("  - [x] This is a task without tabs")); // 0
     getTabIndentation(lineText:string){
         const match = REGEX.TAB_INDENTATION.exec(lineText)
         return match ? match[1].length : 0;
@@ -404,7 +404,7 @@ export class TaskParser   {
     // 使用示例
     //const str = "2023-03-27T15:59:59.000000Z";
     //const dateStr = ISOStringToLocalDateString(str);
-    //console.log(dateStr); // 输出 2023-03-27
+    //this.plugin.debugLog(dateStr); // 输出 2023-03-27
     ISOStringToLocalDateString(utcTimeString:string) {
         try {
           if(utcTimeString === null){
@@ -428,7 +428,7 @@ export class TaskParser   {
     // 使用示例
     //const str = "2023-03-27T15:59:59.000000Z";
     //const dateStr = ISOStringToLocalDatetimeString(str);
-    //console.log(dateStr); // 输出 Mon Mar 27 2023 23:59:59 GMT+0800 (China Standard Time)
+    //this.plugin.debugLog(dateStr); // 输出 Mon Mar 27 2023 23:59:59 GMT+0800 (China Standard Time)
     ISOStringToLocalDatetimeString(utcTimeString:string) {
         try {
           if(utcTimeString === null){
@@ -450,7 +450,7 @@ export class TaskParser   {
     // 使用示例
     //const str = "2023-03-27";
     //const utcStr = localDateStringToUTCDatetimeString(str);
-    //console.log(dateStr); // 输出 2023-03-27T00:00:00.000Z
+    //this.plugin.debugLog(dateStr); // 输出 2023-03-27T00:00:00.000Z
     localDateStringToUTCDatetimeString(localDateString:string) {
         try {
           if(localDateString === null){
@@ -470,7 +470,7 @@ export class TaskParser   {
     // 使用示例
     //const str = "2023-03-27";
     //const utcStr = localDateStringToUTCDateString(str);
-    //console.log(dateStr); // 输出 2023-03-27
+    //this.plugin.debugLog(dateStr); // 输出 2023-03-27
     localDateStringToUTCDateString(localDateString:string) {
         try {
           if(localDateString === null || localDateString === ""){

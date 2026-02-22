@@ -207,7 +207,7 @@ export class CacheOperation   {
         delete metadatas[filepath];
         await this.plugin.safeSettings?.update({ fileMetadata: metadatas }, true)
         this.plugin.logOperation?.log('CACHE_FILE_METADATA_DELETED', `Deleted file metadata for: ${filepath}`, filepath);
-        console.log(`${filepath} is deleted from file metadatas.`)
+        this.plugin.debugLog(`${filepath} is deleted from file metadatas.`)
     }
 
     // ==========================================================================================
@@ -223,7 +223,7 @@ export class CacheOperation   {
     //     let newMetadata = {}
     //     newMetadata.todoistTasks = newTodoistTasks
     //     newMetadata.todoistCount = newTodoistCount
-    //     console.log(`new metadata ${newMetadata}`)
+    //     this.plugin.debugLog(`new metadata ${newMetadata}`)
     // }
 
     // ==========================================================================================
@@ -341,7 +341,7 @@ export class CacheOperation   {
             let file = this.app.vault.getAbstractFileByPath(key)
             // 情况1: 文件不存在且没有关联任务 -> 直接删除
             if(!file && tasks.length === 0){
-                console.log(`${key} is not existed and has no tasks.`)
+                this.plugin.debugLog(`${key} is not existed and has no tasks.`)
                 await this.deleteFilepathFromMetadata(key)
                 continue
             }
@@ -353,12 +353,12 @@ export class CacheOperation   {
             
             if(!file){
                 //search new filepath
-                console.log(`file ${filepath} is not exist`) 
+                this.plugin.debugLog(`file ${filepath} is not exist`) 
                 const todoistId1 = tasks[0]
-                console.log(todoistId1)
+                this.plugin.debugLog(todoistId1)
                 const searchResult = await this.plugin.fileOperation.searchFilepathsByTaskidInVault(todoistId1)
-                console.log(`new file path is`)
-                console.log(searchResult)
+                this.plugin.debugLog(`new file path is`)
+                this.plugin.debugLog(searchResult)
 
                 //update metadata
                 await this.updateRenamedFilePath(filepath,searchResult)
@@ -616,7 +616,7 @@ export class CacheOperation   {
             if (noticeCallback) {
                 noticeCallback('Starting cache rebuild...');
             } else {
-                console.log('Starting cache rebuild...');
+                this.plugin.debugLog('Starting cache rebuild...');
             }
             this.plugin.logOperation?.log('CACHE_REBUILT', 'Starting cache rebuild...');
 
@@ -650,7 +650,7 @@ export class CacheOperation   {
             if (noticeCallback) {
                 noticeCallback('Ensuring sync data is loaded...');
             } else {
-                console.log('Ensuring sync data is loaded...');
+                this.plugin.debugLog('Ensuring sync data is loaded...');
             }
             
             let syncData = this.plugin.todoistSyncAPI.getSyncData();
@@ -684,7 +684,7 @@ export class CacheOperation   {
             if (noticeCallback) {
                 noticeCallback('Scanning vault for tasks...');
             } else {
-                console.log('Scanning vault for tasks...');
+                this.plugin.debugLog('Scanning vault for tasks...');
             }
             
             // 使用 fileOperation 的统一扫描方法
@@ -707,7 +707,7 @@ export class CacheOperation   {
             
             // 记录无 ID 的任务（新任务未同步）
             if (tasksWithoutId.length > 0) {
-                console.log(`[rebuildCache] Found ${tasksWithoutId.length} tasks without todoist_id (new tasks not synced)`);
+                this.plugin.debugLog(`[rebuildCache] Found ${tasksWithoutId.length} tasks without todoist_id (new tasks not synced)`);
                 for (const task of tasksWithoutId) {
                     this.plugin.logOperation?.log(
                         'CACHE_TASK_NON_ID',
@@ -747,7 +747,7 @@ export class CacheOperation   {
             if (noticeCallback) {
                 noticeCallback('Checking for legacy IDs...');
             } else {
-                console.log('Checking for legacy IDs...');
+                this.plugin.debugLog('Checking for legacy IDs...');
             }
 
             // 获取 syncData 中所有活动的任务 ID（用于判断是否是 legacy ID）
@@ -782,10 +782,10 @@ export class CacheOperation   {
                 try {
                     idMapping = await this.plugin.todoistSyncAPI.convertLegacyIds(tasksNeedConversion);
                     convertedCount = Object.keys(idMapping).length;
-                    console.log(`[rebuildCache] Converted ${convertedCount} legacy IDs`);
+                    this.plugin.debugLog(`[rebuildCache] Converted ${convertedCount} legacy IDs`);
                 } catch (error) {
                     console.error(`[rebuildCache] Legacy ID conversion failed: ${(error as Error).message}`);
-                    console.log('[rebuildCache] Will continue without converting legacy IDs');
+                    this.plugin.debugLog('[rebuildCache] Will continue without converting legacy IDs');
                     // 继续执行，不使用转换后的 ID
                     idMapping = {};
                 }
@@ -817,7 +817,7 @@ export class CacheOperation   {
             if (noticeCallback) {
                 noticeCallback('Processing tasks and detecting conflicts...');
             } else {
-                console.log('Processing tasks and detecting conflicts...');
+                this.plugin.debugLog('Processing tasks and detecting conflicts...');
             }
             
             const syncItemsMap = new Map<string, any>();
@@ -857,7 +857,7 @@ export class CacheOperation   {
                                 filePath, taskInfo.lineNumber,
                                 taskInfo.taskId, taskId
                             );
-                            console.log(`[rebuildCache] Updated mapping: ${taskInfo.taskId} -> ${taskId}`);
+                            this.plugin.debugLog(`[rebuildCache] Updated mapping: ${taskInfo.taskId} -> ${taskId}`);
                         }
                         
                         const mappingTaskId = idMapping[taskInfo.taskId] || taskInfo.taskId;
@@ -911,11 +911,11 @@ export class CacheOperation   {
 
             // Step 5: Record conflicts (not processed yet)
             if (conflicts.length > 0) {
-                console.log(`[rebuildCache] Found ${conflicts.length} conflicts (not processed yet):`);
+                this.plugin.debugLog(`[rebuildCache] Found ${conflicts.length} conflicts (not processed yet):`);
                 for (const conflict of conflicts) {
-                    console.log(`  - Task ${conflict.taskId} in ${conflict.filePath}:${conflict.lineNumber}`);
-                    console.log(`    Obsidian: "${conflict.obsidianContent}"`);
-                    console.log(`    Todoist: "${conflict.todoistContent}"`);
+                    this.plugin.debugLog(`  - Task ${conflict.taskId} in ${conflict.filePath}:${conflict.lineNumber}`);
+                    this.plugin.debugLog(`    Obsidian: "${conflict.obsidianContent}"`);
+                    this.plugin.debugLog(`    Todoist: "${conflict.todoistContent}"`);
                 }
                 this.plugin.logOperation?.log('CACHE_REBUILT', `Found ${conflicts.length} conflicts during rebuild`);
             }
@@ -942,7 +942,7 @@ export class CacheOperation   {
             if (noticeCallback) {
                 noticeCallback(message);
             } else {
-                console.log(message);
+                this.plugin.debugLog(message);
             }
             
             return { success: true, tasksProcessed: processedCount };

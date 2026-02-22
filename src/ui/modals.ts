@@ -33,8 +33,8 @@ export class SetDefalutProjectInTheFilepathModal extends Modal {
     this.defaultProjectId = await this.plugin.cacheOperation.getDefaultProjectIdForFilepath(this.filepath)
     const project = await this.plugin.todoistSyncAPI.getProjectById(this.defaultProjectId)
     this.defaultProjectName = project?.name ?? this.plugin.settings.defaultProjectName
-    console.log(this.defaultProjectId)
-    console.log(this.defaultProjectName)
+    this.plugin.debugLog(this.defaultProjectId)
+    this.plugin.debugLog(this.defaultProjectName)
     const projects = this.plugin.todoistSyncAPI.getSyncData()?.projects || []
     const myProjectsOptions: MyProject | undefined = projects.reduce((obj, item) => {
         obj[(item.id).toString()] = item.name;
@@ -52,7 +52,7 @@ export class SetDefalutProjectInTheFilepathModal extends Modal {
                 .addOption(this.defaultProjectId,this.defaultProjectName)
                 .addOptions(myProjectsOptions)
                 .onChange((value)=>{
-                    console.log(`project id  is ${value}`)
+                    this.plugin.debugLog(`project id  is ${value}`)
                     this.plugin.cacheOperation.setDefaultProjectIdForFilepath(this.filepath,value)
                     this.plugin.setStatusBarText()
                     this.close();

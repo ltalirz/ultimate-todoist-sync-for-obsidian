@@ -20,7 +20,7 @@ export class EventHandlers {
 	private async onKeyUp(evt: KeyboardEvent): Promise<void> {
 		if (!this.plugin.settings.apiInitialized) return;
 		if (!(this.plugin.app.workspace.activeEditor?.editor?.hasFocus())) {
-			console.log(`editor is not focused`);
+			this.plugin.debugLog(`editor is not focused`);
 			return;
 		}
 
@@ -79,11 +79,11 @@ export class EventHandlers {
 
 	private async onFileRename(file: TFile, oldpath: string): Promise<void> {
 		if (!this.plugin.settings.apiInitialized) return;
-		console.log(`${oldpath} is renamed`);
+		this.plugin.debugLog(`${oldpath} is renamed`);
 
 		const taskCount = this.plugin.cacheOperation!.getTaskCountInFile(oldpath);
 		if (taskCount === 0) {
-			console.log('The renamed file has no tasks.');
+			this.plugin.debugLog('The renamed file has no tasks.');
 			return;
 		}
 		if (!await this.plugin.checkModuleClass()) return;
@@ -115,9 +115,9 @@ export class EventHandlers {
 				return;
 			}
 
-			console.log(`${filepath} is modified`);
+			this.plugin.debugLog(`${filepath} is modified`);
 			const activeFile = this.plugin.app.workspace.getActiveFile();
-			console.log(activeFile?.path);
+			this.plugin.debugLog(activeFile?.path);
 
 			if (activeFile?.path === filepath) {
 				this.plugin.isProcessingModify = false;
@@ -158,7 +158,7 @@ export class EventHandlers {
 		if (this.plugin.lastLines.has(fileName as string) && line !== this.plugin.lastLines.get(fileName as string)) {
 			const lastLine = this.plugin.lastLines.get(fileName as string);
 			if (this.plugin.settings.debugMode) {
-				console.log('Line changed!', `current line is ${line}`, `last line is ${lastLine}`);
+				this.plugin.debugLog('Line changed!', `current line is ${line}`, `last line is ${lastLine}`);
 			}
 
 			const lastLineText = view.editor.getLine(lastLine as number);

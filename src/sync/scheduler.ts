@@ -10,13 +10,13 @@ export class SyncScheduler {
 
 	async run(): Promise<void> {
 		if (this.inProgress) {
-			console.log('Scheduled sync already in progress, skipping');
+			this.plugin.debugLog('Scheduled sync already in progress, skipping');
 			return;
 		}
 		if (!await this.plugin.checkModuleClass()) return;
 
 		this.inProgress = true;
-		console.log('Todoist scheduled synchronization task started at', new Date().toLocaleString());
+		this.plugin.debugLog('Todoist scheduled synchronization task started at', new Date().toLocaleString());
 
 		try {
 			await this.plugin.syncLockManager.run('todoistToObsidian', async () => {
@@ -29,12 +29,12 @@ export class SyncScheduler {
 			const filesToSync = this.getUniqueFiles();
 
 			if (this.plugin.settings.debugMode) {
-				console.log('Files to sync:', filesToSync);
+				this.plugin.debugLog('Files to sync:', filesToSync);
 			}
 
 			for (const fileKey of filesToSync) {
 				if (this.plugin.settings.debugMode) {
-					console.log('Syncing file:', fileKey);
+					this.plugin.debugLog('Syncing file:', fileKey);
 				}
 
 				const lockOk = await this.plugin.syncLockManager.run('obsidianToTodoist', async () => {
@@ -62,7 +62,7 @@ export class SyncScheduler {
 		}
 
 		this.inProgress = false;
-		console.log('Todoist scheduled synchronization task completed at', new Date().toLocaleString());
+		this.plugin.debugLog('Todoist scheduled synchronization task completed at', new Date().toLocaleString());
 	}
 
 	private getUniqueFiles(): string[] {

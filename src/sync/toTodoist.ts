@@ -29,7 +29,7 @@ export class ObsidianToTodoistSync {
 
         const taskIds = this.plugin.cacheOperation.getTasksInFile(filepath);
         if (taskIds.length === 0) {
-            console.log('No tasks in this file');
+            this.plugin.debugLog('No tasks in this file');
             return 0;
         }
 
@@ -84,8 +84,8 @@ export class ObsidianToTodoistSync {
 
         if (isNewTask) {
             const processedLine = hasTag ? linetxt : this.plugin.taskParser.addTodoistTag(linetxt);
-            console.log('this is a new task');
-            console.log(processedLine);
+            this.plugin.debugLog('this is a new task');
+            this.plugin.debugLog(processedLine);
             const currentTask = await this.plugin.taskParser.convertTextToTodoistTaskObject(processedLine, filepath, line, fileContent);
 
             try {
@@ -135,7 +135,7 @@ export class ObsidianToTodoistSync {
 
             } catch (error) {
                 console.error('Error adding task:', error);
-                console.log(`The error occurred in the file: ${filepath}`);
+                this.plugin.debugLog(`The error occurred in the file: ${filepath}`);
                 new Notice(`Failed to create task. Check console for details.`);
                 return;
             }
@@ -172,17 +172,17 @@ export class ObsidianToTodoistSync {
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             if (!this.plugin.taskParser.hasTodoistId(line) && this.plugin.taskParser.hasTodoistTag(line)) {
-                console.log(filepath);
+                this.plugin.debugLog(filepath);
                 const currentTask = await this.plugin.taskParser.convertTextToTodoistTaskObject(line, filepath, i, content);
                 if (typeof currentTask === "undefined") {
                     continue;
                 }
-                console.log(currentTask);
+                this.plugin.debugLog(currentTask);
                 try {
                     const newTask = await this.plugin.todoistSyncAPI.AddTask(currentTask);
                     const { id: todoist_id } = newTask;
                     newTask.path = filepath;
-                    console.log(newTask);
+                    this.plugin.debugLog(newTask);
                     new Notice(`new task ${newTask.content} id is ${newTask.id}`);
                     this.plugin.logOperation?.log('OBSIDIAN_TASK_CREATED', `Created task in Obsidian: ${newTask.content}`, filepath, todoist_id, 'obsidian→todoist');
                     this.plugin.logOperation?.log('TODOIST_TASK_CREATED', `Created task in Todoist: ${newTask.content}`, filepath, todoist_id, 'obsidian→todoist');
@@ -229,9 +229,9 @@ export class ObsidianToTodoistSync {
 
             const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(lineTask_todoist_id);
             if (!taskMapping) {
-                console.log(`Local cache has no task ${lineTask.todoist_id}`);
+                this.plugin.debugLog(`Local cache has no task ${lineTask.todoist_id}`);
                 const url = this.plugin.taskParser.getObsidianUrlFromFilepath(filepath);
-                console.log(url);
+                this.plugin.debugLog(url);
                 return;
             }
 
@@ -291,20 +291,20 @@ export class ObsidianToTodoistSync {
 
                 const updatedContent: Record<string, unknown> = {};
                 if (contentModified) {
-                    console.log(`Content modified for task ${lineTask_todoist_id}`);
+                    this.plugin.debugLog(`Content modified for task ${lineTask_todoist_id}`);
                     updatedContent.content = lineTaskContent;
                     contentChanged = true;
                 }
 
                 if (tagsModified) {
-                    console.log(`Tags modified for task ${lineTask_todoist_id}`);
+                    this.plugin.debugLog(`Tags modified for task ${lineTask_todoist_id}`);
                     updatedContent.labels = lineTask.labels;
                     tagsChanged = true;
                 }
 
                 if (dueDateModified) {
-                    console.log(`Due date modified for task ${lineTask_todoist_id}`);
-                    console.log(lineTask.dueDate);
+                    this.plugin.debugLog(`Due date modified for task ${lineTask_todoist_id}`);
+                    this.plugin.debugLog(lineTask.dueDate);
                     if (lineTask.dueDate === "") {
                         updatedContent.dueString = "no date";
                     } else {
@@ -326,15 +326,15 @@ export class ObsidianToTodoistSync {
                 }
 
                 if (statusModified) {
-                    console.log(`Status modified for task ${lineTask_todoist_id}`);
+                    this.plugin.debugLog(`Status modified for task ${lineTask_todoist_id}`);
                     if (lineTask.isCompleted === true) {
-                        console.log(`task completed`);
+                        this.plugin.debugLog(`task completed`);
                         await this.plugin.todoistSyncAPI.CloseTask(lineTask.todoist_id.toString());
                         // taskFileMapping already set, no need to update
                         this.plugin.logOperation?.log('OBSIDIAN_TASK_COMPLETED', `Completed task: ${lineTask.content}`, filepath, lineTask_todoist_id, 'obsidian→todoist');
                         this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Completed task in Todoist: ${lineTask.content}`, filepath, lineTask_todoist_id, 'obsidian→todoist');
                     } else {
-                        console.log(`task uncompleted`);
+                        this.plugin.debugLog(`task uncompleted`);
                         await this.plugin.todoistSyncAPI.OpenTask(lineTask.todoist_id.toString());
                         // taskFileMapping already set, no need to update
                         this.plugin.logOperation?.log('OBSIDIAN_TASK_REOPENED', `Reopened task: ${lineTask.content}`, filepath, lineTask_todoist_id);
@@ -344,8 +344,8 @@ export class ObsidianToTodoistSync {
                 }
 
                 if (contentChanged || statusChanged || dueDateChanged || tagsChanged || priorityChanged) {
-                    console.log(lineTask);
-                    console.log(savedTask);
+                    this.plugin.debugLog(lineTask);
+                    this.plugin.debugLog(savedTask);
                     this.plugin.saveSettings();
                     let message = `Task ${lineTask_todoist_id} is updated.`;
 
@@ -495,7 +495,7 @@ export class ObsidianToTodoistSync {
             const api = await this.plugin.todoistSyncAPI.initializeAPI();
             try {
                 const response = await api.deleteTask(taskId);
-                console.log(`response is ${response}`);
+                this.plugin.debugLog(`response is ${response}`);
 
                 if (response) {
                     new Notice(`Task ${taskId} is deleted.`);
@@ -509,7 +509,7 @@ export class ObsidianToTodoistSync {
         }
 
         if (!deletedTaskIds.length) {
-            console.log("No tasks deleted");
+            this.plugin.debugLog("No tasks deleted");
             return [];
         }
 

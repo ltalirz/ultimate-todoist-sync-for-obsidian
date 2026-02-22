@@ -31,7 +31,7 @@ export class BackupOperation {
 
             const file = this.app.vault.getAbstractFileByPath(filePath);
             if (!file) {
-                console.log(`File not found: ${filePath}`);
+                this.plugin.debugLog(`File not found: ${filePath}`);
                 return null;
             }
 
@@ -129,7 +129,7 @@ export class BackupOperation {
         try {
             const backupFile = this.app.vault.getAbstractFileByPath(backupPath);
             if (!backupFile) {
-                console.log(`Backup file not found: ${backupPath}`);
+                this.plugin.debugLog(`Backup file not found: ${backupPath}`);
                 return false;
             }
 
@@ -145,7 +145,7 @@ export class BackupOperation {
 
             const originalFile = this.app.vault.getAbstractFileByPath(originalPath);
             if (!originalFile) {
-                console.log(`Original file not found: ${originalPath}`);
+                this.plugin.debugLog(`Original file not found: ${originalPath}`);
                 return false;
             }
 

@@ -71,7 +71,7 @@ export class SafeSettings {
 
 	async save(): Promise<boolean> {
 		if (this.plugin.saveLock) {
-			console.log('[Settings] Save already in progress, skipping...');
+			this.plugin.debugLog('[Settings] Save already in progress, skipping...');
 			return false;
 		}
 
@@ -106,7 +106,7 @@ export class SafeSettings {
 				console.warn('[Settings] Failed to cleanup temp file:', cleanupError);
 			}
 
-			console.log('[Settings] Settings saved successfully');
+			this.plugin.debugLog('[Settings] Settings saved successfully');
 			this.plugin.saveLock = false;
 			return true;
 		} catch (error) {
@@ -144,7 +144,7 @@ export class SafeSettings {
 				stripped++;
 			}
 		}
-		if (stripped > 0) console.log(`[Settings] Stripped ${stripped} ghost field(s) from loaded data`);
+		if (stripped > 0) this.plugin.debugLog(`[Settings] Stripped ${stripped} ghost field(s) from loaded data`);
 	}
 
 	private sanitizeTaskFileMapping(): void {
@@ -160,7 +160,7 @@ export class SafeSettings {
 				fixed++;
 			}
 		}
-		if (fixed > 0) console.log(`[Settings] Sanitized ${fixed} corrupted taskFileMapping entry(s)`);
+		if (fixed > 0) this.plugin.debugLog(`[Settings] Sanitized ${fixed} corrupted taskFileMapping entry(s)`);
 	}
 
 
@@ -254,7 +254,7 @@ export class SettingsBackup {
 			const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
 			const backupPath = `${this.getBackupDir()}/settings-${timestamp}.json`;
 			await adapter.write(backupPath, data);
-			console.log('[SettingsBackup] Backup created:', backupPath);
+			this.plugin.debugLog('[SettingsBackup] Backup created:', backupPath);
 			await this.cleanOldBackups();
 			return true;
 		} catch (error) {
@@ -284,7 +284,7 @@ export class SettingsBackup {
 				return false;
 			}
 			await adapter.write(StoragePathManager.SETTINGS_FILE, data);
-			console.log('[SettingsBackup] Settings restored from:', latestBackup);
+			this.plugin.debugLog('[SettingsBackup] Settings restored from:', latestBackup);
 			new Notice('Settings restored from backup');
 			return true;
 		} catch (error) {
@@ -338,7 +338,7 @@ export class SettingsBackup {
 				return false;
 			}
 			await adapter.write(StoragePathManager.SETTINGS_FILE, data);
-			console.log('[SettingsBackup] Settings restored from specific backup:', backupPath);
+			this.plugin.debugLog('[SettingsBackup] Settings restored from specific backup:', backupPath);
 			new Notice('Settings restored from backup');
 			return true;
 		} catch (error) {
@@ -364,7 +364,7 @@ export class SettingsBackup {
 			}
 			await adapter.write(StoragePathManager.SETTINGS_FILE, data);
 			await adapter.remove(tempPath).catch(() => {});
-			console.log('[SettingsBackup] Recovered from temp file');
+			this.plugin.debugLog('[SettingsBackup] Recovered from temp file');
 			new Notice('Settings recovered from temp file');
 			return true;
 		} catch (error) {
@@ -383,7 +383,7 @@ export class SettingsBackup {
 			const adapter = this.app.vault.adapter;
 			if (await adapter.exists(backupDir)) {
 				await adapter.rmdir(backupDir, true);
-				console.log('[SettingsBackup] All backups cleared');
+				this.plugin.debugLog('[SettingsBackup] All backups cleared');
 			}
 			return true;
 		} catch (error) {
