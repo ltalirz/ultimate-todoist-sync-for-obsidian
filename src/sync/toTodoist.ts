@@ -110,7 +110,21 @@ export class ObsidianToTodoistSync {
                 const text = this.plugin.taskParser.addTodoistLink(text_with_out_link, link);
                 const from = { line: cursor.line, ch: 0 };
                 const to = { line: cursor.line, ch: linetxt.length };
-                view.app.workspace.activeEditor?.editor?.replaceRange(text, from, to);
+                try {
+                    view.app.workspace.activeEditor?.editor?.replaceRange(text, from, to);
+                } catch (replaceError) {
+                    // replaceRange failed — roll back Todoist task to avoid duplicate on next trigger
+                    console.error('[lineContentNewTaskCheck] replaceRange failed, rolling back Todoist task:', replaceError);
+                    try {
+                        const api = this.plugin.todoistSyncAPI.initializeAPI();
+                        await api.deleteTask(todoist_id);
+                    } catch (deleteError) {
+                        console.error('[lineContentNewTaskCheck] Rollback failed:', deleteError);
+                    }
+                    await this.plugin.cacheOperation.deleteTaskFileMapping(todoist_id);
+                    new Notice(`Failed to write task ID to file. Todoist task rolled back. Please try again.`);
+                    return;
+                }
 
                 try {
                     this.plugin.saveSettings();
@@ -175,7 +189,6 @@ export class ObsidianToTodoistSync {
                         await this.plugin.todoistSyncAPI.CloseTask(newTask.id);
                         // taskFileMapping already set above
                     }
-                    this.plugin.saveSettings();
 
                     const text_with_out_link = `${line} %%[todoist_id:: ${todoist_id}]%%`;
                     const link = this.plugin.settings.useAppURI ? `[link](todoist://task?id=${newTask.id})` : `[link](https://app.todoist.com/app/task/${newTask.id})`;
@@ -191,6 +204,7 @@ export class ObsidianToTodoistSync {
             }
         }
         if (hasNewTask) {
+            this.plugin.saveSettings();
             try {
                 const newContent = lines.join('\n');
                 await this.plugin.backupOperation?.backupFile(filepath);
@@ -219,6 +233,15 @@ export class ObsidianToTodoistSync {
             }
 
             const savedTask = await this.plugin.todoistSyncAPI.GetTaskById(lineTask_todoist_id);
+
+            // Conflict detection: if Todoist was updated since our last sync, skip push and mark conflicted
+            if (taskMapping.updated_at && savedTask.updated_at && savedTask.updated_at !== taskMapping.updated_at) {
+                console.warn(`[lineModifiedTaskCheck] Conflict detected for task ${lineTask_todoist_id}: Todoist updated_at=${savedTask.updated_at}, cached=${taskMapping.updated_at}`);
+                await this.plugin.cacheOperation.setTaskFileMapping(lineTask_todoist_id, taskMapping.filePath, taskMapping.lineNumber, 'conflicted', false);
+                new Notice(`Task ${lineTask_todoist_id} has a conflict: modified in both Obsidian and Todoist. Sync disabled until resolved.`);
+                this.plugin.logOperation?.log('CONFLICT_DETECTED', `Conflict on task ${lineTask_todoist_id}`, filepath, lineTask_todoist_id);
+                return;
+            }
 
             const lineTaskContent = lineTask.content;
             const contentModified = !this.plugin.taskParser.taskContentCompare(lineTask, savedTask);

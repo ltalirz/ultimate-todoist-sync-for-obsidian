@@ -64,14 +64,13 @@ export class TodoistToObsidianSync {
                 try {
                     await this.syncSingleTaskToObsidian(taskId, task);
                     syncedCount++;
+                    await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, {
+                        updated_at: task.updated_at,
+                        note_count: task.note_count || 0
+                    });
                 } catch (error) {
                     console.error(`[Todoist→Obsidian] Error syncing task ${taskId}:`, error);
                 }
-
-                this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, {
-                    updated_at: task.updated_at,
-                    note_count: task.note_count || 0
-                });
             }
 
 			await this.syncNotesToObsidian(taskFileMapping, noteMap);
@@ -158,7 +157,7 @@ export class TodoistToObsidianSync {
                 }
             }
 
-            this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, {
+            await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, {
                 note_count: notes.length
             });
         }
