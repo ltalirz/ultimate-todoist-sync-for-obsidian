@@ -96,13 +96,7 @@ export class TodoistSyncAPI   {
 	}
 
 	async initializeSync(): Promise<void> {
-		// Try to load from cache first
-		if (this.plugin.settings.syncDataCache) {
-			this.syncData = this.plugin.settings.syncDataCache;
-			console.log('[TodoistSyncAPI] Loaded sync data from cache');
-		}
-		
-		// Fetch fresh data (full sync)
+		// Fetch fresh data (full sync) — no need to pre-load stale cache
 		const data = await this.getAllResources(true);
 		this.syncData = data;
 		
@@ -275,7 +269,7 @@ export class TodoistSyncAPI   {
           {
             'type': "user_update",
             'uuid': unixTimestampString,
-            'args': { 'timezone': 'Asia/Shanghai' },
+            'args': { 'timezone': Intl.DateTimeFormat().resolvedOptions().timeZone },
           },
         ];
         const options = {
