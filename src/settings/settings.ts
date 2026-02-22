@@ -135,6 +135,10 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
             );
 
         const myProjectsOptions: Record<string, string> = {};
+        const projects = this.plugin.todoistSyncAPI?.getSyncData()?.projects || [];
+        for (const p of projects) {
+            myProjectsOptions[p.id] = p.name;
+        }
 
         new Setting(containerEl)
             .setName('Default Project')
@@ -144,7 +148,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                     .addOption(this.plugin.settings.defaultProjectId, this.plugin.settings.defaultProjectName)
                     .addOptions(myProjectsOptions)
                     .onChange(async (value) => {
-                        const project = this.plugin.todoistSyncAPI?.getSyncData()?.projects?.find((p: any) => p.id === value);
+                        const project = projects.find((p: any) => p.id === value);
                         await this.plugin.safeSettings?.update({
                             defaultProjectId: value,
                             defaultProjectName: project?.name || value
@@ -263,12 +267,10 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         return
                     }
                     try {
-                        await this.plugin.scheduledSynchronization()
-                        this.plugin.syncLock = false
+                        await this.plugin.scheduler.run()
                         new Notice('Sync completed.')
                     } catch (error) {
                         new Notice(`Sync error: ${error}`)
-                        this.plugin.syncLock = false;
                     }
                 })
             );
