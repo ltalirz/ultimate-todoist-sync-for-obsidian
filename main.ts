@@ -18,7 +18,7 @@ import { SafeSettings, SettingsBackup } from './src/settings/safeSettings';
 import { SyncLockManager } from './src/sync/syncLock';
 import { SyncScheduler } from './src/sync/scheduler';
 import { EventHandlers } from './src/plugin/eventHandlers';
-import { SetDefalutProjectInTheFilepathModal } from './src/ui/modals';
+import { SetDefalutProjectInTheFilepathModal, TaskManagerModal } from './src/ui/modals';
 
 export default class UltimateTodoistSyncForObsidian extends Plugin {
 	settings: UltimateTodoistSyncSettings;
@@ -110,6 +110,14 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				if (!view) return;
 				const filepath = view.file.path;
 				new SetDefalutProjectInTheFilepathModal(this.app, this, filepath);
+			}
+		});
+
+		this.addCommand({
+			id: 'open-task-manager',
+			name: 'Open Task Manager',
+			callback: () => {
+				new TaskManagerModal(this.app, this).open();
 			}
 		});
 	}
