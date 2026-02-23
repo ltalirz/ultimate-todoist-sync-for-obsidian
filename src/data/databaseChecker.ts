@@ -236,7 +236,7 @@ export class DatabaseChecker {
             if (noticeCallback) {
                 noticeCallback('Step 3/4: Loading taskFileMapping...');
             }
-            // 从设置中获取 taskFileMapping（任务 ID -> 文件路径和行号的映射）
+            // 从设置中获取 taskFileMapping（任务 ID -> 文件路径的映射）
             const taskFileMapping = this.plugin.settings.taskFileMapping || {};
 
             // ====== Step 4: 分析差异 ======
@@ -349,7 +349,7 @@ export class DatabaseChecker {
     async compareThreeSources(
         vaultTasksMap: Map<string, VaultTask>,
         todoistTasksMap: Map<string, TodoistTask>,
-        taskFileMapping: Record<string, { filePath: string; lineNumber: number; status?: string; syncEnabled?: boolean }>
+        taskFileMapping: Record<string, { filePath: string; status?: string; syncEnabled?: boolean }>
     ): Promise<{ 
         issues: DatabaseCheckIssue[], 
         summary: DatabaseCheckResult['summary'],
@@ -578,7 +578,6 @@ export class DatabaseChecker {
                         type: 'task_not_in_vault',
                         filePath: mapping.filePath,
                         taskId,
-                        lineNumber: mapping.lineNumber,
                         details: `Task exists in Todoist and mapping but not found in Vault`,
                         todoistContent: todoistTask!.content,
                         todoistStatus: !!(todoistTask as any).checked
@@ -589,9 +588,7 @@ export class DatabaseChecker {
                         type: 'mapping_orphan',
                         filePath: mapping.filePath,
                         taskId,
-                        lineNumber: mapping.lineNumber,
-                        details: `Mapping exists but task is deleted in both Vault and Todoist (orphan mapping)`,
-                        mappingLineNumber: mapping.lineNumber
+                        details: `Mapping exists but task is deleted in both Vault and Todoist (orphan mapping)`
                     });
                     summary.mappingOrphan++;
                 }

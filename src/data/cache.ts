@@ -6,7 +6,7 @@
  * 【模块职责】
  * 本模块负责管理 Obsidian 与 Todoist 之间的任务缓存数据，包括：
  * 1. fileMetadata - 每个文件的元数据（仅保存 defaultProjectId）
- * 2. taskFileMapping - 任务ID到文件路径的映射（taskId -> {filePath, lineNumber, status, syncEnabled}）
+ * 2. taskFileMapping - 任务ID到文件路径的映射（taskId -> {filePath, status, syncEnabled}）
  * 3. rebuildCache - 重建缓存的核心方法，用于扫描 Vault 并与 Todoist 同步
  * 
  * 【数据结构】
@@ -15,7 +15,6 @@
  * 
  * - taskFileMapping: { [taskId]: { 
  *     filePath: string, 
- *     lineNumber: number, 
  *     status?: 'active' | 'nonActive' | 'conflicted' | 'issue',
  *     syncEnabled?: boolean 
  *   } }
@@ -242,8 +241,8 @@ export class CacheOperation   {
     // 
     // 【taskFileMapping 数据结构】
     // {
-    //   "taskId123": { filePath: "folder/file.md", lineNumber: 5, status: 'active', syncEnabled: true },
-    //   "taskId456": { filePath: "folder/file2.md", lineNumber: 10, status: 'conflicted', syncEnabled: false }
+    //   "taskId123": { filePath: "folder/file.md", status: 'active', syncEnabled: true },
+    //   "taskId456": { filePath: "folder/file2.md", status: 'conflicted', syncEnabled: false }
     // }
     //
     // 【status 字段说明】
@@ -262,9 +261,9 @@ export class CacheOperation   {
     /**
      * 获取指定任务 ID 的文件映射
      * @param taskId - Todoist 任务 ID
-     * @returns 文件路径、行号、状态和同步开关，如果不存在则返回 null
+     * @returns 文件路径、状态和同步开关，如果不存在则返回 null
      */
-    getTaskFileMapping(taskId: string): { filePath: string; lineNumber: number; status?: string; syncEnabled?: boolean; updated_at?: string; note_count?: number } | null {
+    getTaskFileMapping(taskId: string): { filePath: string; status?: string; syncEnabled?: boolean; updated_at?: string; note_count?: number } | null {
         return this.plugin.settings.taskFileMapping[taskId] ?? null;
     }
 
@@ -279,13 +278,12 @@ export class CacheOperation   {
      * 设置任务 ID 到文件位置的映射
      * @param taskId - Todoist 任务 ID
      * @param filePath - Obsidian 文件路径
-     * @param lineNumber - 任务所在行号
      * @param status - 任务状态（'active' | 'nonActive' | 'conflicted' | 'issue'），默认 'active'
      * @param syncEnabled - 是否启用同步，默认 true
      */
-    async setTaskFileMapping(taskId: string, filePath: string, lineNumber: number, status: 'active' | 'nonActive' | 'conflicted' | 'issue' = 'active', syncEnabled: boolean = true): Promise<void> {
+    async setTaskFileMapping(taskId: string, filePath: string, status: 'active' | 'nonActive' | 'conflicted' | 'issue' = 'active', syncEnabled: boolean = true): Promise<void> {
         const mapping = { ...this.plugin.settings.taskFileMapping };
-        mapping[taskId] = { filePath, lineNumber, status, syncEnabled };
+        mapping[taskId] = { filePath, status, syncEnabled };
         await this.plugin.safeSettings?.update({ taskFileMapping: mapping });
     }
 
@@ -313,7 +311,7 @@ export class CacheOperation   {
      * 获取所有任务 ID 到文件位置的映射
      * @returns 完整的 taskFileMapping 对象
      */
-    getAllTaskFileMappings(): { [taskId: string]: { filePath: string; lineNumber: number } } {
+    getAllTaskFileMappings(): { [taskId: string]: { filePath: string } } {
         return this.plugin.settings.taskFileMapping ?? {};
     }
 
@@ -835,7 +833,7 @@ export class CacheOperation   {
                 if (item?.id) syncItemsMap.set(item.id, item);
             }
             
-            const nextMapping: Record<string, { filePath: string; lineNumber: number; status?: 'active' | 'nonActive' | 'conflicted' | 'issue'; syncEnabled?: boolean }> = {};
+            const nextMapping: Record<string, { filePath: string; status?: 'active' | 'nonActive' | 'conflicted' | 'issue'; syncEnabled?: boolean; updated_at?: string; note_count?: number }> = {};
             const conflicts: TaskConflict[] = [];
             let processedCount = 0;
             let nonActiveCount = 0;
@@ -855,7 +853,7 @@ export class CacheOperation   {
                             if (status === 'nonActive') nonActiveCount++;
                             else issueCount++;
                             nextMapping[taskInfo.taskId] = {
-                                filePath, lineNumber: taskInfo.lineNumber,
+                                filePath,
                                 status, syncEnabled: false
                             };
                             this.plugin.logOperation?.log(
@@ -890,13 +888,13 @@ export class CacheOperation   {
                                 lineNumber: taskInfo.lineNumber
                             });
                             nextMapping[mappingTaskId] = {
-                                filePath, lineNumber: taskInfo.lineNumber,
+                                filePath,
                                 status: 'conflicted', syncEnabled: false
                             };
                             this.plugin.logOperation?.log('CACHE_TASK_CONFLICTED', `Task ${mappingTaskId} marked as conflicted`, filePath, mappingTaskId);
                         } else {
                             nextMapping[mappingTaskId] = {
-                                filePath, lineNumber: taskInfo.lineNumber,
+                                filePath,
                                 status: 'active', syncEnabled: true,
                                 updated_at: task.updated_at ?? undefined
                             };

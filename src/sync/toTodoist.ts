@@ -93,7 +93,7 @@ export class ObsidianToTodoistSync {
                 this.plugin.logOperation?.log('OBSIDIAN_TASK_CREATED', `Created task in Obsidian: ${newTask.content}`, filepath, todoist_id, 'obsidian→todoist');
                 this.plugin.logOperation?.log('TODOIST_TASK_CREATED', `Created task in Todoist: ${newTask.content}`, filepath, todoist_id, 'obsidian→todoist');
 
-                this.plugin.cacheOperation.setTaskFileMapping(todoist_id, filepath || '', line);
+                this.plugin.cacheOperation.setTaskFileMapping(todoist_id, filepath || '');
 
                 // Immediately sync so syncData contains the new task before any
                 // subsequent lineModifiedTaskCheck fires on the same line.
@@ -189,7 +189,7 @@ export class ObsidianToTodoistSync {
                         this.plugin.logOperation?.log('OBSIDIAN_TASK_CREATED', `Created task in Obsidian: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
                         this.plugin.logOperation?.log('TODOIST_TASK_CREATED', `Created task in Todoist: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
 
-                        this.plugin.cacheOperation.setTaskFileMapping(todoist_id, filepath || '', i);
+                        this.plugin.cacheOperation.setTaskFileMapping(todoist_id, filepath || '');
                     if (currentTask.isCompleted === true) {
                             await this.plugin.todoistSyncAPI.CloseTask(newTask.id);
                             this.plugin.logOperation?.log('OBSIDIAN_TASK_COMPLETED', `Completed task in Obsidian: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
@@ -261,7 +261,7 @@ export class ObsidianToTodoistSync {
                     return;
                 }
                 console.warn(`[lineModifiedTaskCheck] Task ${lineTask_todoist_id} not found in Todoist (deleted?), marking as issue`);
-                await this.plugin.cacheOperation.setTaskFileMapping(lineTask_todoist_id, taskMapping.filePath, taskMapping.lineNumber, 'issue', false);
+                await this.plugin.cacheOperation.setTaskFileMapping(lineTask_todoist_id, taskMapping.filePath, 'issue', false);
                 new Notice(`Task ${lineTask_todoist_id} no longer exists in Todoist. Sync disabled.`);
                 this.plugin.logOperation?.log('CONFLICT_DETECTED', `Task ${lineTask_todoist_id} missing in Todoist`, filepath, lineTask_todoist_id);
                 return;
@@ -286,7 +286,7 @@ export class ObsidianToTodoistSync {
                     // fall through
                 } else {
                     // manual: disable sync until user resolves
-                    await this.plugin.cacheOperation.setTaskFileMapping(lineTask_todoist_id, taskMapping.filePath, taskMapping.lineNumber, 'conflicted', false);
+                    await this.plugin.cacheOperation.setTaskFileMapping(lineTask_todoist_id, taskMapping.filePath, 'conflicted', false);
                     new Notice(`Task ${lineTask_todoist_id} has a conflict: modified in both Obsidian and Todoist. Sync disabled until resolved.`);
                     return;
                 }
@@ -436,7 +436,7 @@ export class ObsidianToTodoistSync {
             const savedTask = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
 
             if (!savedTask) {
-                await this.plugin.cacheOperation.setTaskFileMapping(taskId, taskMapping?.filePath || '', taskMapping?.lineNumber || 0, 'issue', false);
+                await this.plugin.cacheOperation.setTaskFileMapping(taskId, taskMapping?.filePath || '', 'issue', false);
                 new Notice(`Task ${taskId} no longer exists in Todoist. Sync disabled.`);
                 return;
             }
@@ -449,7 +449,7 @@ export class ObsidianToTodoistSync {
                     new Notice(`Conflict on task ${taskId}: Todoist wins — Obsidian will be updated on next sync.`);
                     return;
                 } else if (strategy === 'manual') {
-                    await this.plugin.cacheOperation.setTaskFileMapping(taskId, taskMapping.filePath, taskMapping.lineNumber, 'conflicted', false);
+                    await this.plugin.cacheOperation.setTaskFileMapping(taskId, taskMapping.filePath, 'conflicted', false);
                     new Notice(`Task ${taskId} has a conflict. Sync disabled until resolved.`);
                     return;
                 }
@@ -474,7 +474,7 @@ export class ObsidianToTodoistSync {
             const savedTask = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
 
             if (!savedTask) {
-                await this.plugin.cacheOperation.setTaskFileMapping(taskId, taskMapping?.filePath || '', taskMapping?.lineNumber || 0, 'issue', false);
+                await this.plugin.cacheOperation.setTaskFileMapping(taskId, taskMapping?.filePath || '', 'issue', false);
                 new Notice(`Task ${taskId} no longer exists in Todoist. Sync disabled.`);
                 return;
             }
@@ -487,7 +487,7 @@ export class ObsidianToTodoistSync {
                     new Notice(`Conflict on task ${taskId}: Todoist wins — Obsidian will be updated on next sync.`);
                     return;
                 } else if (strategy === 'manual') {
-                    await this.plugin.cacheOperation.setTaskFileMapping(taskId, taskMapping.filePath, taskMapping.lineNumber, 'conflicted', false);
+                    await this.plugin.cacheOperation.setTaskFileMapping(taskId, taskMapping.filePath, 'conflicted', false);
                     new Notice(`Task ${taskId} has a conflict. Sync disabled until resolved.`);
                     return;
                 }

@@ -14,7 +14,6 @@ export interface UltimateTodoistSyncSettings {
     taskFileMapping: {
         [taskId: string]: {
             filePath: string;
-            lineNumber: number;
             status?: 'active' | 'nonActive' | 'conflicted' | 'issue';
             syncEnabled?: boolean;
             updated_at?: string;
