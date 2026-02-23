@@ -174,7 +174,6 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			this.debugLog('Running startup database check...');
 			const result = await this.databaseChecker.checkDatabase();
 			await this.safeSettings?.update({
-				lastDatabaseCheckPassed: result.success,
 				lastDatabaseCheckTime: Date.now()
 			}, true);
 			if (result.success) {

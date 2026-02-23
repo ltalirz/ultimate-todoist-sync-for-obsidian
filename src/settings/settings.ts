@@ -27,7 +27,6 @@ export interface UltimateTodoistSyncSettings {
     syncEnabled: boolean;
     obsidianToTodoistEnabled: boolean;
     todoistToObsidianEnabled: boolean;
-    lastDatabaseCheckPassed: boolean;
     lastDatabaseCheckTime: number | null;
     syncDataCache: Record<string, any> | null;
     enableLog: boolean;
@@ -55,7 +54,6 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
     syncEnabled: false,
     obsidianToTodoistEnabled: true,
     todoistToObsidianEnabled: false,
-    lastDatabaseCheckPassed: false,
     lastDatabaseCheckTime: null,
     syncDataCache: null,
     enableLog: true,
@@ -205,7 +203,6 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 
         const syncStatusEl = containerEl.createEl('div', { cls: 'setting-item-description' });
         const updateSyncStatus = () => {
-            const passed = this.plugin.settings.lastDatabaseCheckPassed;
             const mainEnabled = this.plugin.settings.syncEnabled;
             const o2tEnabled = this.plugin.settings.obsidianToTodoistEnabled;
             const t2oEnabled = this.plugin.settings.todoistToObsidianEnabled;
@@ -217,9 +214,6 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                 const o2t = o2tEnabled ? '✅' : '❌';
                 const t2o = t2oEnabled ? '✅' : '❌';
                 statusText = `✅ Enabled (O→T: ${o2t}, T→O: ${t2o})`;
-            }
-            if (!passed) {
-                statusText += ' ⚠️ (database issues detected — some tasks may be skipped)';
             }
 
             syncStatusEl.innerHTML = `<div><strong>Status:</strong> ${statusText}</div>`;
@@ -321,8 +315,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         if (before.success) {
                             progressNotice.hide();
                             await this.plugin.safeSettings?.update({
-                                lastDatabaseCheckTime: Date.now(),
-                                lastDatabaseCheckPassed: true
+                                lastDatabaseCheckTime: Date.now()
                             }, true);
                             updateSyncStatus();
                             updateCheckStatus();
@@ -353,8 +346,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         const fixedCount = Math.max(0, before.totalIssues - after.totalIssues);
                         const remainingCount = after.totalIssues;
                         await this.plugin.safeSettings?.update({
-                            lastDatabaseCheckTime: Date.now(),
-                            lastDatabaseCheckPassed: after.success
+                            lastDatabaseCheckTime: Date.now()
                         }, true);
                         updateSyncStatus();
                         updateCheckStatus();

@@ -32,12 +32,6 @@ export class SyncLockManager {
 
 
 	async acquire(direction?: SyncDirection): Promise<boolean> {
-		if (!this.plugin.settings.lastDatabaseCheckPassed) {
-			this.plugin.debugLog('Sync is disabled due to database issues');
-			new Notice('Sync is blocked due to database issues. Please fix the issues first.');
-			return false;
-		}
-
 		if (!this.plugin.settings.syncEnabled) {
 			this.plugin.debugLog('Sync is disabled by user (main switch off)');
 			return false;
