@@ -868,7 +868,7 @@ export class CacheOperation   {
                         
                         if (idMapping[taskInfo.taskId]) {
                             await this.plugin.fileOperation.updateTaskIdInVault(
-                                filePath, taskInfo.lineNumber,
+                                filePath,
                                 taskInfo.taskId, taskId
                             );
                             this.plugin.debugLog(`[rebuildCache] Updated mapping: ${taskInfo.taskId} -> ${taskId}`);

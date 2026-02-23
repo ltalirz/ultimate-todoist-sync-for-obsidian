@@ -569,7 +569,6 @@ export class FileOperation   {
      */
     async updateTaskIdInVault(
         filePath: string, 
-        lineNumber: number, 
         oldId: string, 
         newId: string
     ): Promise<void> {
@@ -584,12 +583,21 @@ export class FileOperation   {
             const content = await this.app.vault.read(file);
             const lines = content.split('\n');
             
-            if (lineNumber >= lines.length) {
-                console.error(`[updateTaskIdInVault] Line ${lineNumber} out of range in ${filePath}`);
+            // Scan for the line containing the old task ID
+            let targetLineIndex = -1;
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes(`todoist_id:: ${oldId}`)) {
+                    targetLineIndex = i;
+                    break;
+                }
+            }
+            
+            if (targetLineIndex === -1) {
+                console.warn(`[updateTaskIdInVault] Old ID ${oldId} not found in ${filePath}`);
                 return;
             }
 
-            let line = lines[lineNumber];
+            let line = lines[targetLineIndex];
             let hasChanges = false;
             
             // 1. Replace todoist_id metadata: %%[todoist_id:: oldId]%% -> %%[todoist_id:: newId]%%
@@ -614,11 +622,11 @@ export class FileOperation   {
             }
             
             if (!hasChanges) {
-                console.warn(`[updateTaskIdInVault] No ID patterns found in line ${lineNumber} of ${filePath}`);
+                console.warn(`[updateTaskIdInVault] No ID patterns found for ${oldId} in ${filePath}`);
                 return;
             }
             
-            lines[lineNumber] = line;
+            lines[targetLineIndex] = line;
             
             await this.plugin.backupOperation?.backupFile(filePath);
             await this.app.vault.modify(file, lines.join('\n'));
