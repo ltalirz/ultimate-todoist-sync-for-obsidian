@@ -38,9 +38,6 @@ export class EventHandlers {
 				if (!await this.plugin.syncLockManager.acquire('obsidianToTodoist')) return;
 				const deletedCount = await this.plugin.obsidianToTodoist!.deletedTaskCheck(filepath);
 				this.plugin.syncLockManager.release();
-				if (deletedCount > 0) {
-					this.plugin.saveSettings();
-				}
 			} catch (error) {
 				console.error(`An error occurred while deleting tasks: ${error}`);
 				this.plugin.syncLockManager.release();
