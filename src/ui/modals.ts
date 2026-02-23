@@ -1,4 +1,4 @@
-import { App, Modal, Notice, Setting, TextComponent } from "obsidian";
+import { App, Modal, Notice, Setting, TextComponent, TFile } from "obsidian";
 import UltimateTodoistSyncForObsidian from "../../main";
 
 
@@ -335,6 +335,7 @@ export class LogViewerModal extends Modal {
 
 export class TaskManagerModal extends Modal {
     plugin: UltimateTodoistSyncForObsidian;
+    private _closed = false;
     constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
         super(app);
         this.plugin = plugin;
@@ -583,6 +584,7 @@ export class TaskManagerModal extends Modal {
                 } else if (!isCompleted && todoistChecked) {
                     await this.plugin.todoistSyncAPI.OpenTask(taskId);
                 }
+                if (this._closed) return;
                 await this.plugin.todoistSyncAPI.incrementalSync();
                 const refreshed = this.plugin.todoistSyncAPI.getTaskByIdLocal(taskId);
                 await this.plugin.cacheOperation.setTaskFileMapping(taskId, filePath, 'active', true);
@@ -594,19 +596,26 @@ export class TaskManagerModal extends Modal {
             } else {
                 const task = this.plugin.todoistSyncAPI.getTaskByIdLocal(taskId);
                 if (!task) { new Notice('Task not found in Todoist'); return; }
-                if (task.content) {
-                    await this.plugin.fileOperation.syncTaskContentToFile(taskId, task.content);
+                // Echo protection: prevent file writes from triggering push sync back to Todoist
+                this.plugin.isSyncingFromTodoist = true;
+                try {
+                    if (task.content) {
+                        await this.plugin.fileOperation.syncTaskContentToFile(taskId, task.content);
+                    }
+                    const todoistDueDate = task.due?.date || '';
+                    await this.plugin.fileOperation.syncTaskDueDateToFile(taskId, todoistDueDate);
+                    const line = await this.getTaskLine(taskId, filePath);
+                    const obsidianChecked = line ? /\[(x|X)\]/.test(line) : false;
+                    const todoistChecked = task.checked || false;
+                    if (todoistChecked && !obsidianChecked) {
+                        await this.plugin.fileOperation.completeTaskInTheFile(taskId);
+                    } else if (!todoistChecked && obsidianChecked) {
+                        await this.plugin.fileOperation.uncompleteTaskInTheFile(taskId);
+                    }
+                } finally {
+                    this.plugin.isSyncingFromTodoist = false;
                 }
-                const todoistDueDate = task.due?.date || '';
-                await this.plugin.fileOperation.syncTaskDueDateToFile(taskId, todoistDueDate);
-                const line = await this.getTaskLine(taskId, filePath);
-                const obsidianChecked = line ? /\[(x|X)\]/.test(line) : false;
-                const todoistChecked = task.checked || false;
-                if (todoistChecked && !obsidianChecked) {
-                    await this.plugin.fileOperation.completeTaskInTheFile(taskId);
-                } else if (!todoistChecked && obsidianChecked) {
-                    await this.plugin.fileOperation.uncompleteTaskInTheFile(taskId);
-                }
+                if (this._closed) return;
                 await this.plugin.cacheOperation.setTaskFileMapping(taskId, filePath, 'active', true);
                 await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, { updated_at: task.updated_at });
                 this.plugin.saveSettings();
@@ -616,15 +625,21 @@ export class TaskManagerModal extends Modal {
             console.error(`[TaskManagerModal] resolveConflict error:`, e);
             new Notice(`Error resolving conflict: ${e}`);
         }
+        if (this._closed) return;
         await this.loadAndRender();
     }
     private async deleteIssueTask(taskId: string) {
         try {
             try {
                 await this.plugin.todoistSyncAPI.deleteTask(taskId);
-            } catch (e) {
-                // ignore — task probably doesn't exist in Todoist
+            } catch (e: unknown) {
+                // Only ignore 404 (task already deleted in Todoist)
+                const err = e as Record<string, unknown>;
+                const is404 = err.httpStatusCode === 404
+                    || (typeof err.message === 'string' && (err.message.includes('404') || err.message.toLowerCase().includes('not found')));
+                if (!is404) throw e;
             }
+            if (this._closed) return;
             await this.plugin.fileOperation.unbindTaskInFile(taskId);
             await this.plugin.cacheOperation.deleteTaskFileMapping(taskId);
             this.plugin.saveSettings();
@@ -633,19 +648,20 @@ export class TaskManagerModal extends Modal {
             console.error(`[TaskManagerModal] deleteIssueTask error:`, e);
             new Notice(`Error deleting task: ${e}`);
         }
+        if (this._closed) return;
         await this.loadAndRender();
     }
     private openFile(filePath: string) {
         const file = this.app.vault.getAbstractFileByPath(filePath);
-        if (file) {
-            this.app.workspace.getLeaf(false).openFile(file as any);
+        if (file instanceof TFile) {
+            this.app.workspace.getLeaf(false).openFile(file);
         }
     }
     private async getTaskLine(taskId: string, filePath: string): Promise<string | null> {
         try {
             const file = this.app.vault.getAbstractFileByPath(filePath);
-            if (!file) return null;
-            const content = await this.app.vault.read(file as any);
+            if (!(file instanceof TFile)) return null;
+            const content = await this.app.vault.read(file);
             const lines = content.split('\n');
             for (const line of lines) {
                 if (line.includes(taskId)) return line;
@@ -656,6 +672,7 @@ export class TaskManagerModal extends Modal {
         return null;
     }
     onClose() {
+        this._closed = true;
         const { contentEl } = this;
         contentEl.empty();
     }
