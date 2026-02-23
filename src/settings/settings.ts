@@ -283,9 +283,9 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Set as Primary Device')
-            .setDesc('Only the primary device pushes changes to Todoist. Secondary devices are read-only (pull sync only).')
+            .setDesc('Only the primary device pushes changes to Todoist. Secondary devices are read-only (sync disabled entirely).')
             .addButton(button => button
-                .setButtonText(this.plugin.isPrimaryDevice() ? 'Already Primary' : 'Claim as Primary')
+                .setButtonText(this.plugin.isPrimaryDevice() ? 'Already Primary' : 'Switch to Primary')
                 .setDisabled(this.plugin.isPrimaryDevice())
                 .onClick(async () => {
                     const deviceId = this.plugin.cachedDeviceId;
@@ -296,7 +296,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                     await this.plugin.safeSettings?.update({ primaryDeviceId: deviceId }, true);
                     updateDeviceStatus();
                     this.display();
-                    new Notice('This device is now the primary device.');
+                    new Notice('This device is now the primary device. Please reload the plugin to activate sync.');
                 })
             );
 

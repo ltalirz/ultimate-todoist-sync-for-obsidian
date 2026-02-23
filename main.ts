@@ -68,13 +68,29 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			return;
 		}
 
+		this.statusBar = this.addStatusBarItem();
 		this.addSettingTab(new UltimateTodoistSyncSettingTab(this.app, this));
 
+		// No API token → not configured yet (fresh install or data.json not synced)
+		// Don't generate deviceId, don't initialize anything — just show settings tab
 		if (!this.settings.todoistAPIToken) {
 			new Notice('Please enter your Todoist API.');
-		} else {
-			await this.initializePlugin();
+			return;
 		}
+
+		// API token exists → data.json is present → safe to read/generate device-id
+		const earlyDeviceManager = new DeviceManager(this.app, this);
+		this.cachedDeviceId = await earlyDeviceManager.getDeviceId();
+
+		// Non-primary device: only keep settings tab + status bar, skip everything else
+		if (this.settings.primaryDeviceId !== '' && this.settings.primaryDeviceId !== this.cachedDeviceId) {
+			this.statusBar.setText('\ud83d\udcf1 Secondary');
+			new Notice('Todoist Sync: Secondary device \u2014 sync disabled. Use settings to claim as primary.');
+			return;
+		}
+
+		// Primary device (or unclaimed) → full initialization
+		await this.initializePlugin();
 
 		this.lastLines = new Map();
 		this.scheduler = new SyncScheduler(this);
@@ -96,8 +112,6 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				new SetDefalutProjectInTheFilepathModal(this.app, this, filepath);
 			}
 		});
-
-		this.statusBar = this.addStatusBarItem();
 	}
 
 	async onunload() {
@@ -161,6 +175,13 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 
 		await this.safeSettings?.update({ apiInitialized: true });
 		this.syncLockManager.release();
+
+		// Auto-claim primary device if no primary is set yet
+		if (this.settings.primaryDeviceId === '' && this.cachedDeviceId) {
+			await this.safeSettings?.update({ primaryDeviceId: this.cachedDeviceId }, true);
+			this.debugLog('[Plugin] Auto-claimed as primary device: ' + this.cachedDeviceId);
+		}
+
 		new Notice(`Ultimate Todoist Sync loaded successfully.`);
 		this.logOperation?.log('PLUGIN_INITIALIZED', 'Plugin initialized successfully');
 		this.runStartupDatabaseCheck();
