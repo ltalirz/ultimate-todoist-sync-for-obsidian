@@ -2,6 +2,7 @@ import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../../main";
 import { LogViewerModal } from '../ui/modals';
 import { RebuildCacheResult } from '../data/cache';
+import { DeviceManager } from '../utils/deviceManager';
 
 export interface UltimateTodoistSyncSettings {
     initialized: boolean;
@@ -38,6 +39,7 @@ export interface UltimateTodoistSyncSettings {
     conflictResolutionStrategy: 'todoist-wins' | 'obsidian-wins' | 'manual';
     lastFullSyncTime: number | null;
     lastDatabaseCheckAutoTime: number | null;
+    isPrimaryDevice: boolean;
 }
 
 export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
@@ -67,6 +69,7 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
     conflictResolutionStrategy: 'manual',
     lastFullSyncTime: null,
     lastDatabaseCheckAutoTime: null,
+    isPrimaryDevice: true,
 }
 
 export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
@@ -263,6 +266,35 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
             );
 
         // ============================================
+        // Device Management Section
+        // ============================================
+        containerEl.createEl('h3', { text: 'Device Management' });
+
+        // Device status display
+        const deviceStatusEl = containerEl.createEl('div', { cls: 'setting-item-description' });
+        const updateDeviceStatus = async () => {
+            const deviceManager = new DeviceManager(this.app, this.plugin);
+            const deviceId = await deviceManager.getDeviceId();
+            const role = this.plugin.settings.isPrimaryDevice ? 'Primary' : 'Secondary (read-only)';
+            const roleIcon = this.plugin.settings.isPrimaryDevice ? '\u2705' : '📱';
+            deviceStatusEl.innerHTML = `<div><strong>Device ID:</strong> <code>${deviceId}</code></div><div><strong>Role:</strong> ${roleIcon} ${role}</div>`;
+        };
+        updateDeviceStatus();
+
+        new Setting(containerEl)
+            .setName('Primary Device')
+            .setDesc('Only the primary device pushes changes to Todoist. Secondary devices are read-only (pull sync only).')
+            .addToggle(component =>
+                component
+                    .setValue(this.plugin.settings.isPrimaryDevice)
+                    .onChange(async (value) => {
+                        await this.plugin.safeSettings?.update({ isPrimaryDevice: value }, true);
+                        updateDeviceStatus();
+                        new Notice(value ? 'This device is now the primary device.' : 'This device is now secondary (read-only).');
+                    })
+            );
+
+                // ============================================
         // Tools Section
         // ============================================
         containerEl.createEl('h3', { text: 'Tools' });

@@ -303,7 +303,6 @@ export class TodoistSyncAPI   {
       }
 
 
-
       //update user timezone
       async updateUserTimezone() { 
         const unixTimestampString: string = Math.floor(Date.now() / 1000).toString();
@@ -372,26 +371,7 @@ export class TodoistSyncAPI   {
       }
     }
 
-    async getNonObsidianAllActivityEvents() {
-	  const clientId = await this.getClientHeader();
-      try{
-        const allActivity = await this.getAllActivityEvents()
-        //this.plugin.debugLog(allActivity)
-        const allActivityEvents = allActivity.events
-        //过滤掉当前设备产生的 activity
-        const filteredArray = allActivityEvents.filter((obj: Event) => {
-			const client = obj.extra_data && obj.extra_data.client;
-			// 过滤掉包含 obsidian 的和当前设备ID的 activity
-			return !client || (!client.includes("obsidian") && client !== clientId); 
-        });
-        return(filteredArray)
 
-      }catch(err){
-        console.error('An error occurred:', err);
-        return [];
-      }
-
-    }
   
   
 
@@ -468,32 +448,10 @@ export class TodoistSyncAPI   {
     }
   
    
-    //get non-obsidian completed event
-    async getNonObsidianCompletedItemsActivity() {
-        const clientId = await this.getClientHeader();
-        const completedItemsActivity = await this.getCompletedItemsActivity()
-        const completedItemsActivityEvents = completedItemsActivity.events
-        //过滤掉当前设备产生的 activity
-        const filteredArray = completedItemsActivityEvents.filter((obj: Event) => {
-            const client = obj.extra_data && obj.extra_data.client;
-            return !client || (!client.includes("obsidian") && client !== clientId);
-        }); 
-        return(filteredArray)     
-    }
+
   
   
-    //get non-obsidian uncompleted event
-    async getNonObsidianUncompletedItemsActivity() {
-        const clientId = await this.getClientHeader();
-        const uncompletedItemsActivity = await this.getUncompletedItemsActivity()
-        const uncompletedItemsActivityEvents = uncompletedItemsActivity.events
-        //过滤掉当前设备产生的 activity
-        const filteredArray = uncompletedItemsActivityEvents.filter((obj: Event) => {
-            const client = obj.extra_data && obj.extra_data.client;
-            return !client || (!client.includes("obsidian") && client !== clientId);
-        }); 
-        return(filteredArray) 
-    }
+
   
   
     //get updated items activity
@@ -527,19 +485,6 @@ export class TodoistSyncAPI   {
     }
    
    
-    //get non-obsidian updated event
-    async  getNonObsidianUpdatedItemsActivity() {
-        const clientId = await this.getClientHeader();
-        const updatedItemsActivity = await this.getUpdatedItemsActivity()
-        const updatedItemsActivityEvents = updatedItemsActivity.events
-        //过滤掉当前设备产生的 activity
-        const filteredArray = updatedItemsActivityEvents.filter((obj: Event) => {
-          const client = obj.extra_data && obj.extra_data.client;
-          return !client || (!client.includes("obsidian") && client !== clientId);
-        });
-        return(filteredArray)
-    }
-
 
 
 //get projects activity
@@ -628,7 +573,6 @@ export class TodoistSyncAPI   {
 		}
 
 		this.rateLimitState.partialSyncCount++;
-
 
 
       return data;
@@ -984,24 +928,5 @@ export class TodoistSyncAPI   {
   }
         
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 

@@ -11,6 +11,10 @@ export class ObsidianToTodoistSync {
     }
 
     async deletedTaskCheck(file_path: string): Promise<number> {
+        if (!this.plugin.settings.isPrimaryDevice) {
+            this.plugin.debugLog('[toTodoist] Push blocked: not primary device');
+            return 0;
+        }
         let file;
         let currentFileValue;
         let view;
@@ -58,12 +62,21 @@ export class ObsidianToTodoistSync {
 
         if (deletedCount > 0) {
             this.plugin.saveSettings();
+            try {
+                await this.plugin.todoistSyncAPI.incrementalSync();
+            } catch (syncErr) {
+                console.error('[deletedTaskCheck] Post-push incremental sync failed:', syncErr);
+            }
         }
 
         return deletedCount;
     }
 
     async lineContentNewTaskCheck(editor: Editor, view: MarkdownView): Promise<void> {
+        if (!this.plugin.settings.isPrimaryDevice) {
+            this.plugin.debugLog('[toTodoist] Push blocked: not primary device');
+            return;
+        }
         const filepath = view.file?.path;
         const fileContent = view?.data;
         const cursor = editor.getCursor();
@@ -99,6 +112,10 @@ export class ObsidianToTodoistSync {
                 // subsequent lineModifiedTaskCheck fires on the same line.
                 try {
                     await this.plugin.todoistSyncAPI.incrementalSync();
+                    const updatedTask = await this.plugin.todoistSyncAPI.GetTaskById(todoist_id);
+                    if (updatedTask?.updated_at) {
+                        await this.plugin.cacheOperation.updateTaskMappingSyncMeta(todoist_id, { updated_at: updatedTask.updated_at });
+                    }
                 } catch (syncErr) {
                     console.error('[lineContentNewTaskCheck] Post-create incremental sync failed:', syncErr);
                 }
@@ -147,6 +164,10 @@ export class ObsidianToTodoistSync {
     }
 
     async fullTextNewTaskCheck(file_path: string): Promise<void> {
+        if (!this.plugin.settings.isPrimaryDevice) {
+            this.plugin.debugLog('[toTodoist] Push blocked: not primary device');
+            return;
+        }
         let file;
         let currentFileValue;
         let view;
@@ -204,6 +225,15 @@ export class ObsidianToTodoistSync {
                         await this.plugin.backupOperation?.backupFile(filepath);
                         await this.app.vault.modify(file, newContent);
             this.plugin.saveSettings();
+                        try {
+                            await this.plugin.todoistSyncAPI.incrementalSync();
+                            const updatedTask = await this.plugin.todoistSyncAPI.GetTaskById(todoist_id);
+                            if (updatedTask?.updated_at) {
+                                await this.plugin.cacheOperation.updateTaskMappingSyncMeta(todoist_id, { updated_at: updatedTask.updated_at });
+                            }
+                        } catch (syncErr) {
+                            console.error('[fullTextNewTaskCheck] Post-push incremental sync failed:', syncErr);
+                        }
                         // Re-read file so subsequent iterations use the latest content
                         const refreshed = await this.app.vault.read(file);
                         lines = refreshed.split('\n');
@@ -230,6 +260,10 @@ export class ObsidianToTodoistSync {
     }
 
     async lineModifiedTaskCheck(filepath: string, lineText: string, lineNumber: number, fileContent: string): Promise<void> {
+        if (!this.plugin.settings.isPrimaryDevice) {
+            this.plugin.debugLog('[toTodoist] Push blocked: not primary device');
+            return;
+        }
         if (this.plugin.taskParser.hasTodoistId(lineText) && this.plugin.taskParser.hasTodoistTag(lineText)) {
             const lineTask = await this.plugin.taskParser.convertTextToTodoistTaskObject(lineText, filepath, lineNumber, fileContent);
             const lineTask_todoist_id = (lineTask.todoist_id).toString();
@@ -364,6 +398,15 @@ export class ObsidianToTodoistSync {
                     this.plugin.debugLog(lineTask);
                     this.plugin.debugLog(savedTask);
                     this.plugin.saveSettings();
+                    try {
+                        await this.plugin.todoistSyncAPI.incrementalSync();
+                        const refreshedTask = await this.plugin.todoistSyncAPI.GetTaskById(lineTask_todoist_id);
+                        if (refreshedTask?.updated_at) {
+                            await this.plugin.cacheOperation.updateTaskMappingSyncMeta(lineTask_todoist_id, { updated_at: refreshedTask.updated_at });
+                        }
+                    } catch (syncErr) {
+                        console.error('[lineModifiedTaskCheck] Post-push incremental sync failed:', syncErr);
+                    }
                     let message = `Task ${lineTask_todoist_id} is updated.`;
 
                     if (contentChanged) {
@@ -430,6 +473,10 @@ export class ObsidianToTodoistSync {
     }
 
     async closeTask(taskId: string): Promise<void> {
+        if (!this.plugin.settings.isPrimaryDevice) {
+            this.plugin.debugLog('[toTodoist] Push blocked: not primary device');
+            return;
+        }
         if (!this.plugin.cacheOperation?.isTaskSyncEnabled(taskId)) return;
         try {
             const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId);
@@ -459,6 +506,15 @@ export class ObsidianToTodoistSync {
             await this.plugin.todoistSyncAPI.CloseTask(taskId);
             await this.plugin.fileOperation.completeTaskInTheFile(taskId);
             this.plugin.saveSettings();
+            try {
+                await this.plugin.todoistSyncAPI.incrementalSync();
+                const refreshedTask = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
+                if (refreshedTask?.updated_at) {
+                    await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, { updated_at: refreshedTask.updated_at });
+                }
+            } catch (syncErr) {
+                console.error('[closeTask] Post-push incremental sync failed:', syncErr);
+            }
             new Notice(`Task ${taskId} is closed.`);
             this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Closed task via checkbox: ${taskId}`, undefined, taskId, 'obsidian→todoist');
         } catch (error) {
@@ -468,6 +524,10 @@ export class ObsidianToTodoistSync {
     }
 
     async repoenTask(taskId: string): Promise<void> {
+        if (!this.plugin.settings.isPrimaryDevice) {
+            this.plugin.debugLog('[toTodoist] Push blocked: not primary device');
+            return;
+        }
         if (!this.plugin.cacheOperation?.isTaskSyncEnabled(taskId)) return;
         try {
             const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId);
@@ -497,6 +557,15 @@ export class ObsidianToTodoistSync {
             await this.plugin.todoistSyncAPI.OpenTask(taskId);
             await this.plugin.fileOperation.uncompleteTaskInTheFile(taskId);
             this.plugin.saveSettings();
+            try {
+                await this.plugin.todoistSyncAPI.incrementalSync();
+                const refreshedTask = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
+                if (refreshedTask?.updated_at) {
+                    await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, { updated_at: refreshedTask.updated_at });
+                }
+            } catch (syncErr) {
+                console.error('[repoenTask] Post-push incremental sync failed:', syncErr);
+            }
             new Notice(`Task ${taskId} is reopened.`);
             this.plugin.logOperation?.log('TODOIST_TASK_REOPENED', `Reopened task via checkbox: ${taskId}`, undefined, taskId, 'obsidian→todoist');
         } catch (error) {
