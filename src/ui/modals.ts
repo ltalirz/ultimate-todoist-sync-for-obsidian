@@ -7,8 +7,8 @@ import UltimateTodoistSyncForObsidian from "../../main";
 // ==========================================================================================
 
 interface MyProject {
-	id: string;
-	name: string;
+    id: string;
+    name: string;
 }
 
 export class SetDefalutProjectInTheFilepathModal extends Modal {
@@ -347,6 +347,28 @@ export class TaskManagerModal extends Modal {
     private async loadAndRender() {
         const { contentEl } = this;
         contentEl.empty();
+        
+        // Show loading indicator
+        contentEl.createEl('p', { text: 'Loading...' });
+        
+        // Sync with Todoist
+        let syncFailed = false;
+        try {
+            await this.plugin.todoistSyncAPI.incrementalSync();
+        } catch (e) {
+            console.error('[TaskManagerModal] Failed to refresh from Todoist:', e);
+            syncFailed = true;
+        }
+        
+        // Clear loading indicator
+        contentEl.empty();
+        
+        // Show warning banner if sync failed
+        if (syncFailed) {
+            const banner = contentEl.createDiv({ cls: 'tm-warning' });
+            banner.textContent = '⚠️ Could not refresh from Todoist. Showing cached data.';
+        }
+        
         const mapping = this.plugin.settings.taskFileMapping;
         const conflicted: string[] = [];
         const issue: string[] = [];
@@ -408,7 +430,7 @@ export class TaskManagerModal extends Modal {
                 obsPriority = `!!${this.plugin.taskParser.getTaskPriority(line)}`;
             }
             try {
-                const task = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
+                const task = this.plugin.todoistSyncAPI.getTaskByIdLocal(taskId);
                 if (task) {
                     todContent = task.content || '';
                     todStatus = task.checked ? '\u2611' : '\u2610';
@@ -554,7 +576,7 @@ export class TaskManagerModal extends Modal {
                 else updates.dueString = 'no date';
                 updates.priority = priority;
                 await this.plugin.todoistSyncAPI.UpdateTask(taskId, updates);
-                const savedTask = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
+                const savedTask = this.plugin.todoistSyncAPI.getTaskByIdLocal(taskId);
                 const todoistChecked = savedTask?.checked || false;
                 if (isCompleted && !todoistChecked) {
                     await this.plugin.todoistSyncAPI.CloseTask(taskId);
@@ -562,7 +584,7 @@ export class TaskManagerModal extends Modal {
                     await this.plugin.todoistSyncAPI.OpenTask(taskId);
                 }
                 await this.plugin.todoistSyncAPI.incrementalSync();
-                const refreshed = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
+                const refreshed = this.plugin.todoistSyncAPI.getTaskByIdLocal(taskId);
                 await this.plugin.cacheOperation.setTaskFileMapping(taskId, filePath, 'active', true);
                 if (refreshed?.updated_at) {
                     await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, { updated_at: refreshed.updated_at });
@@ -570,7 +592,7 @@ export class TaskManagerModal extends Modal {
                 this.plugin.saveSettings();
                 new Notice(`Conflict resolved: kept Obsidian version`);
             } else {
-                const task = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
+                const task = this.plugin.todoistSyncAPI.getTaskByIdLocal(taskId);
                 if (!task) { new Notice('Task not found in Todoist'); return; }
                 if (task.content) {
                     await this.plugin.fileOperation.syncTaskContentToFile(taskId, task.content);
