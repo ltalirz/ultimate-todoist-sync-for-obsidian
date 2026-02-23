@@ -31,15 +31,15 @@ export class EventHandlers {
 		}
 
 		if (evt.key === 'Delete' || evt.key === 'Backspace') {
+			if (!await this.plugin.checkModuleClass()) return;
+			const filepath = this.plugin.app.workspace.getActiveFile()?.path;
+			if (!filepath) return;
+			if (!await this.plugin.syncLockManager.acquire('obsidianToTodoist')) return;
 			try {
-				if (!await this.plugin.checkModuleClass()) return;
-				const filepath = this.plugin.app.workspace.getActiveFile()?.path;
-				if (!filepath) return;
-				if (!await this.plugin.syncLockManager.acquire('obsidianToTodoist')) return;
 				const deletedCount = await this.plugin.obsidianToTodoist!.deletedTaskCheck(filepath);
-				this.plugin.syncLockManager.release();
 			} catch (error) {
 				console.error(`An error occurred while deleting tasks: ${error}`);
+			} finally {
 				this.plugin.syncLockManager.release();
 			}
 		}
@@ -60,16 +60,16 @@ export class EventHandlers {
 	}
 
 	private async onEditorChange(editor: Editor, view: MarkdownView): Promise<void> {
+		if (!this.plugin.settings.apiInitialized) return;
+		if (this.plugin.isSyncingFromTodoist) return;
+		this.lineNumberCheck();
+		if (!await this.plugin.checkModuleClass()) return;
+		if (!await this.plugin.syncLockManager.acquire('obsidianToTodoist')) return;
 		try {
-			if (!this.plugin.settings.apiInitialized) return;
-			if (this.plugin.isSyncingFromTodoist) return;
-			this.lineNumberCheck();
-			if (!await this.plugin.checkModuleClass()) return;
-			if (!await this.plugin.syncLockManager.acquire('obsidianToTodoist')) return;
 			await this.plugin.obsidianToTodoist!.lineContentNewTaskCheck(editor, view);
-			this.plugin.syncLockManager.release();
 		} catch (error) {
 			console.error(`An error occurred while check new task in line: ${(error as Error).message}`);
+		} finally {
 			this.plugin.syncLockManager.release();
 		}
 	}
@@ -94,44 +94,44 @@ export class EventHandlers {
 			await this.plugin.obsidianToTodoist!.updateTaskDescription(file.path);
 		} catch (error) {
 			console.error('An error occurred in updateTaskDescription:', error);
+		} finally {
+			this.plugin.syncLockManager.release();
 		}
-		this.plugin.syncLockManager.release();
 	}
 
 	private async onFileModify(file: TFile): Promise<void> {
+		if (!this.plugin.settings.apiInitialized) return;
+		if (this.plugin.isSyncingFromTodoist) return;
+		if (this.plugin.isProcessingModify) return;
+		this.plugin.isProcessingModify = true;
+
+		const filepath = file.path;
+		const storagePath = this.plugin.storagePathManager?.getBasePath() || 'ultimate-todoist-sync';
+		if (filepath.includes(storagePath)) {
+			this.plugin.isProcessingModify = false;
+			return;
+		}
+
+		this.plugin.debugLog(`${filepath} is modified`);
+		const activeFile = this.plugin.app.workspace.getActiveFile();
+		this.plugin.debugLog(activeFile?.path);
+
+		if (activeFile?.path === filepath) {
+			this.plugin.isProcessingModify = false;
+			return;
+		}
+
+		if (!await this.plugin.syncLockManager.acquire('obsidianToTodoist')) {
+			this.plugin.isProcessingModify = false;
+			return;
+		}
+
 		try {
-			if (!this.plugin.settings.apiInitialized) return;
-			if (this.plugin.isSyncingFromTodoist) return;
-			if (this.plugin.isProcessingModify) return;
-			this.plugin.isProcessingModify = true;
-
-			const filepath = file.path;
-			const storagePath = this.plugin.storagePathManager?.getBasePath() || 'ultimate-todoist-sync';
-			if (filepath.includes(storagePath)) {
-				this.plugin.isProcessingModify = false;
-				return;
-			}
-
-			this.plugin.debugLog(`${filepath} is modified`);
-			const activeFile = this.plugin.app.workspace.getActiveFile();
-			this.plugin.debugLog(activeFile?.path);
-
-			if (activeFile?.path === filepath) {
-				this.plugin.isProcessingModify = false;
-				return;
-			}
-
-			if (!await this.plugin.syncLockManager.acquire('obsidianToTodoist')) {
-				this.plugin.isProcessingModify = false;
-				return;
-			}
-
 			await this.plugin.obsidianToTodoist!.fullTextNewTaskCheck(filepath);
-			this.plugin.syncLockManager.release();
 		} catch (error) {
 			console.error(`An error occurred while modifying the file: ${(error as Error).message}`);
-			this.plugin.syncLockManager.release();
 		} finally {
+			this.plugin.syncLockManager.release();
 			this.plugin.isProcessingModify = false;
 		}
 	}
@@ -162,12 +162,12 @@ export class EventHandlers {
 			if (!await this.plugin.checkModuleClass()) return;
 			this.plugin.lastLines.set(fileName as string, line as number);
 
+			if (!await this.plugin.syncLockManager.acquire('obsidianToTodoist')) return;
 			try {
-				if (!await this.plugin.syncLockManager.acquire('obsidianToTodoist')) return;
 				await this.plugin.obsidianToTodoist!.lineModifiedTaskCheck(filepath as string, lastLineText, lastLine as number, fileContent);
-				this.plugin.syncLockManager.release();
 			} catch (error) {
 				console.error(`An error occurred while check modified task in line text: ${error}`);
+			} finally {
 				this.plugin.syncLockManager.release();
 			}
 		}
