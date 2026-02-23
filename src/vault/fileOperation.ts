@@ -145,6 +145,52 @@ export class FileOperation   {
         }
     }
 
+    /**
+     * Unbind a task from its vault line by removing todoist_id, todoist link, and #todoist tag.
+     * The task line remains in the file but is no longer associated with Todoist.
+     */
+    async unbindTaskInFile(taskId: string): Promise<void> {
+        const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId);
+        if (!taskMapping) {
+            console.error(`[FileOperation] unbindTaskInFile: Task ${taskId} not found in taskFileMapping`);
+            return;
+        }
+        const filepath = taskMapping.filePath;
+        const file = this.app.vault.getAbstractFileByPath(filepath);
+        if (!file) {
+            console.error(`[FileOperation] unbindTaskInFile: File not found: ${filepath}`);
+            return;
+        }
+        const content = await this.app.vault.read(file);
+        const lines = content.split('\n');
+        let modified = false;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (!line.includes(taskId)) continue;
+            let newLine = line;
+            // Remove %%[todoist_id:: xxx]%%
+            newLine = newLine.replace(/%%\[todoist_id::\s*\S+\]%%/g, '');
+            // Remove todoist links: [link](https://todoist.com/...) or [link](https://app.todoist.com/...) or [link](todoist://...)
+            newLine = newLine.replace(/\[([^\]]*)\]\(https?:\/\/(?:app\.)?todoist\.com\/[^)]*\)/g, '');
+            newLine = newLine.replace(/\[([^\]]*)\]\(todoist:\/\/[^)]*\)/g, '');
+            // Remove #todoist tag
+            newLine = newLine.replace(/#todoist/g, '');
+            // Clean up multiple spaces left behind
+            newLine = newLine.replace(/  +/g, ' ');
+            // Trim trailing whitespace but preserve leading indentation
+            newLine = newLine.replace(/\s+$/, '');
+            if (newLine !== line) {
+                lines[i] = newLine;
+                modified = true;
+            }
+            break;
+        }
+        if (modified) {
+            const newContent = lines.join('\n');
+            await this.app.vault.modify(file, newContent);
+            this.plugin.logOperation?.log('FILE_TASK_UNBOUND', `Unbound task from file: ${taskId}`, filepath, taskId, 'manual');
+        }
+    }
     //add #todoist at the end of task line, if full vault sync enabled
     async addTodoistTagToFile(filepath: string) {    
         // 获取文件对象并更新内容

@@ -1,6 +1,6 @@
 import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../../main";
-import { LogViewerModal } from '../ui/modals';
+import { LogViewerModal, TaskManagerModal } from '../ui/modals';
 import { RebuildCacheResult } from '../data/cache';
 import { DeviceManager } from '../utils/deviceManager';
 
@@ -437,6 +437,17 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         verifyNotice.hide();
                         new Notice(`Verify error: ${error.message}`);
                     }
+                })
+            );
+
+
+        new Setting(containerEl)
+            .setName('Manage Problem Tasks')
+            .setDesc('View and resolve conflicted, issue, and inactive tasks.')
+            .addButton(button => button
+                .setButtonText('Manage')
+                .onClick(() => {
+                    new TaskManagerModal(this.app, this.plugin).open();
                 })
             );
 

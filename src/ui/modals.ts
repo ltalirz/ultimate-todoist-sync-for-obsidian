@@ -1,4 +1,4 @@
-import { App, Modal, Setting, TextComponent } from "obsidian";
+import { App, Modal, Notice, Setting, TextComponent } from "obsidian";
 import UltimateTodoistSyncForObsidian from "../../main";
 
 
@@ -320,6 +320,379 @@ export class LogViewerModal extends Modal {
                 tid.style.cssText = 'color:var(--text-muted);font-size:11px;white-space:nowrap;flex-shrink:0;';
             }
         }
+    }
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
+    }
+}
+
+
+// ==========================================================================================
+// TaskManagerModal - 问题任务管理器
+// ==========================================================================================
+
+export class TaskManagerModal extends Modal {
+    plugin: UltimateTodoistSyncForObsidian;
+
+    constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
+        super(app);
+        this.plugin = plugin;
+    }
+
+    async onOpen() {
+        const { modalEl } = this;
+        modalEl.style.width = '900px';
+        modalEl.style.maxWidth = '95vw';
+        await this.loadAndRender();
+    }
+
+    private async loadAndRender() {
+        const { contentEl } = this;
+        contentEl.empty();
+        contentEl.createEl('h3', { text: 'Task Manager' });
+
+        const scrollArea = contentEl.createDiv();
+        scrollArea.style.cssText = 'max-height: 70vh; overflow-y: auto;';
+
+        const mapping = this.plugin.settings.taskFileMapping;
+        const conflicted: string[] = [];
+        const issue: string[] = [];
+        const nonActive: string[] = [];
+
+        for (const [taskId, info] of Object.entries(mapping)) {
+            if (info.status === 'conflicted') conflicted.push(taskId);
+            else if (info.status === 'issue') issue.push(taskId);
+            else if (info.status === 'nonActive') nonActive.push(taskId);
+        }
+
+        await this.renderConflictedSection(scrollArea, conflicted);
+        await this.renderIssueSection(scrollArea, issue);
+        await this.renderNonActiveSection(scrollArea, nonActive);
+
+        if (conflicted.length === 0 && issue.length === 0 && nonActive.length === 0) {
+            scrollArea.createEl('p', { text: 'No problem tasks found.' }).style.cssText = 'color: var(--text-muted); text-align: center; margin-top: 40px;';
+        }
+    }
+
+    private async renderConflictedSection(container: HTMLElement, taskIds: string[]) {
+        if (taskIds.length === 0) return;
+
+        const header = container.createEl('h4', { text: `\u26a0\ufe0f Conflicted Tasks (${taskIds.length})` });
+        header.style.cssText = 'margin-top: 16px;';
+
+        for (const taskId of taskIds) {
+            const info = this.plugin.settings.taskFileMapping[taskId];
+            const filePath = info?.filePath || '';
+
+            const card = container.createDiv();
+            card.style.cssText = 'border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 12px; margin-bottom: 12px;';
+
+            // Card header
+            const cardHeader = card.createDiv();
+            cardHeader.style.cssText = 'display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap;';
+            cardHeader.createSpan({ text: `ID: ${taskId}` }).style.cssText = 'font-family: var(--font-monospace); font-size: 12px; color: var(--text-muted);';
+
+            const fileLink = cardHeader.createEl('a', { text: filePath });
+            fileLink.style.cssText = 'color: var(--text-accent); cursor: pointer; font-size: 12px; text-decoration: underline;';
+            fileLink.addEventListener('click', () => this.openFile(filePath));
+
+            // Load data from both sides
+            const line = await this.getTaskLine(taskId, filePath);
+            let obsContent = '', obsStatus = '', obsDue = '', obsTags = '', obsPriority = '';
+            let todContent = '', todStatus = '', todDue = '', todTags = '', todPriority = '';
+
+            if (line) {
+                obsContent = this.plugin.taskParser.getTaskContentFromLineText(line) || '';
+                obsStatus = /\[(x|X)\]/.test(line) ? '\u2611' : '\u2610';
+                obsDue = this.plugin.taskParser.getDueDateFromLineText(line) || '';
+                obsTags = this.plugin.taskParser.getAllTagsFromLineText(line).join(', ');
+                obsPriority = `!!${this.plugin.taskParser.getTaskPriority(line)}`;
+            }
+
+            try {
+                const task = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
+                if (task) {
+                    todContent = task.content || '';
+                    todStatus = task.checked ? '\u2611' : '\u2610';
+                    todDue = task.due?.date || '';
+                    todTags = (task.labels || []).join(', ');
+                    todPriority = `!!${task.priority || 1}`;
+                }
+            } catch (e) {
+                // task may not exist
+            }
+
+            // Diff table
+            const table = card.createEl('table');
+            table.style.cssText = 'width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 10px;';
+
+            const thead = table.createEl('thead');
+            const headerRow = thead.createEl('tr');
+            for (const h of ['Field', 'Obsidian', 'Todoist']) {
+                const th = headerRow.createEl('th', { text: h });
+                th.style.cssText = 'text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--background-modifier-border); color: var(--text-muted); font-weight: 600;';
+            }
+
+            const tbody = table.createEl('tbody');
+            const rows: [string, string, string][] = [
+                ['Content', obsContent, todContent],
+                ['Status', obsStatus, todStatus],
+                ['Due Date', obsDue, todDue],
+                ['Tags', obsTags, todTags],
+                ['Priority', obsPriority, todPriority],
+            ];
+
+            for (const [field, obsVal, todVal] of rows) {
+                const tr = tbody.createEl('tr');
+                const isDiff = obsVal !== todVal;
+                if (isDiff) {
+                    tr.style.cssText = 'background: var(--background-modifier-error-hover); border-radius: 4px;';
+                }
+                const tdField = tr.createEl('td', { text: field });
+                tdField.style.cssText = 'padding: 4px 8px; font-weight: 500; color: var(--text-muted); white-space: nowrap;';
+                const tdObs = tr.createEl('td', { text: obsVal || '\u2014' });
+                tdObs.style.cssText = 'padding: 4px 8px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+                tdObs.title = obsVal;
+                const tdTod = tr.createEl('td', { text: todVal || '\u2014' });
+                tdTod.style.cssText = 'padding: 4px 8px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+                tdTod.title = todVal;
+            }
+
+            // Buttons
+            const btnRow = card.createDiv();
+            btnRow.style.cssText = 'display: flex; gap: 8px;';
+
+            const keepObsBtn = btnRow.createEl('button', { text: 'Keep Obsidian' });
+            keepObsBtn.style.cssText = 'padding: 6px 14px; border-radius: 4px; cursor: pointer; background: var(--interactive-accent); color: var(--text-on-accent); border: none; font-weight: 600;';
+            keepObsBtn.addEventListener('click', async () => {
+                keepObsBtn.disabled = true;
+                await this.resolveConflict(taskId, filePath, 'obsidian');
+            });
+
+            const keepTodBtn = btnRow.createEl('button', { text: 'Keep Todoist' });
+            keepTodBtn.style.cssText = 'padding: 6px 14px; border-radius: 4px; cursor: pointer; background: var(--interactive-normal); color: var(--text-normal); border: 1px solid var(--background-modifier-border);';
+            keepTodBtn.addEventListener('click', async () => {
+                keepTodBtn.disabled = true;
+                await this.resolveConflict(taskId, filePath, 'todoist');
+            });
+        }
+    }
+
+    private async renderIssueSection(container: HTMLElement, taskIds: string[]) {
+        if (taskIds.length === 0) return;
+
+        const header = container.createEl('h4', { text: `\u2757 Issue Tasks (${taskIds.length})` });
+        header.style.cssText = 'margin-top: 16px;';
+
+        const table = container.createEl('table');
+        table.style.cssText = 'width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 12px;';
+
+        const thead = table.createEl('thead');
+        const headerRow = thead.createEl('tr');
+        for (const h of ['Task ID', 'File', 'Content', '']) {
+            const th = headerRow.createEl('th', { text: h });
+            th.style.cssText = 'text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--background-modifier-border); color: var(--text-muted); font-weight: 600;';
+        }
+
+        const tbody = table.createEl('tbody');
+        for (const taskId of taskIds) {
+            const info = this.plugin.settings.taskFileMapping[taskId];
+            const filePath = info?.filePath || '';
+            const line = await this.getTaskLine(taskId, filePath);
+            const preview = line
+                ? (this.plugin.taskParser.getTaskContentFromLineText(line) || line.substring(0, 60))
+                : '(file not found)';
+
+            const tr = tbody.createEl('tr');
+            tr.style.cssText = 'border-bottom: 1px solid var(--background-modifier-border-hover);';
+
+            const tdId = tr.createEl('td', { text: taskId });
+            tdId.style.cssText = 'padding: 4px 8px; font-family: var(--font-monospace); font-size: 11px; color: var(--text-muted); white-space: nowrap;';
+
+            const tdFile = tr.createEl('td');
+            tdFile.style.cssText = 'padding: 4px 8px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+            const fileLink = tdFile.createEl('a', { text: filePath || '\u2014' });
+            fileLink.style.cssText = 'color: var(--text-accent); cursor: pointer; text-decoration: underline;';
+            fileLink.addEventListener('click', () => this.openFile(filePath));
+
+            const tdContent = tr.createEl('td', { text: preview });
+            tdContent.style.cssText = 'padding: 4px 8px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+            tdContent.title = preview;
+
+            const tdBtn = tr.createEl('td');
+            tdBtn.style.cssText = 'padding: 4px 8px; white-space: nowrap;';
+            const delBtn = tdBtn.createEl('button', { text: 'Delete' });
+            delBtn.style.cssText = 'padding: 4px 10px; border-radius: 4px; cursor: pointer; background: var(--background-modifier-error); color: var(--text-on-accent); border: none;';
+            delBtn.addEventListener('click', async () => {
+                delBtn.disabled = true;
+                await this.deleteIssueTask(taskId);
+            });
+        }
+    }
+
+    private async renderNonActiveSection(container: HTMLElement, taskIds: string[]) {
+        if (taskIds.length === 0) return;
+
+        const header = container.createEl('h4', { text: `\ud83d\udccb NonActive Tasks (${taskIds.length})` });
+        header.style.cssText = 'margin-top: 16px; color: var(--text-muted);';
+
+        const table = container.createEl('table');
+        table.style.cssText = 'width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 12px;';
+
+        const thead = table.createEl('thead');
+        const headerRow = thead.createEl('tr');
+        for (const h of ['Task ID', 'File', 'Content']) {
+            const th = headerRow.createEl('th', { text: h });
+            th.style.cssText = 'text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--background-modifier-border); color: var(--text-muted); font-weight: 600;';
+        }
+
+        const tbody = table.createEl('tbody');
+        for (const taskId of taskIds) {
+            const info = this.plugin.settings.taskFileMapping[taskId];
+            const filePath = info?.filePath || '';
+            const line = await this.getTaskLine(taskId, filePath);
+            const preview = line
+                ? (this.plugin.taskParser.getTaskContentFromLineText(line) || line.substring(0, 60))
+                : '(file not found)';
+
+            const tr = tbody.createEl('tr');
+            tr.style.cssText = 'border-bottom: 1px solid var(--background-modifier-border-hover);';
+
+            const tdId = tr.createEl('td', { text: taskId });
+            tdId.style.cssText = 'padding: 4px 8px; font-family: var(--font-monospace); font-size: 11px; color: var(--text-muted); white-space: nowrap;';
+
+            const tdFile = tr.createEl('td');
+            tdFile.style.cssText = 'padding: 4px 8px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+            const fileLink = tdFile.createEl('a', { text: filePath || '\u2014' });
+            fileLink.style.cssText = 'color: var(--text-accent); cursor: pointer; text-decoration: underline;';
+            fileLink.addEventListener('click', () => this.openFile(filePath));
+
+            const tdContent = tr.createEl('td', { text: preview });
+            tdContent.style.cssText = 'padding: 4px 8px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+            tdContent.title = preview;
+        }
+    }
+
+    private async resolveConflict(taskId: string, filePath: string, choice: 'obsidian' | 'todoist') {
+        try {
+            if (choice === 'obsidian') {
+                const line = await this.getTaskLine(taskId, filePath);
+                if (!line) { new Notice('Task line not found in vault'); return; }
+
+                const content = this.plugin.taskParser.getTaskContentFromLineText(line);
+                const labels = this.plugin.taskParser.getAllTagsFromLineText(line);
+                const dueDate = this.plugin.taskParser.getDueDateFromLineText(line);
+                const priority = this.plugin.taskParser.getTaskPriority(line);
+                const isCompleted = /\[(x|X)\]/.test(line);
+
+                const updates: Record<string, unknown> = {};
+                if (content) updates.content = content;
+                if (labels && labels.length > 0) updates.labels = labels;
+                if (dueDate) updates.dueDate = dueDate;
+                else updates.dueString = 'no date';
+                updates.priority = priority;
+                await this.plugin.todoistSyncAPI.UpdateTask(taskId, updates);
+
+                // Sync completion status
+                const savedTask = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
+                const todoistChecked = savedTask?.checked || false;
+                if (isCompleted && !todoistChecked) {
+                    await this.plugin.todoistSyncAPI.CloseTask(taskId);
+                } else if (!isCompleted && todoistChecked) {
+                    await this.plugin.todoistSyncAPI.OpenTask(taskId);
+                }
+
+                // Refresh and update mapping
+                await this.plugin.todoistSyncAPI.incrementalSync();
+                const refreshed = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
+                await this.plugin.cacheOperation.setTaskFileMapping(taskId, filePath, 'active', true);
+                if (refreshed?.updated_at) {
+                    await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, { updated_at: refreshed.updated_at });
+                }
+                this.plugin.saveSettings();
+                new Notice(`Conflict resolved: kept Obsidian version for task ${taskId}`);
+
+            } else {
+                const task = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
+                if (!task) { new Notice('Task not found in Todoist'); return; }
+
+                // Sync content
+                if (task.content) {
+                    await this.plugin.fileOperation.syncTaskContentToFile(taskId, task.content);
+                }
+
+                // Sync due date
+                const todoistDueDate = task.due?.date || '';
+                await this.plugin.fileOperation.syncTaskDueDateToFile(taskId, todoistDueDate);
+
+                // Sync checked status
+                const line = await this.getTaskLine(taskId, filePath);
+                const obsidianChecked = line ? /\[(x|X)\]/.test(line) : false;
+                const todoistChecked = task.checked || false;
+                if (todoistChecked && !obsidianChecked) {
+                    await this.plugin.fileOperation.completeTaskInTheFile(taskId);
+                } else if (!todoistChecked && obsidianChecked) {
+                    await this.plugin.fileOperation.uncompleteTaskInTheFile(taskId);
+                }
+
+                // Update mapping
+                await this.plugin.cacheOperation.setTaskFileMapping(taskId, filePath, 'active', true);
+                await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, { updated_at: task.updated_at });
+                this.plugin.saveSettings();
+                new Notice(`Conflict resolved: kept Todoist version for task ${taskId}`);
+            }
+        } catch (e) {
+            console.error(`[TaskManagerModal] resolveConflict error:`, e);
+            new Notice(`Error resolving conflict: ${e}`);
+        }
+        await this.loadAndRender();
+    }
+
+    private async deleteIssueTask(taskId: string) {
+        try {
+            // Try API delete (ignore errors — task likely already gone)
+            try {
+                await this.plugin.todoistSyncAPI.deleteTask(taskId);
+            } catch (e) {
+                // ignore — task probably doesn't exist in Todoist
+            }
+
+            // Unbind from vault file
+            await this.plugin.fileOperation.unbindTaskInFile(taskId);
+
+            // Remove mapping
+            await this.plugin.cacheOperation.deleteTaskFileMapping(taskId);
+            this.plugin.saveSettings();
+            new Notice(`Issue task ${taskId} deleted`);
+        } catch (e) {
+            console.error(`[TaskManagerModal] deleteIssueTask error:`, e);
+            new Notice(`Error deleting task: ${e}`);
+        }
+        await this.loadAndRender();
+    }
+
+    private openFile(filePath: string) {
+        const file = this.app.vault.getAbstractFileByPath(filePath);
+        if (file) {
+            this.app.workspace.getLeaf(false).openFile(file as any);
+        }
+    }
+
+    private async getTaskLine(taskId: string, filePath: string): Promise<string | null> {
+        try {
+            const file = this.app.vault.getAbstractFileByPath(filePath);
+            if (!file) return null;
+            const content = await this.app.vault.read(file as any);
+            const lines = content.split('\n');
+            for (const line of lines) {
+                if (line.includes(taskId)) return line;
+            }
+        } catch (e) {
+            // file may not exist
+        }
+        return null;
     }
 
     onClose() {
