@@ -36,7 +36,12 @@ export class TodoistSyncAPI   {
 	};
 
 	// Store complete raw API response
+	// Store complete raw API response
 	private syncData: Record<string, any> | null = null;
+	// API-level sync lock — prevents concurrent incrementalSync/initializeSync
+	private _syncRunning = false;
+	private _syncDirty = false;
+	private _syncWaiters: Array<{ resolve: () => void; reject: (err: any) => void }> = [];
 
 	constructor(app:App, plugin:UltimateTodoistSyncForObsidian) {
 		//super(app,settings);
@@ -96,30 +101,60 @@ export class TodoistSyncAPI   {
 	}
 
 	async initializeSync(): Promise<void> {
-		// Fetch fresh data (full sync) — no need to pre-load stale cache
-		const data = await this.getAllResources(true);
-		this.syncData = data;
-		
-		// Save to cache
-		await this.plugin.safeSettings?.update({ syncDataCache: data }, true);
-		this.plugin.debugLog('[TodoistSyncAPI] Sync initialized with full data and cached');
+		// Route through incrementalSync lock so concurrent callers wait
+		if (this._syncRunning) {
+			return new Promise<void>((resolve, reject) => {
+				this._syncDirty = true;
+				this._syncWaiters.push({ resolve, reject });
+			});
+		}
+		this._syncRunning = true;
+		this._syncDirty = false;
+		const waiters = this._syncWaiters.splice(0);
+		try {
+			const data = await this.getAllResources(true);
+			this.syncData = data;
+			await this.plugin.safeSettings?.update({ syncDataCache: data }, true);
+			this.plugin.debugLog('[TodoistSyncAPI] Sync initialized with full data and cached');
+			waiters.forEach(w => w.resolve());
+		} catch (error) {
+			waiters.forEach(w => w.reject(error));
+			throw error;
+		} finally {
+			this._syncRunning = false;
+		}
 	}
-
 	async incrementalSync(): Promise<void> {
 		if (!this.syncData) {
 			await this.initializeSync();
 			return;
 		}
 
+		// If a sync is already running, mark dirty and wait for it to finish
+		if (this._syncRunning) {
+			return new Promise<void>((resolve, reject) => {
+				this._syncDirty = true;
+				this._syncWaiters.push({ resolve, reject });
+			});
+		}
+
+		this._syncRunning = true;
+		this._syncDirty = false;
+		const waiters = this._syncWaiters.splice(0);
 		try {
-			const changes = await this.getAllResources(false);
-			this.mergeSyncData(changes);
-			
-			// Save updated syncData to cache
-			await this.plugin.safeSettings?.update({ syncDataCache: this.syncData }, true);
-			this.plugin.debugLog('[TodoistSyncAPI] Incremental sync completed and cached');
+			do {
+				this._syncDirty = false;
+				const changes = await this.getAllResources(false);
+				this.mergeSyncData(changes);
+				await this.plugin.safeSettings?.update({ syncDataCache: this.syncData }, true);
+				this.plugin.debugLog('[TodoistSyncAPI] Incremental sync completed and cached');
+			} while (this._syncDirty);
+			waiters.forEach(w => w.resolve());
 		} catch (error) {
 			console.error('[TodoistSyncAPI] Incremental sync failed:', error);
+			waiters.forEach(w => w.reject(error));
+		} finally {
+			this._syncRunning = false;
 		}
 	}
 
@@ -585,7 +620,7 @@ export class TodoistSyncAPI   {
 
 		this.rateLimitState.partialSyncCount++;
 
-		this.incrementalSync().catch(err => console.error('[TodoistSyncAPI] Background incremental sync failed:', err));
+
 
       return data;
     } catch (error: any) {
