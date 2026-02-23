@@ -145,6 +145,15 @@ export class TodoistSyncAPI   {
 			do {
 				this._syncDirty = false;
 				const changes = await this.getAllResources(false);
+				// Detect sync_token expiration: if Todoist returns full_sync=true,
+				// the token was expired/invalid. Fall back to full sync.
+				if (changes.full_sync === true) {
+					console.warn('[TodoistSyncAPI] sync_token expired, falling back to full sync');
+					this.syncData = changes;
+					await this.plugin.safeSettings?.update({ syncDataCache: this.syncData }, true);
+					this.plugin.debugLog('[TodoistSyncAPI] Full sync fallback completed');
+					break;
+				}
 				this.mergeSyncData(changes);
 				await this.plugin.safeSettings?.update({ syncDataCache: this.syncData }, true);
 				this.plugin.debugLog('[TodoistSyncAPI] Incremental sync completed and cached');
