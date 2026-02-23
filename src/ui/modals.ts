@@ -335,74 +335,71 @@ export class LogViewerModal extends Modal {
 
 export class TaskManagerModal extends Modal {
     plugin: UltimateTodoistSyncForObsidian;
-
     constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
         super(app);
         this.plugin = plugin;
     }
-
     async onOpen() {
         const { modalEl } = this;
-        modalEl.style.width = '900px';
-        modalEl.style.maxWidth = '95vw';
+        modalEl.addClass('task-manager-modal');
         await this.loadAndRender();
     }
-
     private async loadAndRender() {
         const { contentEl } = this;
         contentEl.empty();
-        contentEl.createEl('h3', { text: 'Task Manager' });
-
-        const scrollArea = contentEl.createDiv();
-        scrollArea.style.cssText = 'max-height: 70vh; overflow-y: auto;';
-
         const mapping = this.plugin.settings.taskFileMapping;
         const conflicted: string[] = [];
         const issue: string[] = [];
         const nonActive: string[] = [];
-
         for (const [taskId, info] of Object.entries(mapping)) {
             if (info.status === 'conflicted') conflicted.push(taskId);
             else if (info.status === 'issue') issue.push(taskId);
             else if (info.status === 'nonActive') nonActive.push(taskId);
         }
-
+        // Header with summary badges
+        const header = contentEl.createDiv({ cls: 'tm-header' });
+        header.createEl('h3', { text: 'Task Manager' });
+        const summary = header.createDiv({ cls: 'tm-summary' });
+        if (conflicted.length > 0) {
+            summary.createSpan({ cls: 'tm-badge tm-badge--conflict', text: `\u26a0\ufe0f ${conflicted.length} conflicted` });
+        }
+        if (issue.length > 0) {
+            summary.createSpan({ cls: 'tm-badge tm-badge--issue', text: `\u2757 ${issue.length} issue` });
+        }
+        if (nonActive.length > 0) {
+            summary.createSpan({ cls: 'tm-badge tm-badge--nonactive', text: `${nonActive.length} inactive` });
+        }
+        const scrollArea = contentEl.createDiv({ cls: 'tm-scroll' });
+        if (conflicted.length === 0 && issue.length === 0 && nonActive.length === 0) {
+            const empty = scrollArea.createDiv({ cls: 'tm-empty' });
+            empty.createSpan({ cls: 'tm-empty-icon', text: '\u2705' });
+            empty.createSpan({ cls: 'tm-empty-text', text: 'No problem tasks found. Everything is in sync.' });
+            return;
+        }
         await this.renderConflictedSection(scrollArea, conflicted);
         await this.renderIssueSection(scrollArea, issue);
         await this.renderNonActiveSection(scrollArea, nonActive);
-
-        if (conflicted.length === 0 && issue.length === 0 && nonActive.length === 0) {
-            scrollArea.createEl('p', { text: 'No problem tasks found.' }).style.cssText = 'color: var(--text-muted); text-align: center; margin-top: 40px;';
-        }
     }
-
     private async renderConflictedSection(container: HTMLElement, taskIds: string[]) {
         if (taskIds.length === 0) return;
-
-        const header = container.createEl('h4', { text: `\u26a0\ufe0f Conflicted Tasks (${taskIds.length})` });
-        header.style.cssText = 'margin-top: 16px;';
-
+        const section = container.createDiv({ cls: 'tm-section' });
+        const sectionHeader = section.createDiv({ cls: 'tm-section-header' });
+        sectionHeader.createSpan({ cls: 'tm-section-icon', text: '\u26a0\ufe0f' });
+        sectionHeader.createEl('h4', { cls: 'tm-section-title', text: 'Conflicted Tasks' });
+        sectionHeader.createSpan({ cls: 'tm-section-count', text: `(${taskIds.length})` });
         for (const taskId of taskIds) {
             const info = this.plugin.settings.taskFileMapping[taskId];
             const filePath = info?.filePath || '';
-
-            const card = container.createDiv();
-            card.style.cssText = 'border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 12px; margin-bottom: 12px;';
-
+            const card = section.createDiv({ cls: 'tm-card' });
             // Card header
-            const cardHeader = card.createDiv();
-            cardHeader.style.cssText = 'display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap;';
-            cardHeader.createSpan({ text: `ID: ${taskId}` }).style.cssText = 'font-family: var(--font-monospace); font-size: 12px; color: var(--text-muted);';
-
-            const fileLink = cardHeader.createEl('a', { text: filePath });
-            fileLink.style.cssText = 'color: var(--text-accent); cursor: pointer; font-size: 12px; text-decoration: underline;';
+            const cardHeader = card.createDiv({ cls: 'tm-card-header' });
+            cardHeader.createSpan({ cls: 'tm-task-id', text: taskId });
+            const fileLink = cardHeader.createEl('a', { cls: 'tm-file-link', text: filePath });
             fileLink.addEventListener('click', () => this.openFile(filePath));
-
             // Load data from both sides
             const line = await this.getTaskLine(taskId, filePath);
             let obsContent = '', obsStatus = '', obsDue = '', obsTags = '', obsPriority = '';
             let todContent = '', todStatus = '', todDue = '', todTags = '', todPriority = '';
-
             if (line) {
                 obsContent = this.plugin.taskParser.getTaskContentFromLineText(line) || '';
                 obsStatus = /\[(x|X)\]/.test(line) ? '\u2611' : '\u2610';
@@ -410,7 +407,6 @@ export class TaskManagerModal extends Modal {
                 obsTags = this.plugin.taskParser.getAllTagsFromLineText(line).join(', ');
                 obsPriority = `!!${this.plugin.taskParser.getTaskPriority(line)}`;
             }
-
             try {
                 const task = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
                 if (task) {
@@ -423,18 +419,14 @@ export class TaskManagerModal extends Modal {
             } catch (e) {
                 // task may not exist
             }
-
             // Diff table
-            const table = card.createEl('table');
-            table.style.cssText = 'width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 10px;';
-
+            const table = card.createEl('table', { cls: 'tm-diff' });
             const thead = table.createEl('thead');
             const headerRow = thead.createEl('tr');
-            for (const h of ['Field', 'Obsidian', 'Todoist']) {
-                const th = headerRow.createEl('th', { text: h });
-                th.style.cssText = 'text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--background-modifier-border); color: var(--text-muted); font-weight: 600;';
-            }
-
+            headerRow.createEl('th', { text: 'Field' });
+            headerRow.createEl('th', { text: '' });
+            headerRow.createEl('th', { text: 'Obsidian' });
+            headerRow.createEl('th', { text: 'Todoist' });
             const tbody = table.createEl('tbody');
             const rows: [string, string, string][] = [
                 ['Content', obsContent, todContent],
@@ -443,59 +435,53 @@ export class TaskManagerModal extends Modal {
                 ['Tags', obsTags, todTags],
                 ['Priority', obsPriority, todPriority],
             ];
-
             for (const [field, obsVal, todVal] of rows) {
-                const tr = tbody.createEl('tr');
                 const isDiff = obsVal !== todVal;
+                const tr = tbody.createEl('tr');
+                if (isDiff) tr.addClass('tm-diff-changed');
+                tr.createEl('td', { cls: 'tm-diff-field', text: field });
+                // Change marker
+                const marker = tr.createEl('td', { cls: 'tm-diff-marker' });
                 if (isDiff) {
-                    tr.style.cssText = 'background: var(--background-modifier-error-hover); border-radius: 4px;';
+                    marker.addClass('tm-diff-marker--changed');
+                    marker.textContent = '\u25cf';
                 }
-                const tdField = tr.createEl('td', { text: field });
-                tdField.style.cssText = 'padding: 4px 8px; font-weight: 500; color: var(--text-muted); white-space: nowrap;';
-                const tdObs = tr.createEl('td', { text: obsVal || '\u2014' });
-                tdObs.style.cssText = 'padding: 4px 8px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+                const tdObs = tr.createEl('td');
+                tdObs.addClass(obsVal ? 'tm-diff-val' : 'tm-diff-val tm-diff-val--empty');
+                tdObs.textContent = obsVal || '\u2014';
                 tdObs.title = obsVal;
-                const tdTod = tr.createEl('td', { text: todVal || '\u2014' });
-                tdTod.style.cssText = 'padding: 4px 8px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+                const tdTod = tr.createEl('td');
+                tdTod.addClass(todVal ? 'tm-diff-val' : 'tm-diff-val tm-diff-val--empty');
+                tdTod.textContent = todVal || '\u2014';
                 tdTod.title = todVal;
             }
-
-            // Buttons
-            const btnRow = card.createDiv();
-            btnRow.style.cssText = 'display: flex; gap: 8px;';
-
-            const keepObsBtn = btnRow.createEl('button', { text: 'Keep Obsidian' });
-            keepObsBtn.style.cssText = 'padding: 6px 14px; border-radius: 4px; cursor: pointer; background: var(--interactive-accent); color: var(--text-on-accent); border: none; font-weight: 600;';
+            // Action buttons
+            const actions = card.createDiv({ cls: 'tm-card-actions' });
+            const keepObsBtn = actions.createEl('button', { cls: 'tm-btn tm-btn--primary', text: 'Keep Obsidian' });
             keepObsBtn.addEventListener('click', async () => {
                 keepObsBtn.disabled = true;
                 await this.resolveConflict(taskId, filePath, 'obsidian');
             });
-
-            const keepTodBtn = btnRow.createEl('button', { text: 'Keep Todoist' });
-            keepTodBtn.style.cssText = 'padding: 6px 14px; border-radius: 4px; cursor: pointer; background: var(--interactive-normal); color: var(--text-normal); border: 1px solid var(--background-modifier-border);';
+            const keepTodBtn = actions.createEl('button', { cls: 'tm-btn tm-btn--secondary', text: 'Keep Todoist' });
             keepTodBtn.addEventListener('click', async () => {
                 keepTodBtn.disabled = true;
                 await this.resolveConflict(taskId, filePath, 'todoist');
             });
         }
     }
-
     private async renderIssueSection(container: HTMLElement, taskIds: string[]) {
         if (taskIds.length === 0) return;
-
-        const header = container.createEl('h4', { text: `\u2757 Issue Tasks (${taskIds.length})` });
-        header.style.cssText = 'margin-top: 16px;';
-
-        const table = container.createEl('table');
-        table.style.cssText = 'width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 12px;';
-
+        const section = container.createDiv({ cls: 'tm-section' });
+        const sectionHeader = section.createDiv({ cls: 'tm-section-header' });
+        sectionHeader.createSpan({ cls: 'tm-section-icon', text: '\u2757' });
+        sectionHeader.createEl('h4', { cls: 'tm-section-title', text: 'Issue Tasks' });
+        sectionHeader.createSpan({ cls: 'tm-section-count', text: `(${taskIds.length})` });
+        const table = section.createEl('table', { cls: 'tm-table' });
         const thead = table.createEl('thead');
         const headerRow = thead.createEl('tr');
         for (const h of ['Task ID', 'File', 'Content', '']) {
-            const th = headerRow.createEl('th', { text: h });
-            th.style.cssText = 'text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--background-modifier-border); color: var(--text-muted); font-weight: 600;';
+            headerRow.createEl('th', { text: h });
         }
-
         const tbody = table.createEl('tbody');
         for (const taskId of taskIds) {
             const info = this.plugin.settings.taskFileMapping[taskId];
@@ -504,50 +490,35 @@ export class TaskManagerModal extends Modal {
             const preview = line
                 ? (this.plugin.taskParser.getTaskContentFromLineText(line) || line.substring(0, 60))
                 : '(file not found)';
-
             const tr = tbody.createEl('tr');
-            tr.style.cssText = 'border-bottom: 1px solid var(--background-modifier-border-hover);';
-
-            const tdId = tr.createEl('td', { text: taskId });
-            tdId.style.cssText = 'padding: 4px 8px; font-family: var(--font-monospace); font-size: 11px; color: var(--text-muted); white-space: nowrap;';
-
+            tr.createEl('td').createSpan({ cls: 'tm-task-id', text: taskId });
             const tdFile = tr.createEl('td');
-            tdFile.style.cssText = 'padding: 4px 8px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
-            const fileLink = tdFile.createEl('a', { text: filePath || '\u2014' });
-            fileLink.style.cssText = 'color: var(--text-accent); cursor: pointer; text-decoration: underline;';
+            const fileLink = tdFile.createEl('a', { cls: 'tm-file-link', text: filePath || '\u2014' });
             fileLink.addEventListener('click', () => this.openFile(filePath));
-
-            const tdContent = tr.createEl('td', { text: preview });
-            tdContent.style.cssText = 'padding: 4px 8px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
-            tdContent.title = preview;
-
+            const tdContent = tr.createEl('td');
+            const contentSpan = tdContent.createSpan({ cls: 'tm-content-preview', text: preview });
+            contentSpan.title = preview;
             const tdBtn = tr.createEl('td');
-            tdBtn.style.cssText = 'padding: 4px 8px; white-space: nowrap;';
-            const delBtn = tdBtn.createEl('button', { text: 'Delete' });
-            delBtn.style.cssText = 'padding: 4px 10px; border-radius: 4px; cursor: pointer; background: var(--background-modifier-error); color: var(--text-on-accent); border: none;';
+            const delBtn = tdBtn.createEl('button', { cls: 'tm-btn tm-btn--danger', text: 'Delete' });
             delBtn.addEventListener('click', async () => {
                 delBtn.disabled = true;
                 await this.deleteIssueTask(taskId);
             });
         }
     }
-
     private async renderNonActiveSection(container: HTMLElement, taskIds: string[]) {
         if (taskIds.length === 0) return;
-
-        const header = container.createEl('h4', { text: `\ud83d\udccb NonActive Tasks (${taskIds.length})` });
-        header.style.cssText = 'margin-top: 16px; color: var(--text-muted);';
-
-        const table = container.createEl('table');
-        table.style.cssText = 'width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 12px;';
-
+        const section = container.createDiv({ cls: 'tm-section' });
+        const sectionHeader = section.createDiv({ cls: 'tm-section-header' });
+        sectionHeader.createSpan({ cls: 'tm-section-icon', text: '\ud83d\udccb' });
+        sectionHeader.createEl('h4', { cls: 'tm-section-title', text: 'Inactive Tasks' });
+        sectionHeader.createSpan({ cls: 'tm-section-count', text: `(${taskIds.length})` });
+        const table = section.createEl('table', { cls: 'tm-table' });
         const thead = table.createEl('thead');
         const headerRow = thead.createEl('tr');
         for (const h of ['Task ID', 'File', 'Content']) {
-            const th = headerRow.createEl('th', { text: h });
-            th.style.cssText = 'text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--background-modifier-border); color: var(--text-muted); font-weight: 600;';
+            headerRow.createEl('th', { text: h });
         }
-
         const tbody = table.createEl('tbody');
         for (const taskId of taskIds) {
             const info = this.plugin.settings.taskFileMapping[taskId];
@@ -556,37 +527,26 @@ export class TaskManagerModal extends Modal {
             const preview = line
                 ? (this.plugin.taskParser.getTaskContentFromLineText(line) || line.substring(0, 60))
                 : '(file not found)';
-
             const tr = tbody.createEl('tr');
-            tr.style.cssText = 'border-bottom: 1px solid var(--background-modifier-border-hover);';
-
-            const tdId = tr.createEl('td', { text: taskId });
-            tdId.style.cssText = 'padding: 4px 8px; font-family: var(--font-monospace); font-size: 11px; color: var(--text-muted); white-space: nowrap;';
-
+            tr.createEl('td').createSpan({ cls: 'tm-task-id', text: taskId });
             const tdFile = tr.createEl('td');
-            tdFile.style.cssText = 'padding: 4px 8px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
-            const fileLink = tdFile.createEl('a', { text: filePath || '\u2014' });
-            fileLink.style.cssText = 'color: var(--text-accent); cursor: pointer; text-decoration: underline;';
+            const fileLink = tdFile.createEl('a', { cls: 'tm-file-link', text: filePath || '\u2014' });
             fileLink.addEventListener('click', () => this.openFile(filePath));
-
-            const tdContent = tr.createEl('td', { text: preview });
-            tdContent.style.cssText = 'padding: 4px 8px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
-            tdContent.title = preview;
+            const tdContent = tr.createEl('td');
+            const contentSpan = tdContent.createSpan({ cls: 'tm-content-preview', text: preview });
+            contentSpan.title = preview;
         }
     }
-
     private async resolveConflict(taskId: string, filePath: string, choice: 'obsidian' | 'todoist') {
         try {
             if (choice === 'obsidian') {
                 const line = await this.getTaskLine(taskId, filePath);
                 if (!line) { new Notice('Task line not found in vault'); return; }
-
                 const content = this.plugin.taskParser.getTaskContentFromLineText(line);
                 const labels = this.plugin.taskParser.getAllTagsFromLineText(line);
                 const dueDate = this.plugin.taskParser.getDueDateFromLineText(line);
                 const priority = this.plugin.taskParser.getTaskPriority(line);
                 const isCompleted = /\[(x|X)\]/.test(line);
-
                 const updates: Record<string, unknown> = {};
                 if (content) updates.content = content;
                 if (labels && labels.length > 0) updates.labels = labels;
@@ -594,8 +554,6 @@ export class TaskManagerModal extends Modal {
                 else updates.dueString = 'no date';
                 updates.priority = priority;
                 await this.plugin.todoistSyncAPI.UpdateTask(taskId, updates);
-
-                // Sync completion status
                 const savedTask = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
                 const todoistChecked = savedTask?.checked || false;
                 if (isCompleted && !todoistChecked) {
@@ -603,8 +561,6 @@ export class TaskManagerModal extends Modal {
                 } else if (!isCompleted && todoistChecked) {
                     await this.plugin.todoistSyncAPI.OpenTask(taskId);
                 }
-
-                // Refresh and update mapping
                 await this.plugin.todoistSyncAPI.incrementalSync();
                 const refreshed = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
                 await this.plugin.cacheOperation.setTaskFileMapping(taskId, filePath, 'active', true);
@@ -612,22 +568,15 @@ export class TaskManagerModal extends Modal {
                     await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, { updated_at: refreshed.updated_at });
                 }
                 this.plugin.saveSettings();
-                new Notice(`Conflict resolved: kept Obsidian version for task ${taskId}`);
-
+                new Notice(`Conflict resolved: kept Obsidian version`);
             } else {
                 const task = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
                 if (!task) { new Notice('Task not found in Todoist'); return; }
-
-                // Sync content
                 if (task.content) {
                     await this.plugin.fileOperation.syncTaskContentToFile(taskId, task.content);
                 }
-
-                // Sync due date
                 const todoistDueDate = task.due?.date || '';
                 await this.plugin.fileOperation.syncTaskDueDateToFile(taskId, todoistDueDate);
-
-                // Sync checked status
                 const line = await this.getTaskLine(taskId, filePath);
                 const obsidianChecked = line ? /\[(x|X)\]/.test(line) : false;
                 const todoistChecked = task.checked || false;
@@ -636,12 +585,10 @@ export class TaskManagerModal extends Modal {
                 } else if (!todoistChecked && obsidianChecked) {
                     await this.plugin.fileOperation.uncompleteTaskInTheFile(taskId);
                 }
-
-                // Update mapping
                 await this.plugin.cacheOperation.setTaskFileMapping(taskId, filePath, 'active', true);
                 await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, { updated_at: task.updated_at });
                 this.plugin.saveSettings();
-                new Notice(`Conflict resolved: kept Todoist version for task ${taskId}`);
+                new Notice(`Conflict resolved: kept Todoist version`);
             }
         } catch (e) {
             console.error(`[TaskManagerModal] resolveConflict error:`, e);
@@ -649,37 +596,29 @@ export class TaskManagerModal extends Modal {
         }
         await this.loadAndRender();
     }
-
     private async deleteIssueTask(taskId: string) {
         try {
-            // Try API delete (ignore errors — task likely already gone)
             try {
                 await this.plugin.todoistSyncAPI.deleteTask(taskId);
             } catch (e) {
                 // ignore — task probably doesn't exist in Todoist
             }
-
-            // Unbind from vault file
             await this.plugin.fileOperation.unbindTaskInFile(taskId);
-
-            // Remove mapping
             await this.plugin.cacheOperation.deleteTaskFileMapping(taskId);
             this.plugin.saveSettings();
-            new Notice(`Issue task ${taskId} deleted`);
+            new Notice(`Issue task deleted`);
         } catch (e) {
             console.error(`[TaskManagerModal] deleteIssueTask error:`, e);
             new Notice(`Error deleting task: ${e}`);
         }
         await this.loadAndRender();
     }
-
     private openFile(filePath: string) {
         const file = this.app.vault.getAbstractFileByPath(filePath);
         if (file) {
             this.app.workspace.getLeaf(false).openFile(file as any);
         }
     }
-
     private async getTaskLine(taskId: string, filePath: string): Promise<string | null> {
         try {
             const file = this.app.vault.getAbstractFileByPath(filePath);
@@ -694,7 +633,6 @@ export class TaskManagerModal extends Modal {
         }
         return null;
     }
-
     onClose() {
         const { contentEl } = this;
         contentEl.empty();
