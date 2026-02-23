@@ -786,6 +786,11 @@ export class TodoistSyncAPI   {
     }
   }
 
+  // Local-only lookup: no network requests, returns undefined if not found
+  getTaskByIdLocal(taskId: string): any {
+    return this.syncData?.items?.find((t: any) => t.id === taskId);
+  }
+
   // Compatible wrapper: GetActiveTasks
   async GetActiveTasks(options?: {
     projectId?: string;
