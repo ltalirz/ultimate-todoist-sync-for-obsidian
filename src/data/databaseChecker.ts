@@ -37,7 +37,6 @@ export interface DatabaseCheckIssue {
         | 'priority_mismatch'        // 优先级不一致
         | 'label_mismatch'          // 标签不一致
         | 'project_mismatch'         // 项目不一致
-        | 'line_number_mismatch'     // 行号不一致
         | 'duplicate_task';          // 重复任务（同一文件多行同一任务）
     
     // 基本信息
@@ -68,10 +67,6 @@ export interface DatabaseCheckIssue {
     obsidianProjectId?: string;    // Obsidian 中的项目 ID
     todoistProjectId?: string;     // Todoist 中的项目 ID
     projectName?: string;           // 项目名称
-    
-    // 行号相关
-    obsidianLineNumber?: number;   // Obsidian 中的行号
-    mappingLineNumber?: number;    // taskFileMapping 中记录的行号
     
     // 标签相关
     labels?: string[];              // 标签（通用）
@@ -135,7 +130,6 @@ export interface DatabaseCheckResult {
         priorityMismatch: number;            // 优先级不一致
         labelMismatch: number;               // 标签不一致
         projectMismatch: number;            // 项目不一致
-        lineNumberMismatch: number;         // 行号不一致
         duplicateTask: number;              // 重复任务
     };
     reportPath?: string;             // 生成的报告文件路径
@@ -206,7 +200,6 @@ export class DatabaseChecker {
             priorityMismatch: 0,              // 优先级不一致
             labelMismatch: 0,                 // 标签不一致
             projectMismatch: 0,               // 项目不一致
-            lineNumberMismatch: 0,            // 行号不一致
             duplicateTask: 0                  // 重复任务
         };
 
@@ -385,7 +378,6 @@ export class DatabaseChecker {
             priorityMismatch: 0,
             labelMismatch: 0,
             projectMismatch: 0,
-            lineNumberMismatch: 0,
             duplicateTask: 0
         };
 
@@ -420,20 +412,6 @@ export class DatabaseChecker {
 
                 if (inTodoist) {
                     // 情况 1: Vault ✅ + Mapping ✅ + Todoist ✅ → 检查一致性
-                    // ---- 检查行号一致性 ----
-                    if (vaultTask!.lineNumber !== mapping.lineNumber) {
-                        issues.push({
-                            type: 'line_number_mismatch',
-                            filePath: vaultTask!.filePath,
-                            taskId,
-                            lineNumber: vaultTask!.lineNumber,
-                            obsidianLineNumber: vaultTask!.lineNumber,
-                            mappingLineNumber: mapping.lineNumber,
-                            details: `Line number mismatch: Vault line ${vaultTask!.lineNumber + 1}, Mapping line ${mapping.lineNumber + 1}`
-                        });
-                        summary.lineNumberMismatch++;
-                    }
-
                     // ---- 检查内容一致性 ----
                     if (vaultTask!.content.trim() !== todoistTask!.content.trim()) {
                         issues.push({
@@ -690,7 +668,7 @@ export class DatabaseChecker {
         const totalVaultWithMappingTasks = step1.vaultWithMapping;
         const issuesInVaultWithMapping = result.summary.contentMismatch + result.summary.statusMismatch + 
             result.summary.priorityMismatch + result.summary.labelMismatch + 
-            result.summary.projectMismatch + result.summary.lineNumberMismatch;
+            result.summary.projectMismatch;
         const c1 = totalVaultWithMappingTasks - issuesInVaultWithMapping; // 一致的任务
         
         const c2 = taskDeletedInTodoist + taskNonActive + taskIssue; // Vault ✅ + Mapping ✅ + Todoist ❌
@@ -795,7 +773,6 @@ Generated: ${new Date().toLocaleString()}
                 'priority_mismatch': 'Priority Mismatch',
                 'label_mismatch': 'Label Mismatch',
                 'project_mismatch': 'Project Mismatch',
-                'line_number_mismatch': 'Line Number Mismatch',
                 'duplicate_task': 'Duplicate Task'
             };
 
@@ -913,18 +890,6 @@ Generated: ${new Date().toLocaleString()}
                     markdown += '\n';
                 }
 
-                // 为行号不一致问题添加详细对比
-                if (type === 'line_number_mismatch') {
-                    markdown += `#### Line Number Details\n\n`;
-                    for (let i = 0; i < Math.min(issues.length, 10); i++) {
-                        const issue = issues[i];
-                        markdown += `- **\`${issue.taskId}\`**: Vault line **${(issue.obsidianLineNumber || 0) + 1}**, Mapping line **${(issue.mappingLineNumber || 0) + 1}**\n`;
-                    }
-                    if (issues.length > 10) {
-                        markdown += `*... and ${issues.length - 10} more*\n`;
-                    }
-                    markdown += '\n';
-                }
             }
         }
 

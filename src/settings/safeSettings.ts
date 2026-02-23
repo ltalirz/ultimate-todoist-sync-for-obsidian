@@ -152,13 +152,7 @@ export class SafeSettings {
 		if (!mapping) return;
 		let fixed = 0;
 		for (const [taskId, entry] of Object.entries(mapping)) {
-			if (typeof entry.lineNumber !== 'number') {
-				console.warn(`[Settings] taskFileMapping[${taskId}].lineNumber is "${entry.lineNumber}" (${typeof entry.lineNumber}), resetting to 0`);
-				entry.lineNumber = 0;
-				entry.status = 'issue';
-				entry.syncEnabled = false;
-				fixed++;
-			}
+
 		}
 		if (fixed > 0) this.plugin.debugLog(`[Settings] Sanitized ${fixed} corrupted taskFileMapping entry(s)`);
 	}

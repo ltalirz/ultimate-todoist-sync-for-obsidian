@@ -45,7 +45,7 @@
 
 import { App, TFile} from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../../main";
-import { TaskConflict, ConflictResolution, ConflictResolutionModal } from '../ui/modals';
+import { TaskConflict } from '../ui/modals';
 
 export interface RebuildCacheResult {
     success: boolean;
@@ -1005,51 +1005,6 @@ export class CacheOperation   {
     // 
     // ==========================================================================================
 
-    /**
-     * 解决冲突
-     * @param resolutions - 用户选择的解决方式映射
-     * @param conflicts - 冲突列表
-     */
-    private async resolveConflicts(resolutions: Map<string, ConflictResolution>, conflicts: TaskConflict[]): Promise<void> {
-        for (const conflict of conflicts) {
-            const resolution = resolutions.get(conflict.taskId);
-            
-            if (resolution === 'obsidian') {
-                // 用 Obsidian 内容更新 Todoist
-                try {
-                    await this.plugin.todoistSyncAPI.UpdateTask(conflict.taskId, {
-                        content: conflict.obsidianContent
-                    });
-                    this.plugin.logOperation?.log('TODOIST_TASK_UPDATED', `Updated task ${conflict.taskId} with Obsidian content`, conflict.filePath, conflict.taskId);
-                } catch (error) {
-                    console.error(`Failed to update task ${conflict.taskId}:`, error);
-                }
-            } else if (resolution === 'todoist') {
-                // 用 Todoist 内容更新 Obsidian 文件
-                try {
-                    const file = this.app.vault.getAbstractFileByPath(conflict.filePath);
-                    if (file instanceof TFile) {
-                        const content = await this.app.vault.read(file);
-                        const lines = content.split('\n');
-                        
-                        // 找到对应行并替换内容
-                        if (lines[conflict.lineNumber]) {
-                            const oldContent = this.plugin.taskParser.getTaskContentFromLineText(lines[conflict.lineNumber]);
-                            lines[conflict.lineNumber] = lines[conflict.lineNumber].replace(
-                                oldContent,
-                                conflict.todoistContent
-                            );
-                            await this.plugin.backupOperation?.backupFile(conflict.filePath);
-                            await this.app.vault.modify(file, lines.join('\n'));
-                            this.plugin.logOperation?.log('FILE_TASK_CONTENT_SYNCED', `Synced task ${conflict.taskId} from Todoist to file`, conflict.filePath, conflict.taskId);
-                        }
-                    }
-                } catch (error) {
-                    console.error(`Failed to update file ${conflict.filePath}:`, error);
-                }
-            }
-            // 如果是 skip，则不做任何操作
-        }
-    }
+
 
 }

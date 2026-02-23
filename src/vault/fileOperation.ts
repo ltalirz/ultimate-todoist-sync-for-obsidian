@@ -496,17 +496,7 @@ export class FileOperation   {
         }
     }
 
-    //get line text from file path
-    //请使用 view.editor.getLine，read 方法有延迟
-    async getLineTextFromFilePath(filepath:string,lineNumber:string) {
 
-        const file = this.app.vault.getAbstractFileByPath(filepath)
-        const content = await this.app.vault.read(file)
-    
-        const lines = content.split('\n')
-        return(lines[lineNumber])
-    }
-  
     //search todoist_id by content
     async searchTodoistIdFromFilePath(filepath: string, searchTerm: string): Promise<string | null> {
         const file = this.app.vault.getAbstractFileByPath(filepath)
