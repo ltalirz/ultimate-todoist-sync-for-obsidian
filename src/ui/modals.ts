@@ -415,6 +415,30 @@ export class TaskManagerModal extends Modal {
         sectionHeader.createSpan({ cls: 'tm-section-icon', text: '\u26a0\ufe0f' });
         sectionHeader.createEl('h4', { cls: 'tm-section-title', text: 'Conflicted Tasks' });
         sectionHeader.createSpan({ cls: 'tm-section-count', text: `(${taskIds.length})` });
+        // Bulk operations bar
+        const bulkBar = section.createDiv({ cls: 'tm-bulk-bar' });
+        const bulkObsBtn = bulkBar.createEl('button', { cls: 'tm-btn tm-btn--primary', text: 'Resolve All: Keep Obsidian' });
+        bulkObsBtn.addEventListener('click', async () => {
+            bulkObsBtn.disabled = true;
+            for (let i = 0; i < taskIds.length; i++) {
+                if (this._closed) return;
+                const tid = taskIds[i];
+                const fp = this.plugin.settings.taskFileMapping[tid]?.filePath || '';
+                bulkObsBtn.textContent = `Resolving ${i + 1}/${taskIds.length}...`;
+                await this.resolveConflict(tid, fp, 'obsidian');
+            }
+        });
+        const bulkTodBtn = bulkBar.createEl('button', { cls: 'tm-btn tm-btn--secondary', text: 'Resolve All: Keep Todoist' });
+        bulkTodBtn.addEventListener('click', async () => {
+            bulkTodBtn.disabled = true;
+            for (let i = 0; i < taskIds.length; i++) {
+                if (this._closed) return;
+                const tid = taskIds[i];
+                const fp = this.plugin.settings.taskFileMapping[tid]?.filePath || '';
+                bulkTodBtn.textContent = `Resolving ${i + 1}/${taskIds.length}...`;
+                await this.resolveConflict(tid, fp, 'todoist');
+            }
+        });
         for (const taskId of taskIds) {
             const info = this.plugin.settings.taskFileMapping[taskId];
             const filePath = info?.filePath || '';
@@ -504,6 +528,19 @@ export class TaskManagerModal extends Modal {
         sectionHeader.createSpan({ cls: 'tm-section-icon', text: '\u2757' });
         sectionHeader.createEl('h4', { cls: 'tm-section-title', text: 'Issue Tasks' });
         sectionHeader.createSpan({ cls: 'tm-section-count', text: `(${taskIds.length})` });
+        // Bulk operations bar
+        const bulkBar = section.createDiv({ cls: 'tm-bulk-bar' });
+        const bulkDelBtn = bulkBar.createEl('button', { cls: 'tm-btn tm-btn--danger', text: 'Delete All' });
+        bulkDelBtn.addEventListener('click', async () => {
+            const confirmed = await this.showConfirmDialog(`Delete all ${taskIds.length} issue tasks?`);
+            if (!confirmed) return;
+            bulkDelBtn.disabled = true;
+            for (let i = 0; i < taskIds.length; i++) {
+                if (this._closed) return;
+                bulkDelBtn.textContent = `Deleting ${i + 1}/${taskIds.length}...`;
+                await this.deleteIssueTask(taskIds[i]);
+            }
+        });
         const table = section.createEl('table', { cls: 'tm-table' });
         const thead = table.createEl('thead');
         const headerRow = thead.createEl('tr');
@@ -541,6 +578,30 @@ export class TaskManagerModal extends Modal {
         sectionHeader.createSpan({ cls: 'tm-section-icon', text: '\ud83d\udccb' });
         sectionHeader.createEl('h4', { cls: 'tm-section-title', text: 'Inactive Tasks' });
         sectionHeader.createSpan({ cls: 'tm-section-count', text: `(${taskIds.length})` });
+        // Bulk operations bar
+        const bulkBar = section.createDiv({ cls: 'tm-bulk-bar' });
+        const bulkReEnableBtn = bulkBar.createEl('button', { cls: 'tm-btn tm-btn--primary', text: 'Re-enable All' });
+        bulkReEnableBtn.addEventListener('click', async () => {
+            bulkReEnableBtn.disabled = true;
+            for (let i = 0; i < taskIds.length; i++) {
+                if (this._closed) return;
+                const tid = taskIds[i];
+                const fp = this.plugin.settings.taskFileMapping[tid]?.filePath || '';
+                bulkReEnableBtn.textContent = `Re-enabling ${i + 1}/${taskIds.length}...`;
+                await this.reEnableTask(tid, fp);
+            }
+        });
+        const bulkDelBtn = bulkBar.createEl('button', { cls: 'tm-btn tm-btn--danger', text: 'Delete All' });
+        bulkDelBtn.addEventListener('click', async () => {
+            const confirmed = await this.showConfirmDialog(`Delete all ${taskIds.length} inactive tasks?`);
+            if (!confirmed) return;
+            bulkDelBtn.disabled = true;
+            for (let i = 0; i < taskIds.length; i++) {
+                if (this._closed) return;
+                bulkDelBtn.textContent = `Deleting ${i + 1}/${taskIds.length}...`;
+                await this.deleteIssueTask(taskIds[i]);
+            }
+        });
         const table = section.createEl('table', { cls: 'tm-table' });
         const thead = table.createEl('thead');
         const headerRow = thead.createEl('tr');
