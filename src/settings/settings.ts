@@ -36,6 +36,8 @@ export interface UltimateTodoistSyncSettings {
     storageDirectory: string;
     lastStorageDirectory: string | null;
     conflictResolutionStrategy: 'todoist-wins' | 'obsidian-wins' | 'manual';
+    lastFullSyncTime: number | null;
+    lastDatabaseCheckAutoTime: number | null;
 }
 
 export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
@@ -63,6 +65,8 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
     storageDirectory: 'ultimate-todoist-sync',
     lastStorageDirectory: null,
     conflictResolutionStrategy: 'manual',
+    lastFullSyncTime: null,
+    lastDatabaseCheckAutoTime: null,
 }
 
 export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
