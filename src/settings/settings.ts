@@ -2,7 +2,6 @@ import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../../main";
 import { LogViewerModal, TaskManagerModal } from '../ui/modals';
 import { RebuildCacheResult } from '../data/cache';
-import { DeviceManager } from '../utils/deviceManager';
 
 export interface UltimateTodoistSyncSettings {
     initialized: boolean;
@@ -39,7 +38,7 @@ export interface UltimateTodoistSyncSettings {
     conflictResolutionStrategy: 'todoist-wins' | 'obsidian-wins' | 'manual';
     lastFullSyncTime: number | null;
     lastDatabaseCheckAutoTime: number | null;
-    isPrimaryDevice: boolean;
+    primaryDeviceId: string;
 }
 
 export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
@@ -69,7 +68,7 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
     conflictResolutionStrategy: 'manual',
     lastFullSyncTime: null,
     lastDatabaseCheckAutoTime: null,
-    isPrimaryDevice: true,
+    primaryDeviceId: '',
 }
 
 export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
@@ -272,26 +271,33 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 
         // Device status display
         const deviceStatusEl = containerEl.createEl('div', { cls: 'setting-item-description' });
-        const updateDeviceStatus = async () => {
-            const deviceManager = new DeviceManager(this.app, this.plugin);
-            const deviceId = await deviceManager.getDeviceId();
-            const role = this.plugin.settings.isPrimaryDevice ? 'Primary' : 'Secondary (read-only)';
-            const roleIcon = this.plugin.settings.isPrimaryDevice ? '\u2705' : '📱';
-            deviceStatusEl.innerHTML = `<div><strong>Device ID:</strong> <code>${deviceId}</code></div><div><strong>Role:</strong> ${roleIcon} ${role}</div>`;
+        const updateDeviceStatus = () => {
+            const thisDeviceId = this.plugin.cachedDeviceId || '(loading...)';
+            const primaryId = this.plugin.settings.primaryDeviceId || '(none)';
+            const isPrimary = this.plugin.isPrimaryDevice();
+            const role = isPrimary ? 'Primary' : 'Secondary (read-only)';
+            const roleIcon = isPrimary ? '\u2705' : '\ud83d\udcf1';
+            deviceStatusEl.innerHTML = `<div><strong>This Device:</strong> <code>${thisDeviceId}</code></div><div><strong>Primary Device:</strong> <code>${primaryId}</code></div><div><strong>Role:</strong> ${roleIcon} ${role}</div>`;
         };
         updateDeviceStatus();
 
         new Setting(containerEl)
-            .setName('Primary Device')
+            .setName('Set as Primary Device')
             .setDesc('Only the primary device pushes changes to Todoist. Secondary devices are read-only (pull sync only).')
-            .addToggle(component =>
-                component
-                    .setValue(this.plugin.settings.isPrimaryDevice)
-                    .onChange(async (value) => {
-                        await this.plugin.safeSettings?.update({ isPrimaryDevice: value }, true);
-                        updateDeviceStatus();
-                        new Notice(value ? 'This device is now the primary device.' : 'This device is now secondary (read-only).');
-                    })
+            .addButton(button => button
+                .setButtonText(this.plugin.isPrimaryDevice() ? 'Already Primary' : 'Claim as Primary')
+                .setDisabled(this.plugin.isPrimaryDevice())
+                .onClick(async () => {
+                    const deviceId = this.plugin.cachedDeviceId;
+                    if (!deviceId) {
+                        new Notice('Device ID not available yet. Please wait for plugin initialization.');
+                        return;
+                    }
+                    await this.plugin.safeSettings?.update({ primaryDeviceId: deviceId }, true);
+                    updateDeviceStatus();
+                    this.display();
+                    new Notice('This device is now the primary device.');
+                })
             );
 
                 // ============================================

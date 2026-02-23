@@ -11,7 +11,7 @@ export class ObsidianToTodoistSync {
     }
 
     async deletedTaskCheck(file_path: string): Promise<number> {
-        if (!this.plugin.settings.isPrimaryDevice) {
+        if (!this.plugin.isPrimaryDevice()) {
             this.plugin.debugLog('[toTodoist] Push blocked: not primary device');
             return 0;
         }
@@ -73,7 +73,7 @@ export class ObsidianToTodoistSync {
     }
 
     async lineContentNewTaskCheck(editor: Editor, view: MarkdownView): Promise<void> {
-        if (!this.plugin.settings.isPrimaryDevice) {
+        if (!this.plugin.isPrimaryDevice()) {
             this.plugin.debugLog('[toTodoist] Push blocked: not primary device');
             return;
         }
@@ -164,7 +164,7 @@ export class ObsidianToTodoistSync {
     }
 
     async fullTextNewTaskCheck(file_path: string): Promise<void> {
-        if (!this.plugin.settings.isPrimaryDevice) {
+        if (!this.plugin.isPrimaryDevice()) {
             this.plugin.debugLog('[toTodoist] Push blocked: not primary device');
             return;
         }
@@ -260,7 +260,7 @@ export class ObsidianToTodoistSync {
     }
 
     async lineModifiedTaskCheck(filepath: string, lineText: string, lineNumber: number, fileContent: string): Promise<void> {
-        if (!this.plugin.settings.isPrimaryDevice) {
+        if (!this.plugin.isPrimaryDevice()) {
             this.plugin.debugLog('[toTodoist] Push blocked: not primary device');
             return;
         }
@@ -473,7 +473,7 @@ export class ObsidianToTodoistSync {
     }
 
     async closeTask(taskId: string): Promise<void> {
-        if (!this.plugin.settings.isPrimaryDevice) {
+        if (!this.plugin.isPrimaryDevice()) {
             this.plugin.debugLog('[toTodoist] Push blocked: not primary device');
             return;
         }
@@ -524,7 +524,7 @@ export class ObsidianToTodoistSync {
     }
 
     async repoenTask(taskId: string): Promise<void> {
-        if (!this.plugin.settings.isPrimaryDevice) {
+        if (!this.plugin.isPrimaryDevice()) {
             this.plugin.debugLog('[toTodoist] Push blocked: not primary device');
             return;
         }

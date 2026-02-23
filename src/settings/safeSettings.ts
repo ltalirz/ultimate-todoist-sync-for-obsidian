@@ -3,8 +3,9 @@ import { App, Notice } from 'obsidian';
 import { DEFAULT_SETTINGS } from './settings';
 import { StoragePathManager } from '../storage/pathManager';
 import UltimateTodoistSyncForObsidian from '../../main';
+import { DeviceManager } from '../utils/deviceManager';
 
-const GHOST_FIELDS = ['todayLogs', 'todoistTasksData', 'syncToken', 'logs', 'logRetentionDays', 'statistics', 'deviceIdGenerated'];
+const GHOST_FIELDS = ['todayLogs', 'todoistTasksData', 'syncToken', 'logs', 'logRetentionDays', 'statistics', 'deviceIdGenerated', 'isPrimaryDevice'];
 const REQUIRED_FIELDS = ['initialized', 'todoistAPIToken', 'taskFileMapping'];
 
 // ==========================================================================================
@@ -61,6 +62,21 @@ export class SafeSettings {
 			this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS, data);
 			this.stripGhostFields();
 			this.sanitizeTaskFileMapping();
+
+			// Migration: isPrimaryDevice (boolean) → primaryDeviceId (string)
+			// If old data had isPrimaryDevice=true and no primaryDeviceId yet,
+			// read this device's ID and claim it as primary.
+			if ((data as any)?.isPrimaryDevice === true && !this.plugin.settings.primaryDeviceId) {
+				try {
+					const tempDeviceManager = new DeviceManager(this.plugin.app, this.plugin);
+					const deviceId = await tempDeviceManager.getDeviceId();
+					this.plugin.settings.primaryDeviceId = deviceId;
+					this.plugin.debugLog('[Settings] Migrated isPrimaryDevice=true → primaryDeviceId=' + deviceId);
+				} catch (migrationError) {
+					console.error('[Settings] Migration from isPrimaryDevice failed:', migrationError);
+				}
+			}
+
 			return true;
 		} catch (error) {
 			console.error('[Settings] Failed to load data:', error);

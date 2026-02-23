@@ -41,6 +41,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 	saveLock: boolean;
 	isProcessingModify: boolean;
 	isSyncingFromTodoist: boolean;
+	cachedDeviceId: string;
 
 	syncLockManager: SyncLockManager;
 
@@ -57,6 +58,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 	async onload() {
 		this.saveLock = false;
 		this.isSyncingFromTodoist = false;
+		this.cachedDeviceId = '';
 		this.syncLockManager = new SyncLockManager(this);
 		this.safeSettings = new SafeSettings(this);
 
@@ -197,6 +199,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		this.backupOperation = new BackupOperation(this.app, this);
 		this.databaseChecker = new DatabaseChecker(this.app, this);
 		this.deviceManager = new DeviceManager(this.app, this);
+		this.cachedDeviceId = await this.deviceManager.getDeviceId();
 		this.storagePathManager = new StoragePathManager(this.app, this);
 
 		this.storagePathManager.ensureAllDirs().catch(error => {
@@ -221,6 +224,10 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		}
 	}
 
+	isPrimaryDevice(): boolean {
+		return this.settings.primaryDeviceId !== '' && this.settings.primaryDeviceId === this.cachedDeviceId;
+	}
+
 	async checkModuleClass(): Promise<boolean> {
 		if (this.settings.apiInitialized === true) {
 			if (
@@ -229,7 +236,8 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 				this.cacheOperation === undefined ||
 				this.fileOperation === undefined ||
 				this.obsidianToTodoist === undefined ||
-				this.taskParser === undefined
+				this.taskParser === undefined ||
+				this.deviceManager === undefined
 			) {
 				await this.initializeModuleClass();
 			}
