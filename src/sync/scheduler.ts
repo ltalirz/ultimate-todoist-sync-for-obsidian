@@ -19,6 +19,19 @@ export class SyncScheduler {
 		this.plugin.debugLog('Todoist scheduled synchronization task started at', new Date().toLocaleString());
 
 		try {
+			// Periodic full sync: every 24h, reset sync_token to force full sync
+			const FULL_SYNC_INTERVAL = 24 * 60 * 60 * 1000;
+			const lastFullSync = this.plugin.settings.lastFullSyncTime || 0;
+			if (Date.now() - lastFullSync > FULL_SYNC_INTERVAL) {
+				this.plugin.debugLog('Periodic full sync triggered');
+				try {
+					await this.plugin.todoistSyncAPI.initializeSync();
+					await this.plugin.safeSettings?.update({ lastFullSyncTime: Date.now() }, true);
+				} catch (error) {
+					console.error('[Scheduler] Periodic full sync failed:', error);
+				}
+			}
+
 			await this.plugin.syncLockManager.run('todoistToObsidian', async () => {
 				await this.plugin.todoistToObsidian!.syncTodoistToObsidian();
 			});
@@ -49,6 +62,20 @@ export class SyncScheduler {
 				await this.plugin.syncLockManager.run('obsidianToTodoist', async () => {
 					await this.plugin.obsidianToTodoist!.fullTextModifiedTaskCheck(fileKey);
 				});
+			}
+			// Periodic database check: every 72h, run three-way consistency check
+			const DB_CHECK_INTERVAL = 72 * 60 * 60 * 1000;
+			const lastDbCheck = this.plugin.settings.lastDatabaseCheckAutoTime || 0;
+			if (Date.now() - lastDbCheck > DB_CHECK_INTERVAL) {
+				this.plugin.debugLog('Periodic database check triggered');
+				try {
+					if (this.plugin.databaseChecker) {
+						await this.plugin.databaseChecker.checkDatabase();
+						await this.plugin.safeSettings?.update({ lastDatabaseCheckAutoTime: Date.now() }, true);
+					}
+				} catch (error) {
+					console.error('[Scheduler] Periodic database check failed:', error);
+				}
 			}
 		} catch (error) {
 			console.error('An error occurred during scheduled sync:', error);
