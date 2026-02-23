@@ -384,6 +384,9 @@ export class TaskManagerModal extends Modal {
         // Header with summary badges
         const header = contentEl.createDiv({ cls: 'tm-header' });
         header.createEl('h3', { text: 'Task Manager' });
+        const refreshBtn = header.createEl('button', { cls: 'tm-refresh-btn', text: '\ud83d\udd04' });
+        refreshBtn.title = 'Refresh from Todoist';
+        refreshBtn.addEventListener('click', () => this.loadAndRender());
         const summary = header.createDiv({ cls: 'tm-summary' });
         if (conflicted.length > 0) {
             summary.createSpan({ cls: 'tm-badge tm-badge--conflict', text: `\u26a0\ufe0f ${conflicted.length} conflicted` });
@@ -541,7 +544,7 @@ export class TaskManagerModal extends Modal {
         const table = section.createEl('table', { cls: 'tm-table' });
         const thead = table.createEl('thead');
         const headerRow = thead.createEl('tr');
-        for (const h of ['Task ID', 'File', 'Content']) {
+        for (const h of ['Task ID', 'File', 'Content', 'Actions']) {
             headerRow.createEl('th', { text: h });
         }
         const tbody = table.createEl('tbody');
@@ -560,6 +563,17 @@ export class TaskManagerModal extends Modal {
             const tdContent = tr.createEl('td');
             const contentSpan = tdContent.createSpan({ cls: 'tm-content-preview', text: preview });
             contentSpan.title = preview;
+            const tdActions = tr.createEl('td');
+            const reEnableBtn = tdActions.createEl('button', { cls: 'tm-btn tm-btn--primary', text: 'Re-enable' });
+            reEnableBtn.addEventListener('click', async () => {
+                reEnableBtn.disabled = true;
+                await this.reEnableTask(taskId, filePath);
+            });
+            const delBtn = tdActions.createEl('button', { cls: 'tm-btn tm-btn--danger', text: 'Delete' });
+            delBtn.addEventListener('click', async () => {
+                delBtn.disabled = true;
+                await this.deleteIssueTask(taskId);
+            });
         }
     }
     private async resolveConflict(taskId: string, filePath: string, choice: 'obsidian' | 'todoist') {
@@ -610,13 +624,12 @@ export class TaskManagerModal extends Modal {
                     }
                 }
                 if (this._closed) return;
-                await this.plugin.todoistSyncAPI.incrementalSync();
                 const refreshed = this.plugin.todoistSyncAPI.getTaskByIdLocal(taskId);
                 await this.plugin.cacheOperation.setTaskFileMapping(taskId, filePath, 'active', true);
                 if (refreshed?.updated_at) {
                     await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, { updated_at: refreshed.updated_at });
                 }
-                this.plugin.saveSettings();
+                this.plugin.safeSettings?.update({}, true);
                 new Notice(`Conflict resolved: kept Obsidian version`);
             } else {
                 const task = this.plugin.todoistSyncAPI.getTaskByIdLocal(taskId);
@@ -705,7 +718,7 @@ export class TaskManagerModal extends Modal {
                 if (this._closed) return;
                 await this.plugin.cacheOperation.setTaskFileMapping(taskId, filePath, 'active', true);
                 await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, { updated_at: task.updated_at });
-                this.plugin.saveSettings();
+                this.plugin.safeSettings?.update({}, true);
                 new Notice(`Conflict resolved: kept Todoist version`);
             }
         } catch (e) {
@@ -731,11 +744,23 @@ export class TaskManagerModal extends Modal {
             if (this._closed) return;
             await this.plugin.fileOperation.unbindTaskInFile(taskId);
             await this.plugin.cacheOperation.deleteTaskFileMapping(taskId);
-            this.plugin.saveSettings();
+            this.plugin.safeSettings?.update({}, true);
             new Notice(`Issue task deleted`);
         } catch (e) {
             console.error(`[TaskManagerModal] deleteIssueTask error:`, e);
             new Notice(`Error deleting task: ${e}`);
+        }
+        if (this._closed) return;
+        await this.loadAndRender();
+    }
+    private async reEnableTask(taskId: string, filePath: string) {
+        try {
+            await this.plugin.cacheOperation.setTaskFileMapping(taskId, filePath, 'active', true);
+            this.plugin.safeSettings?.update({}, true);
+            new Notice(`Task re-enabled`);
+        } catch (e) {
+            console.error(`[TaskManagerModal] reEnableTask error:`, e);
+            new Notice(`Error re-enabling task: ${e}`);
         }
         if (this._closed) return;
         await this.loadAndRender();
