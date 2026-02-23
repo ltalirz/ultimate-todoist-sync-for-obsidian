@@ -52,17 +52,15 @@ export class SyncScheduler {
 			}
 		} catch (error) {
 			console.error('An error occurred during scheduled sync:', error);
-			this.plugin.syncLockManager.release();
+		} finally {
+			try {
+				await this.plugin.logOperation?.flushToFile();
+			} catch (error) {
+				console.error('An error occurred in flushToFile:', error);
+			}
+			this.inProgress = false;
+			this.plugin.debugLog('Todoist scheduled synchronization task completed at', new Date().toLocaleString());
 		}
-
-		try {
-			await this.plugin.logOperation?.flushToFile();
-		} catch (error) {
-			console.error('An error occurred in flushToFile:', error);
-		}
-
-		this.inProgress = false;
-		this.plugin.debugLog('Todoist scheduled synchronization task completed at', new Date().toLocaleString());
 	}
 
 	private getUniqueFiles(): string[] {
