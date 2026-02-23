@@ -15,7 +15,6 @@ export class ObsidianToTodoistSync {
         let currentFileValue;
         let view;
         let filepath;
-
         if (file_path) {
             file = this.app.vault.getAbstractFileByPath(file_path);
             filepath = file_path;
@@ -26,7 +25,6 @@ export class ObsidianToTodoistSync {
             filepath = file?.path;
             currentFileValue = view?.data;
         }
-
         const taskIds = this.plugin.cacheOperation.getTasksInFile(filepath);
         if (taskIds.length === 0) {
             this.plugin.debugLog('No tasks in this file');
@@ -35,36 +33,34 @@ export class ObsidianToTodoistSync {
 
         const currentFileValueWithOutFrontMatter = currentFileValue.replace(/^---[\s\S]*?---\n/, '');
 
-        const deleteTasksPromises = taskIds
-            .filter((taskId: string) => !currentFileValueWithOutFrontMatter.includes(taskId) && this.plugin.cacheOperation.isTaskSyncEnabled(taskId))
-            .map(async (taskId: string) => {
-                try {
-                    const api = this.plugin.todoistSyncAPI.initializeAPI();
-                    const response = await api.deleteTask(taskId);
+        const tasksToDelete = taskIds.filter(
+            (taskId: string) =>
+                !currentFileValueWithOutFrontMatter.includes(taskId) &&
+                this.plugin.cacheOperation.isTaskSyncEnabled(taskId)
+        );
 
-                    if (response) {
-                        new Notice(`task ${taskId} is deleted`);
-                        this.plugin.logOperation?.log('OBSIDIAN_TASK_DELETED', `Deleted task: ${taskId}`, undefined, taskId);
-                        return taskId;
-                    }
-                } catch (error) {
-                    console.error(`Failed to delete task ${taskId}: ${error}`);
-                    new Notice(`Failed to delete task ${taskId}. Check console for details.`);
+        let deletedCount = 0;
+        for (const taskId of tasksToDelete) {
+            try {
+                const api = this.plugin.todoistSyncAPI.initializeAPI();
+                const response = await api.deleteTask(taskId);
+                if (response) {
+                    new Notice(`task ${taskId} is deleted`);
+                    this.plugin.logOperation?.log('OBSIDIAN_TASK_DELETED', `Deleted task: ${taskId}`, undefined, taskId);
+                    await this.plugin.cacheOperation.deleteTaskFileMapping(taskId);
+                    deletedCount++;
                 }
-            });
+            } catch (error) {
+                console.error(`Failed to delete task ${taskId}: ${error}`);
+                new Notice(`Failed to delete task ${taskId}. Check console for details.`);
+            }
+        }
 
-        const deletedTaskIds = await Promise.all(deleteTasksPromises);
-        const validDeletedIds = deletedTaskIds.filter((id): id is string => id !== undefined);
-        
-        if (validDeletedIds.length === 0) {
-            return 0;
+        if (deletedCount > 0) {
+            this.plugin.saveSettings();
         }
-        
-        for (const taskId of validDeletedIds) {
-            this.plugin.cacheOperation.deleteTaskFileMapping(taskId);
-        }
-        
-        return validDeletedIds.length;
+
+        return deletedCount;
     }
 
     async lineContentNewTaskCheck(editor: Editor, view: MarkdownView): Promise<void> {
@@ -155,7 +151,6 @@ export class ObsidianToTodoistSync {
         let currentFileValue;
         let view;
         let filepath;
-
         if (file_path) {
             file = this.app.vault.getAbstractFileByPath(file_path);
             filepath = file_path;
@@ -166,67 +161,71 @@ export class ObsidianToTodoistSync {
             filepath = file?.path;
             currentFileValue = view?.data;
         }
-
         if (this.plugin.settings.enableFullVaultSync) {
             await this.plugin.fileOperation.addTodoistTagToFile(filepath);
             currentFileValue = await this.app.vault.read(file);
         }
 
-        const content = currentFileValue;
-
-        let hasNewTask = false;
-        const lines = content.split('\n');
-
+        // Prevent per-task vault.modify from triggering modify event storm
+        this.plugin.isProcessingModify = true;
+        try {
+            let lines = currentFileValue.split('\n');
         for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (!this.plugin.taskParser.hasTodoistId(line) && this.plugin.taskParser.hasTodoistTag(line)) {
-                this.plugin.debugLog(filepath);
-                const currentTask = await this.plugin.taskParser.convertTextToTodoistTaskObject(line, filepath, i, content);
-                if (typeof currentTask === "undefined") {
-                    continue;
-                }
-                this.plugin.debugLog(currentTask);
-                try {
-                    const newTask = await this.plugin.todoistSyncAPI.AddTask(currentTask);
-                    const { id: todoist_id } = newTask;
-                    newTask.path = filepath;
-                    this.plugin.debugLog(newTask);
-                    new Notice(`new task ${newTask.content} id is ${newTask.id}`);
-                    this.plugin.logOperation?.log('OBSIDIAN_TASK_CREATED', `Created task in Obsidian: ${newTask.content}`, filepath, todoist_id, 'obsidian→todoist');
-                    this.plugin.logOperation?.log('TODOIST_TASK_CREATED', `Created task in Todoist: ${newTask.content}`, filepath, todoist_id, 'obsidian→todoist');
-
-                this.plugin.cacheOperation.setTaskFileMapping(todoist_id, filepath || '', i);
-
-                    if (currentTask.isCompleted === true) {
-                        await this.plugin.todoistSyncAPI.CloseTask(newTask.id);
-                        // taskFileMapping already set above
-                        this.plugin.logOperation?.log('OBSIDIAN_TASK_COMPLETED', `Completed task in Obsidian: ${newTask.content}`, filepath, todoist_id, 'obsidian→todoist');
-                        this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Completed task in Todoist: ${newTask.content}`, filepath, todoist_id, 'obsidian→todoist');
+                const line = lines[i];
+                if (!this.plugin.taskParser.hasTodoistId(line) && this.plugin.taskParser.hasTodoistTag(line)) {
+                    this.plugin.debugLog(filepath);
+                    const currentTask = await this.plugin.taskParser.convertTextToTodoistTaskObject(line, filepath, i, lines.join('\n'));
+                    if (typeof currentTask === 'undefined') {
+                        continue;
                     }
+                this.plugin.debugLog(currentTask);
+                    let todoist_id: string | undefined;
+                    try {
+                        const newTask = await this.plugin.todoistSyncAPI.AddTask(currentTask);
+                        todoist_id = newTask.id;
+                        newTask.path = filepath;
+                        this.plugin.debugLog(newTask);
+                        new Notice(`new task ${newTask.content} id is ${newTask.id}`);
+                        this.plugin.logOperation?.log('OBSIDIAN_TASK_CREATED', `Created task in Obsidian: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
+                        this.plugin.logOperation?.log('TODOIST_TASK_CREATED', `Created task in Todoist: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
 
+                        this.plugin.cacheOperation.setTaskFileMapping(todoist_id, filepath || '', i);
+                    if (currentTask.isCompleted === true) {
+                            await this.plugin.todoistSyncAPI.CloseTask(newTask.id);
+                            this.plugin.logOperation?.log('OBSIDIAN_TASK_COMPLETED', `Completed task in Obsidian: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
+                            this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Completed task in Todoist: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
+                        }
                     const text_with_out_link = `${line} %%[todoist_id:: ${todoist_id}]%%`;
-                    const link = this.plugin.settings.useAppURI ? `[link](todoist://task?id=${newTask.id})` : `[link](https://app.todoist.com/app/task/${newTask.id})`;
-                    const text = this.plugin.taskParser.addTodoistLink(text_with_out_link, link);
+                        const link = this.plugin.settings.useAppURI ? `[link](todoist://task?id=${newTask.id})` : `[link](https://app.todoist.com/app/task/${newTask.id})`;
+                        const text = this.plugin.taskParser.addTodoistLink(text_with_out_link, link);
                     lines[i] = text;
+                        // Atomic: write file immediately after each task
+                        const newContent = lines.join('\n');
+                        await this.plugin.backupOperation?.backupFile(filepath);
+                        await this.app.vault.modify(file, newContent);
+            this.plugin.saveSettings();
+                        // Re-read file so subsequent iterations use the latest content
+                        const refreshed = await this.app.vault.read(file);
+                        lines = refreshed.split('\n');
 
-                    hasNewTask = true;
-
-                } catch (error) {
-                    console.error('Error adding task:', error);
-                    new Notice(`Failed to create task. Check console for details.`);
-                    continue;
+                    } catch (error) {
+                        console.error('Error adding task:', error);
+                        new Notice(`Failed to create task. Check console for details.`);
+                        // Rollback: delete Todoist task + clean mapping if we got an id
+                        if (todoist_id) {
+                            try {
+                                await this.plugin.todoistSyncAPI.deleteTask(todoist_id);
+                            } catch (deleteError) {
+                                console.error('[fullTextNewTaskCheck] Rollback deleteTask failed:', deleteError);
+                            }
+                            await this.plugin.cacheOperation.deleteTaskFileMapping(todoist_id);
+                        }
+                        continue;
+                    }
                 }
             }
-        }
-        if (hasNewTask) {
-            this.plugin.saveSettings();
-            try {
-                const newContent = lines.join('\n');
-                await this.plugin.backupOperation?.backupFile(filepath);
-                await this.app.vault.modify(file, newContent);
-            } catch (error) {
-                console.error(error);
-            }
+        } finally {
+            this.plugin.isProcessingModify = false;
         }
     }
 
@@ -506,38 +505,7 @@ export class ObsidianToTodoistSync {
         }
     }
 
-    async deleteTasksByIds(taskIds: string[]): Promise<string[]> {
-        const deletedTaskIds: string[] = [];
 
-        for (const taskId of taskIds) {
-            const api = await this.plugin.todoistSyncAPI.initializeAPI();
-            try {
-                const response = await api.deleteTask(taskId);
-                this.plugin.debugLog(`response is ${response}`);
-
-                if (response) {
-                    new Notice(`Task ${taskId} is deleted.`);
-                    this.plugin.logOperation?.log('OBSIDIAN_TASK_DELETED', `Deleted task: ${taskId}`, undefined, taskId);
-                    this.plugin.logOperation?.log('TODOIST_TASK_DELETED', `Deleted task in Todoist: ${taskId}`, undefined, taskId, 'obsidian→todoist');
-                    deletedTaskIds.push(taskId);
-                }
-            } catch (error) {
-                console.error(`Failed to delete task ${taskId}: ${error}`);
-            }
-        }
-
-        if (!deletedTaskIds.length) {
-            this.plugin.debugLog("No tasks deleted");
-            return [];
-        }
-
-        for (const taskId of deletedTaskIds) {
-            this.plugin.cacheOperation.deleteTaskFileMapping(taskId);
-        }
-        this.plugin.saveSettings();
-
-        return deletedTaskIds;
-    }
 
     async updateTaskDescription(filepath: string): Promise<void> {
         const taskIds = this.plugin.cacheOperation.getTasksInFile(filepath);
