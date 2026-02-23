@@ -99,6 +99,14 @@ export class ObsidianToTodoistSync {
 
                 this.plugin.cacheOperation.setTaskFileMapping(todoist_id, filepath || '', line);
 
+                // Immediately sync so syncData contains the new task before any
+                // subsequent lineModifiedTaskCheck fires on the same line.
+                try {
+                    await this.plugin.todoistSyncAPI.incrementalSync();
+                } catch (syncErr) {
+                    console.error('[lineContentNewTaskCheck] Post-create incremental sync failed:', syncErr);
+                }
+
                 if (currentTask.isCompleted === true) {
                     await this.plugin.todoistSyncAPI.CloseTask(newTask.id);
                     // taskFileMapping already set above
@@ -243,6 +251,16 @@ export class ObsidianToTodoistSync {
 
             // Handle deleted task: task exists in cache but not in Todoist
             if (!savedTask) {
+                // If the task was just created (mapping exists but syncData not yet updated),
+                // skip silently rather than marking as issue. The incremental sync running
+                // in the background will populate syncData shortly.
+                const mappingAge = taskMapping.updated_at
+                    ? Date.now() - new Date(taskMapping.updated_at).getTime()
+                    : 0;
+                if (mappingAge < 30000) {
+                    this.plugin.debugLog(`[lineModifiedTaskCheck] Task ${lineTask_todoist_id} not in syncData yet (just created), skipping`);
+                    return;
+                }
                 console.warn(`[lineModifiedTaskCheck] Task ${lineTask_todoist_id} not found in Todoist (deleted?), marking as issue`);
                 await this.plugin.cacheOperation.setTaskFileMapping(lineTask_todoist_id, taskMapping.filePath, taskMapping.lineNumber, 'issue', false);
                 new Notice(`Task ${lineTask_todoist_id} no longer exists in Todoist. Sync disabled.`);

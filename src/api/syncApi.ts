@@ -778,7 +778,20 @@ export class TodoistSyncAPI   {
         this.syncData = await this.getAllResources(true);
       }
       const tasks = this.syncData?.items || [];
-      return tasks.find((t: any) => t.id === taskId);
+      const found = tasks.find((t: any) => t.id === taskId);
+      if (found) return found;
+
+      // Not in local cache — do an incremental sync and retry once.
+      // This handles the race where a task was just created and syncData
+      // hasn't been updated yet (e.g. lineModifiedTaskCheck fires immediately
+      // after lineContentNewTaskCheck).
+      try {
+        await this.incrementalSync();
+      } catch (_) {
+        // ignore sync errors here; fall through to return undefined
+      }
+      const refreshed = this.syncData?.items || [];
+      return refreshed.find((t: any) => t.id === taskId);
     } catch (error) {
       console.error('Error getting task by id:', error);
       throw error;
