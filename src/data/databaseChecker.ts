@@ -770,7 +770,8 @@ Generated: ${new Date().toLocaleString()}
                 'priority_mismatch': 'Priority Mismatch',
                 'label_mismatch': 'Label Mismatch',
                 'project_mismatch': 'Project Mismatch',
-                'duplicate_task': 'Duplicate Task'
+                'duplicate_task': 'Duplicate Task',
+                'new_task_not_synced': 'New Task Not Synced'
             };
 
             // 优先级标签映射
@@ -786,23 +787,21 @@ Generated: ${new Date().toLocaleString()}
                 const label = typeLabels[type] || type;
                 markdown += `### ${label} (${issues.length})\n\n`;
 
-                // 创建该问题类型的表格
+                // 转义 markdown 表格中的 pipe 字符
+                    const escapePipe = (s: string): string => s.replace(/\|/g, '\\|');
                 markdown += `| # | Task ID | Content | File | Line | Status | Details |\n`;
                 markdown += `|---|---------|---------|------|------|--------|---------|\n`;
-                
-                // 遍历每个问题
                 for (let i = 0; i < issues.length; i++) {
                     const issue = issues[i];
                     // 截取任务内容
-                    const taskContent = issue.taskContent?.substring(0, 30) || issue.obsidianContent?.substring(0, 30) || '-';
+                    const taskContent = escapePipe(issue.taskContent?.substring(0, 30) || issue.obsidianContent?.substring(0, 30) || '-');
                     // 生成 Obsidian wiki link，显示文件名但链接到完整路径
                     const fileBaseName = issue.filePath ? (issue.filePath.split('/').pop()?.replace(/\.md$/, '') || issue.filePath) : null;
                     const filePath = issue.filePath
-                        ? `[[${issue.filePath.replace(/\.md$/, '')}|${fileBaseName}]]`
+                        ? `[[${issue.filePath.replace(/\.md$/, '')}\\|${fileBaseName}]]`
                         : '-';
                     // 行号格式化
                     const lineNum = issue.lineNumber !== undefined ? String(issue.lineNumber + 1) : '-';
-                    
                     // 状态列
                     let statusCol = '';
                     if (issue.obsidianStatus !== undefined && issue.todoistStatus !== undefined) {
@@ -817,8 +816,7 @@ Generated: ${new Date().toLocaleString()}
                         statusCol = '-';
                     }
 
-                    const details = issue.details.substring(0, 40);
-                    
+                    const details = escapePipe(issue.details.substring(0, 40));
                     markdown += `| ${i + 1} | \`${issue.taskId || '-'}\` | ${taskContent} | ${filePath} | ${lineNum} | ${statusCol} | ${details} |\n`;
                 }
                 markdown += '\n';
