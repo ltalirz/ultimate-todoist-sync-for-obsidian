@@ -31,7 +31,8 @@ opencode-session-history
 
 
 data.json
-.sisyphus
-tests
+/.sisyphus/
+/tests/
 AGENTS.md
 device-id
+/.stfolder/
