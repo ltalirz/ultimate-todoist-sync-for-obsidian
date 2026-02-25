@@ -48,6 +48,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 	scheduler: SyncScheduler;
 	private eventHandlers: EventHandlers;
 	private lastApiNoticeTime = 0;
+	private syncIntervalId: number | null = null;
 
 	debugLog(...args: unknown[]): void {
 		if (this.settings?.debugMode) {
@@ -97,7 +98,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		this.eventHandlers = new EventHandlers(this);
 		this.eventHandlers.register();
 
-		this.registerInterval(window.setInterval(async () => await this.scheduler.run(), this.settings.automaticSynchronizationInterval * 1000));
+		this.restartSyncSchedulerInterval();
 
 		this.app.workspace.on('active-leaf-change', () => {
 			this.setStatusBarText();
@@ -138,6 +139,18 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 
 	async saveSettings(): Promise<boolean> {
 		return this.safeSettings!.save();
+	}
+
+	restartSyncSchedulerInterval(): void {
+		if (!this.scheduler) return;
+
+		if (this.syncIntervalId !== null) {
+			window.clearInterval(this.syncIntervalId);
+		}
+
+		const scheduler = this.scheduler;
+		this.syncIntervalId = window.setInterval(async () => await scheduler.run(), this.settings.automaticSynchronizationInterval * 1000);
+		this.registerInterval(this.syncIntervalId);
 	}
 
 	async modifyTodoistAPI(api: string): Promise<boolean> {

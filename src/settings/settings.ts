@@ -93,7 +93,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Todoist API Token')
-            .setDesc('Enter your Todoist API token and click the send button to connect.')
+            .setDesc('Enter your Todoist API token and click Connect.')
             .addText((text) => {
                 text
                     .setPlaceholder('Enter your API token')
@@ -159,31 +159,57 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
         // ============================================
         containerEl.createEl('h3', { text: 'Sync Settings', cls: 'uts-section-heading' });
 
+        let intervalInputEl: HTMLInputElement | null = null;
         new Setting(containerEl)
             .setName('Automatic Sync Interval')
-            .setDesc('Time in seconds between automatic syncs. Default: 300 (5 minutes). Minimum: 20 seconds.')
-            .addText((text) =>
+            .setDesc('Set interval in seconds (minimum 20). Example: 300 = every 5 minutes. Click Apply to save.')
+            .addText((text) => {
                 text
-                    .setPlaceholder('300')
-                    .setValue(this.plugin.settings.automaticSynchronizationInterval.toString())
-                    .onChange(async (value) => {
-                        const intervalNum = Number(value)
-                        if (isNaN(intervalNum)) {
-                            new Notice(`Please enter a valid number.`)
-                            return
-                        }
-                        if (intervalNum < 20) {
-                            new Notice(`Minimum interval is 20 seconds.`)
-                            return
-                        }
-                        if (!Number.isInteger(intervalNum)) {
-                            new Notice('Please enter an integer.');
-                            return;
-                        }
-                        await this.plugin.safeSettings?.update({ automaticSynchronizationInterval: intervalNum }, true)
-                        new Notice('Sync interval updated.');
-                    })
-            );
+                    .setPlaceholder('e.g. 300')
+                    .setValue(this.plugin.settings.automaticSynchronizationInterval.toString());
+                text.inputEl.type = 'number';
+                text.inputEl.min = '20';
+                text.inputEl.step = '1';
+                intervalInputEl = text.inputEl;
+            })
+            .addButton((button) => {
+                button.setButtonText('Apply');
+                button.onClick(async () => {
+                    const rawValue = intervalInputEl?.value?.trim() ?? '';
+                    const intervalNum = Number(rawValue);
+
+                    if (rawValue === '' || Number.isNaN(intervalNum)) {
+                        new Notice('Please enter a valid number.');
+                        return;
+                    }
+
+                    if (!Number.isInteger(intervalNum)) {
+                        new Notice('Please enter an integer.');
+                        return;
+                    }
+
+                    if (intervalNum < 20) {
+                        new Notice('Minimum interval is 20 seconds.');
+                        return;
+                    }
+
+                    if (intervalNum === this.plugin.settings.automaticSynchronizationInterval) {
+                        new Notice('Sync interval unchanged.');
+                        return;
+                    }
+
+                    button.setButtonText('Applying...');
+                    button.setDisabled(true);
+                    try {
+                        await this.plugin.safeSettings?.update({ automaticSynchronizationInterval: intervalNum }, true);
+                        this.plugin.restartSyncSchedulerInterval();
+                        new Notice('Sync interval updated and applied.');
+                    } finally {
+                        button.setDisabled(false);
+                        button.setButtonText('Apply');
+                    }
+                });
+            });
 
         const myProjectsOptions: Record<string, string> = {};
         const projects = this.plugin.todoistSyncAPI?.getSyncData()?.projects || [];
@@ -194,18 +220,21 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
         new Setting(containerEl)
             .setName('Default Project')
             .setDesc('New tasks will be created in this project.')
-            .addDropdown(component =>
+            .addDropdown((component) => {
+                if (!myProjectsOptions[this.plugin.settings.defaultProjectId]) {
+                    component.addOption(this.plugin.settings.defaultProjectId, this.plugin.settings.defaultProjectName);
+                }
                 component
-                    .addOption(this.plugin.settings.defaultProjectId, this.plugin.settings.defaultProjectName)
                     .addOptions(myProjectsOptions)
+                    .setValue(this.plugin.settings.defaultProjectId)
                     .onChange(async (value) => {
                         const project = projects.find((p: any) => p.id === value);
                         await this.plugin.safeSettings?.update({
                             defaultProjectId: value,
                             defaultProjectName: project?.name || value
                         }, true)
-                    })
-            );
+                    });
+            });
 
         new Setting(containerEl)
             .setName('Full Vault Sync')
@@ -391,10 +420,18 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         new Notice('Database checker not initialized');
                         return;
                     }
+                    if (!this.plugin.cacheOperation) {
+                        new Notice('Cache operation not initialized');
+                        return;
+                    }
+
+                    const databaseChecker = this.plugin.databaseChecker;
+                    const cacheOperation = this.plugin.cacheOperation;
+
                     const progressNotice = new Notice('Step 1/3: Checking database...', 0);
                     try {
                         // Step 1: Initial check
-                        const before = await this.plugin.databaseChecker.checkDatabase((msg) => {
+                        const before = await databaseChecker.checkDatabase((msg) => {
                             progressNotice.setMessage(`Step 1/3: ${msg}`);
                         });
                         if (before.success) {
@@ -409,7 +446,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         }
                         // Step 2: Rebuild cache to fix what can be fixed
                         progressNotice.setMessage(`Step 2/3: Found ${before.totalIssues} issues. Rebuilding cache...`);
-                        const rebuildResult: RebuildCacheResult = await this.plugin.cacheOperation.rebuildCache((msg) => {
+                        const rebuildResult: RebuildCacheResult = await cacheOperation.rebuildCache((msg) => {
                             progressNotice.setMessage(`Step 2/3: ${msg}`);
                         });
                         // Show rebuild summary
@@ -424,7 +461,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         }
                         // Step 3: Re-check to see what remains
                         progressNotice.setMessage('Step 3/3: Re-checking database...');
-                        const after = await this.plugin.databaseChecker.checkDatabase((msg) => {
+                        const after = await databaseChecker.checkDatabase((msg) => {
                             progressNotice.setMessage(`Step 3/3: ${msg}`);
                         });
                         progressNotice.hide();
@@ -448,7 +485,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         }
                     } catch (error) {
                         progressNotice.hide();
-                        new Notice(`Fix Database error: ${error.message}`);
+                        new Notice(`Fix Database error: ${error instanceof Error ? error.message : String(error)}`);
                     }
                 })
             );
@@ -485,7 +522,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         }
                     } catch (error) {
                         verifyNotice.hide();
-                        new Notice(`Verify error: ${error.message}`);
+                        new Notice(`Verify error: ${error instanceof Error ? error.message : String(error)}`);
                     }
                 })
             );
@@ -543,55 +580,89 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
         // ============================================
         containerEl.createEl('h3', { text: 'Backup & Recovery', cls: 'uts-section-heading' });
 
+        let storageDirectoryInputEl: HTMLInputElement | null = null;
         new Setting(containerEl)
             .setName('Storage Directory')
-            .setDesc('Directory for plugin data storage. Changing this will migrate existing data.')
-            .addText(text => text
-                .setPlaceholder('ultimate-todoist-sync')
-                .setValue(this.plugin.settings.storageDirectory)
-                .onChange(async (value) => {
-                    const newDir = value.trim();
+            .setDesc('Directory for plugin data storage. Click Apply to confirm and migrate existing data.')
+            .addText((text) => {
+                text
+                    .setPlaceholder('ultimate-todoist-sync')
+                    .setValue(this.plugin.settings.storageDirectory);
+                storageDirectoryInputEl = text.inputEl;
+            })
+            .addButton((button) => {
+                button.setButtonText('Apply');
+                button.onClick(async () => {
+                    const newDir = storageDirectoryInputEl?.value?.trim() ?? '';
                     const currentDir = this.plugin.settings.storageDirectory;
-                    
+
                     if (!newDir) {
                         new Notice('Directory name cannot be empty');
                         return;
                     }
-                    
-                    if (newDir === currentDir) return;
-                    
+
+                    if (newDir === currentDir) {
+                        new Notice('Storage directory unchanged.');
+                        return;
+                    }
+
                     const confirmed = confirm(
                         `Change storage directory from "${currentDir}" to "${newDir}"?\n\n` +
                         'Existing data will be migrated to the new location.'
                     );
                     if (!confirmed) return;
-                    
-                    if (this.plugin.storagePathManager) {
-                        const success = await this.plugin.storagePathManager.migrateToNewDirectory(newDir);
-                        if (success) {
-                            await this.plugin.safeSettings?.update({ storageDirectory: newDir }, true);
-                            new Notice('Storage directory changed. Please reload the plugin.');
+
+                    button.setButtonText('Applying...');
+                    button.setDisabled(true);
+                    try {
+                        if (this.plugin.storagePathManager) {
+                            const success = await this.plugin.storagePathManager.migrateToNewDirectory(newDir);
+                            if (success) {
+                                await this.plugin.safeSettings?.update({ storageDirectory: newDir }, true);
+                                new Notice('Storage directory changed. Please reload the plugin.');
+                            } else {
+                                new Notice('Migration failed. Check console for details.');
+                            }
                         } else {
-                            new Notice('Migration failed. Check console for details.');
+                            await this.plugin.safeSettings?.update({ storageDirectory: newDir }, true);
+                            new Notice('Storage directory updated. Please reload the plugin.');
                         }
-                    } else {
-                        await this.plugin.safeSettings?.update({ storageDirectory: newDir }, true);
-                        new Notice('Storage directory updated. Please reload the plugin.');
+                    } finally {
+                        button.setDisabled(false);
+                        button.setButtonText('Apply');
                     }
-                })
-            );
+                });
+            });
 
         new Setting(containerEl)
             .setName('Backup Todoist Data')
             .setDesc('Backup all Todoist data to vault.')
             .addButton(button => button
                 .setButtonText('Backup')
-                .onClick(() => {
+                .onClick(async () => {
                     if (!this.plugin.settings.apiInitialized) {
                         new Notice('Please set the Todoist API first')
                         return
                     }
-                    this.plugin.todoistToObsidian.backupTodoistAllResources()
+
+                    if (!this.plugin.todoistToObsidian) {
+                        new Notice('Todoist backup module not initialized');
+                        return;
+                    }
+
+                    const todoistToObsidian = this.plugin.todoistToObsidian;
+
+                    button.setButtonText('Backing up...');
+                    button.setDisabled(true);
+                    try {
+                        await todoistToObsidian.backupTodoistAllResources();
+                        new Notice('Todoist data backup completed.');
+                    } catch (error) {
+                        new Notice(`Backup failed: ${error instanceof Error ? error.message : String(error)}`);
+                    } finally {
+                        button.setButtonText('Backup');
+                        button.setDisabled(false);
+                    }
                 })
             );
 
