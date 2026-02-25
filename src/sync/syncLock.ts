@@ -37,6 +37,27 @@ export class SyncLockManager {
 		return !this.plugin.saveLock;
 	}
 
+	async acquireExclusive(): Promise<boolean> {
+		if (this.plugin.saveLock) {
+			this.plugin.debugLog('save locked, waiting before exclusive sync acquire.');
+			const saveReleased = await this.waitForSaveRelease();
+			if (!saveReleased) {
+				this.plugin.debugLog('save lock did not release in time.');
+				return false;
+			}
+		}
+
+		if (this.locked) {
+			this.plugin.debugLog('sync locked. waiting for exclusive acquire.');
+			const released = await this.waitForRelease();
+			if (!released) return false;
+			this.plugin.debugLog('sync unlocked.');
+		}
+
+		this.locked = true;
+		return true;
+	}
+
 
 	async acquire(direction?: SyncDirection): Promise<boolean> {
 		if (!this.plugin.settings.syncEnabled) {

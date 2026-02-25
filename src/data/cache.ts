@@ -709,7 +709,18 @@ export class CacheOperation   {
      */
     async rebuildCache(noticeCallback?: (message: string) => void): Promise<RebuildCacheResult> {
         const backupMapping = { ...this.plugin.settings.taskFileMapping };
+        let exclusiveLockAcquired = false;
         try {
+            const syncLockManager = this.plugin.syncLockManager;
+            if (!syncLockManager) {
+                throw new Error('Sync lock manager is not initialized');
+            }
+
+            exclusiveLockAcquired = await syncLockManager.acquireExclusive();
+            if (!exclusiveLockAcquired) {
+                throw new Error('Unable to acquire sync lock for cache rebuild. Please retry in a few seconds.');
+            }
+
             if (noticeCallback) {
                 noticeCallback('Starting cache rebuild...');
             } else {
@@ -718,18 +729,11 @@ export class CacheOperation   {
             this.plugin.logOperation?.log('CACHE_REBUILT', 'Starting cache rebuild...');
 
             // ==========================================================================================
-            // Step 1: 清空 taskFileMapping
             // ==========================================================================================
             // 
             // 【说明】
-            // taskFileMapping 是从任务 ID 到文件位置的映射
-            // 重建缓存时需要重新扫描，所以先清空
-            // fileMetadata 保留，因为文件本身可能还在
             // 
             // ==========================================================================================
-            
-            // Step 1: Backup old mapping, then clear (restore on failure)
-            await this.plugin.safeSettings?.update({ taskFileMapping: {} }, false);
 
             // ==========================================================================================
             // Step 2: 确保 syncData 已加载
@@ -1118,6 +1122,10 @@ export class CacheOperation   {
                 new Notice(message);
             }
             return { success: false, tasksProcessed: 0, conflictsCount: 0, nonActiveCount: 0, issueCount: 0, convertedCount: 0, tasksWithoutIdCount: 0 };
+        } finally {
+            if (exclusiveLockAcquired) {
+                this.plugin.syncLockManager?.release();
+            }
         }
     }
 
