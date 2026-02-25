@@ -5,8 +5,16 @@ import { StoragePathManager } from '../storage/pathManager';
 import UltimateTodoistSyncForObsidian from '../../main';
 import { DeviceManager } from '../utils/deviceManager';
 
-const GHOST_FIELDS = ['todayLogs', 'todoistTasksData', 'syncToken', 'logs', 'logRetentionDays', 'statistics', 'deviceIdGenerated', 'isPrimaryDevice'];
+const GHOST_FIELDS = ['todayLogs', 'todoistTasksData', 'syncToken', 'logs', 'logRetentionDays', 'statistics', 'deviceIdGenerated', 'isPrimaryDevice', 'lastDatabaseCheckPassed'];
 const REQUIRED_FIELDS = ['initialized', 'todoistAPIToken', 'taskFileMapping'];
+
+type TaskMappingEntry = {
+	filePath: string;
+	status?: 'active' | 'nonActive' | 'conflicted' | 'issue';
+	syncEnabled?: boolean;
+	updated_at?: string;
+	note_count?: number;
+};
 
 // ==========================================================================================
 // SafeSettings - 设置的完整生命周期管理：加载、保存、运行时变更
@@ -38,26 +46,35 @@ export class SafeSettings {
 				}
 			}
 
-			const data = await this.plugin.loadData();
+			const rawData = await this.plugin.loadData();
 
-			if (!this.validate(data)) {
+			if (rawData === null || rawData === undefined) {
+				this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS);
+				return true;
+			}
+
+			if (!this.isLoadDataUsable(rawData)) {
 				console.warn('[Settings] Settings corrupted, attempting recovery...');
 				new Notice('Settings corrupted, attempting recovery...');
 				const recovered = await this.plugin.settingsBackup.restore();
 				if (recovered) {
 					new Notice('Settings recovered from backup');
 					const recoveredData = await this.plugin.loadData();
-					this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS, recoveredData);
+					const normalizedRecoveredData = this.isLoadDataUsable(recoveredData)
+						? this.normalizeLoadedData(recoveredData)
+						: {};
+					this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS, normalizedRecoveredData);
 					this.stripGhostFields();
 					this.sanitizeTaskFileMapping();
 					return true;
 				}
-				console.error('[Settings] Recovery failed, using default settings');
+				console.error('[Settings] Recovery failed, using default settings in memory only');
 				this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS);
-				new Notice('Settings reset to defaults due to corruption');
-				await this.save();
-				return true;
+				new Notice('Settings appear corrupted and recovery failed. Plugin stopped to avoid overwriting data.json.');
+				return false;
 			}
+
+			const data = this.normalizeLoadedData(rawData);
 
 			this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS, data);
 			this.stripGhostFields();
@@ -80,9 +97,110 @@ export class SafeSettings {
 			return true;
 		} catch (error) {
 			console.error('[Settings] Failed to load data:', error);
+
+			try {
+				const recovered = await this.plugin.settingsBackup.restore();
+				if (recovered) {
+					const recoveredData = await this.plugin.loadData();
+					const normalizedRecoveredData = this.isLoadDataUsable(recoveredData)
+						? this.normalizeLoadedData(recoveredData)
+						: {};
+					this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS, normalizedRecoveredData);
+					this.stripGhostFields();
+					this.sanitizeTaskFileMapping();
+					new Notice('Settings recovered from backup after load failure');
+					return true;
+				}
+			} catch (restoreError) {
+				console.error('[Settings] Backup restore after load failure also failed:', restoreError);
+			}
+
 			this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS);
-			return true;
+			new Notice('Settings load failed. Loaded defaults in memory only; original data was not overwritten.');
+			return false;
 		}
+	}
+
+	private isLoadDataUsable(data: unknown): data is Record<string, unknown> {
+		if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+		try {
+			JSON.parse(JSON.stringify(data));
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	private normalizeLoadedData(data: Record<string, unknown>): Record<string, unknown> {
+		const normalized: Record<string, unknown> = { ...data };
+
+		if (typeof normalized.syncInterval === 'number' && typeof normalized.automaticSynchronizationInterval !== 'number') {
+			normalized.automaticSynchronizationInterval = normalized.syncInterval;
+		}
+
+		if (typeof normalized.todoistApiToken === 'string' && typeof normalized.todoistAPIToken !== 'string') {
+			normalized.todoistAPIToken = normalized.todoistApiToken;
+		}
+
+		if (!normalized.taskFileMapping || typeof normalized.taskFileMapping !== 'object' || Array.isArray(normalized.taskFileMapping)) {
+			normalized.taskFileMapping = {};
+		}
+
+		const taskFileMapping = normalized.taskFileMapping as Record<string, unknown>;
+		if (Object.keys(taskFileMapping).length === 0) {
+			const legacyMapping = this.buildLegacyTaskFileMapping(normalized);
+			if (Object.keys(legacyMapping).length > 0) {
+				normalized.taskFileMapping = legacyMapping;
+				this.plugin.debugLog(`[Settings] Migrated ${Object.keys(legacyMapping).length} mapping entries from legacy todoistTasksData`);
+			}
+		}
+
+		if (!normalized.fileMetadata || typeof normalized.fileMetadata !== 'object' || Array.isArray(normalized.fileMetadata)) {
+			normalized.fileMetadata = {};
+		}
+
+		return normalized;
+	}
+
+	private buildLegacyTaskFileMapping(data: Record<string, unknown>): Record<string, TaskMappingEntry> {
+		const legacyCache = data.todoistTasksData;
+		if (!legacyCache || typeof legacyCache !== 'object' || Array.isArray(legacyCache)) return {};
+
+		const tasks = (legacyCache as Record<string, unknown>).tasks;
+		if (!Array.isArray(tasks)) return {};
+
+		const migrated: Record<string, TaskMappingEntry> = {};
+		for (const task of tasks) {
+			if (!task || typeof task !== 'object' || Array.isArray(task)) continue;
+
+			const legacyTask = task as Record<string, unknown>;
+			const rawTaskId = legacyTask.id;
+			const rawFilePath = legacyTask.path;
+
+			if ((typeof rawTaskId !== 'string' && typeof rawTaskId !== 'number') || typeof rawFilePath !== 'string') {
+				continue;
+			}
+
+			const taskId = String(rawTaskId).trim();
+			const filePath = rawFilePath.trim();
+			if (!taskId || !filePath || migrated[taskId]) continue;
+
+			const entry: TaskMappingEntry = {
+				filePath,
+				syncEnabled: true,
+				status: legacyTask.isCompleted === true ? 'nonActive' : 'active',
+			};
+
+			if (typeof legacyTask.updated_at === 'string') {
+				entry.updated_at = legacyTask.updated_at;
+			} else if (typeof legacyTask.updatedAt === 'string') {
+				entry.updated_at = legacyTask.updatedAt;
+			}
+
+			migrated[taskId] = entry;
+		}
+
+		return migrated;
 	}
 
 	async save(): Promise<boolean> {
