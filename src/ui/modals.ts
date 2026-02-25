@@ -340,6 +340,7 @@ export class TaskManagerModal extends Modal {
 	private selectedTaskId: string | null = null;
 	private taskData: { conflicted: string[], issue: string[], nonActive: string[] } = { conflicted: [], issue: [], nonActive: [] };
 	private scrollArea: HTMLElement | null = null;
+	private _activeOverlay: HTMLElement | null = null;
 	constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
 		super(app);
 		this.plugin = plugin;
@@ -435,8 +436,9 @@ export class TaskManagerModal extends Modal {
 					if (this._closed) return;
 					const fp = this.plugin.settings.taskFileMapping[ids[i]]?.filePath || '';
 					bulkObsBtn.textContent = `Resolving ${i + 1}/${ids.length}...`;
-					await this.resolveConflict(ids[i], fp, 'obsidian');
+					await this.resolveConflict(ids[i], fp, 'obsidian', true);
 				}
+				if (!this._closed) await this.loadAndRender();
 			});
 			const bulkTodBtn = bulkBar.createEl('button', { cls: 'tm-btn tm-btn--secondary', text: 'Resolve All: Todoist' });
 			bulkTodBtn.addEventListener('click', async () => {
@@ -446,8 +448,9 @@ export class TaskManagerModal extends Modal {
 					if (this._closed) return;
 					const fp = this.plugin.settings.taskFileMapping[ids[i]]?.filePath || '';
 					bulkTodBtn.textContent = `Resolving ${i + 1}/${ids.length}...`;
-					await this.resolveConflict(ids[i], fp, 'todoist');
+					await this.resolveConflict(ids[i], fp, 'todoist', true);
 				}
+				if (!this._closed) await this.loadAndRender();
 			});
 		}
 		if (this.taskData.issue.length > 0) {
@@ -461,8 +464,9 @@ export class TaskManagerModal extends Modal {
 				for (let i = 0; i < ids.length; i++) {
 					if (this._closed) return;
 					bulkDelBtn.textContent = `Deleting ${i + 1}/${ids.length}...`;
-					await this.deleteIssueTask(ids[i]);
+					await this.deleteIssueTask(ids[i], true);
 				}
+				if (!this._closed) await this.loadAndRender();
 			});
 		}
 		if (this.taskData.nonActive.length > 0) {
@@ -475,8 +479,9 @@ export class TaskManagerModal extends Modal {
 					if (this._closed) return;
 					const fp = this.plugin.settings.taskFileMapping[ids[i]]?.filePath || '';
 					bulkReBtn.textContent = `Re-enabling ${i + 1}/${ids.length}...`;
-					await this.reEnableTask(ids[i], fp);
+					await this.reEnableTask(ids[i], fp, true);
 				}
+				if (!this._closed) await this.loadAndRender();
 			});
 			const bulkDelInBtn = bulkBar.createEl('button', { cls: 'tm-btn tm-btn--danger', text: 'Delete All Inactive' });
 			bulkDelInBtn.addEventListener('click', async () => {
@@ -487,8 +492,9 @@ export class TaskManagerModal extends Modal {
 				for (let i = 0; i < ids.length; i++) {
 					if (this._closed) return;
 					bulkDelInBtn.textContent = `Deleting ${i + 1}/${ids.length}...`;
-					await this.deleteIssueTask(ids[i]);
+					await this.deleteIssueTask(ids[i], true);
 				}
+				if (!this._closed) await this.loadAndRender();
 			});
 		}
 		if (!hasBulkOps) bulkBar.remove();
@@ -690,11 +696,11 @@ export class TaskManagerModal extends Modal {
 			await this.deleteIssueTask(taskId);
 		});
 	}
-	private async resolveConflict(taskId: string, filePath: string, choice: 'obsidian' | 'todoist') {
+	private async resolveConflict(taskId: string, filePath: string, choice: 'obsidian' | 'todoist', skipRerender = false) {
 		try {
 			if (choice === 'obsidian') {
 				const line = await this.getTaskLine(taskId, filePath);
-				if (!line) { new Notice('Task line not found in vault'); return; }
+				if (!line) { new Notice('Task line not found in vault'); this.navigateToList(); return; }
 				const content = this.plugin.taskParser.getTaskContentFromLineText(line);
 				const labels = this.plugin.taskParser.getAllTagsFromLineText(line);
 				const dueDate = this.plugin.taskParser.getDueDateFromLineText(line);
@@ -747,7 +753,7 @@ export class TaskManagerModal extends Modal {
 				new Notice(`Conflict resolved: kept Obsidian version`);
 			} else {
 				const task = this.plugin.todoistSyncAPI.getTaskByIdLocal(taskId);
-				if (!task) { new Notice('Task not found in Todoist'); return; }
+				if (!task) { new Notice('Task not found in Todoist'); this.navigateToList(); return; }
 				// Echo protection: prevent file writes from triggering push sync back to Todoist
 				this.plugin.isSyncingFromTodoist = true;
 				try {
@@ -756,6 +762,8 @@ export class TaskManagerModal extends Modal {
 					}
 					const todoistDueDate = task.due?.date || '';
 					await this.plugin.fileOperation.syncTaskDueDateToFile(taskId, todoistDueDate);
+					// Invalidate file cache after content/date writes so tag/priority sync reads fresh data
+					this._fileCache.delete(filePath);
 					// Sync tags (labels) from Todoist to file
 					const todoistLabels = task.labels || [];
 					let currentLine = await this.getTaskLine(taskId, filePath);
@@ -839,12 +847,12 @@ export class TaskManagerModal extends Modal {
 			console.error(`[TaskManagerModal] resolveConflict error:`, e);
 			new Notice(`Error resolving conflict: ${e}`);
 		}
-		if (this._closed) return;
+		if (this._closed || skipRerender) return;
 		this.currentView = 'list';
 		this.selectedTaskId = null;
 		await this.loadAndRender();
 	}
-    private async deleteIssueTask(taskId: string) {
+    private async deleteIssueTask(taskId: string, skipRerender = false) {
         const confirmed = await this.showConfirmDialog(`Delete task ${taskId}? This removes it from Todoist and unbinds from file.`);
         if (!confirmed) return;
         try {
@@ -866,12 +874,12 @@ export class TaskManagerModal extends Modal {
             console.error(`[TaskManagerModal] deleteIssueTask error:`, e);
             new Notice(`Error deleting task: ${e}`);
         }
-        if (this._closed) return;
+        if (this._closed || skipRerender) return;
         this.currentView = 'list';
         this.selectedTaskId = null;
         await this.loadAndRender();
     }
-    private async reEnableTask(taskId: string, filePath: string) {
+    private async reEnableTask(taskId: string, filePath: string, skipRerender = false) {
         try {
             await this.plugin.cacheOperation.setTaskFileMapping(taskId, filePath, 'active', true);
             this.plugin.safeSettings?.update({}, true);
@@ -880,7 +888,7 @@ export class TaskManagerModal extends Modal {
             console.error(`[TaskManagerModal] reEnableTask error:`, e);
             new Notice(`Error re-enabling task: ${e}`);
         }
-        if (this._closed) return;
+        if (this._closed || skipRerender) return;
         this.currentView = 'list';
         this.selectedTaskId = null;
         await this.loadAndRender();
@@ -889,13 +897,15 @@ export class TaskManagerModal extends Modal {
         return new Promise((resolve) => {
             const overlay = document.createElement('div');
             overlay.className = 'tm-confirm-overlay';
+            this._activeOverlay = overlay;
+            const cleanup = () => { overlay.remove(); this._activeOverlay = null; };
             const box = overlay.createDiv({ cls: 'tm-confirm-box' });
             box.createDiv({ cls: 'tm-confirm-msg', text: message });
             const actions = box.createDiv({ cls: 'tm-confirm-actions' });
             const cancelBtn = actions.createEl('button', { cls: 'tm-btn tm-btn--secondary', text: 'Cancel' });
-            cancelBtn.addEventListener('click', () => { overlay.remove(); resolve(false); });
+            cancelBtn.addEventListener('click', () => { cleanup(); resolve(false); });
             const confirmBtn = actions.createEl('button', { cls: 'tm-btn tm-btn--danger', text: 'Delete' });
-            confirmBtn.addEventListener('click', () => { overlay.remove(); resolve(true); });
+            confirmBtn.addEventListener('click', () => { cleanup(); resolve(true); });
             document.body.appendChild(overlay);
         });
     }
@@ -904,6 +914,11 @@ export class TaskManagerModal extends Modal {
         if (file instanceof TFile) {
             this.app.workspace.getLeaf(false).openFile(file);
         }
+    }
+    private navigateToList() {
+        this.currentView = 'list';
+        this.selectedTaskId = null;
+        this.renderCurrentView();
     }
     private async getTaskLine(taskId: string, filePath: string): Promise<string | null> {
         try {
@@ -926,6 +941,11 @@ export class TaskManagerModal extends Modal {
     }
     onClose() {
         this._closed = true;
+        // Clean up any lingering confirm dialog overlay
+        if (this._activeOverlay) {
+            this._activeOverlay.remove();
+            this._activeOverlay = null;
+        }
         const { contentEl } = this;
         contentEl.empty();
     }
