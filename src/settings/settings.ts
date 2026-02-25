@@ -683,22 +683,22 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                 })
             );
 
-        new Setting(containerEl)
-            .setName('Restore Settings')
-            .setDesc('Restore settings from latest backup.')
-            .addButton(button => button
-                .setButtonText('Restore')
-                .onClick(async () => {
-                    if (!this.plugin.settingsBackup) {
-                        new Notice('Settings backup not initialized')
-                        return;
-                    }
-                    const success = await this.plugin.settingsBackup.restore();
-                    if (success) {
-                        new Notice('Settings restored. Please reload the plugin.');
-                    }
-                })
-            );
+		new Setting(containerEl)
+			.setName('Restore Settings')
+			.setDesc('Restore settings from latest backup.')
+			.addButton(button => button
+				.setButtonText('Restore')
+				.onClick(async () => {
+					if (!this.plugin.safeSettings) {
+						new Notice('Settings backup not initialized')
+						return;
+					}
+					const success = await this.plugin.safeSettings.restoreFromLatestBackup();
+					if (success) {
+						new Notice('Settings restored and reloaded.');
+					}
+				})
+			);
 
         new Setting(containerEl)
             .setName('View Backup History')

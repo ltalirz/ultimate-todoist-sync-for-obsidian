@@ -26,9 +26,95 @@ export class SafeSettings {
 	private plugin: UltimateTodoistSyncForObsidian;
 	private lastBackupTime = 0;
 	private static readonly BACKUP_THROTTLE_MS = 5 * 60 * 1000;
+	private static readonly SAVE_DEBOUNCE_MS = 1200;
+	private settingsIoQueue: Promise<void> = Promise.resolve();
+	private saveDebounceTimer: number | null = null;
+	private hasDirtyChanges = false;
+	private lastSavedSnapshot = '';
 
 	constructor(plugin: UltimateTodoistSyncForObsidian) {
 		this.plugin = plugin;
+	}
+
+	public async withSettingsIOLock<T>(_operation: string, fn: () => Promise<T>): Promise<T> {
+		const run = this.settingsIoQueue.then(async () => {
+			this.plugin.saveLock = true;
+			try {
+				return await fn();
+			} finally {
+				this.plugin.saveLock = false;
+			}
+		}, async () => {
+			this.plugin.saveLock = true;
+			try {
+				return await fn();
+			} finally {
+				this.plugin.saveLock = false;
+			}
+		});
+
+		this.settingsIoQueue = run.then(() => undefined, () => undefined);
+		return run;
+	}
+
+	private buildSettingsSnapshot(): string {
+		return JSON.stringify(this.plugin.settings, null, 2);
+	}
+
+	private markPersisted(snapshot: string): void {
+		this.hasDirtyChanges = false;
+		this.lastSavedSnapshot = snapshot;
+	}
+
+	private markDirty(): void {
+		this.hasDirtyChanges = true;
+	}
+
+	private syncPersistedStateFromMemory(isDirty: boolean): void {
+		try {
+			this.lastSavedSnapshot = this.buildSettingsSnapshot();
+			this.hasDirtyChanges = isDirty;
+		} catch (error) {
+			console.error('[Settings] Failed to sync persisted state snapshot:', error);
+			this.lastSavedSnapshot = '';
+			this.hasDirtyChanges = true;
+		}
+	}
+
+	private cancelDebouncedSave(): void {
+		if (this.saveDebounceTimer !== null) {
+			window.clearTimeout(this.saveDebounceTimer);
+			this.saveDebounceTimer = null;
+		}
+	}
+
+	private scheduleDebouncedSave(): void {
+		this.cancelDebouncedSave();
+		this.saveDebounceTimer = window.setTimeout(() => {
+			this.saveDebounceTimer = null;
+			this.save().catch(error => {
+				console.error('[Settings] Debounced save failed:', error);
+			});
+		}, SafeSettings.SAVE_DEBOUNCE_MS);
+	}
+
+	private async reloadSettingsFromDisk(): Promise<boolean> {
+		const rawData = await this.plugin.loadData();
+		if (!this.isLoadDataUsable(rawData)) return false;
+
+		const normalizedData = this.normalizeLoadedData(rawData);
+		this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS, normalizedData);
+		this.stripUnknownFields();
+		this.sanitizeTaskFileMapping();
+		this.syncPersistedStateFromMemory(false);
+		return true;
+	}
+
+	async restoreFromLatestBackup(): Promise<boolean> {
+		if (!this.plugin.settingsBackup) return false;
+		const restored = await this.plugin.settingsBackup.restore();
+		if (!restored) return false;
+		return this.reloadSettingsFromDisk();
 	}
 
 
@@ -52,6 +138,7 @@ export class SafeSettings {
 
 			if (rawData === null || rawData === undefined) {
 				this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS);
+				this.syncPersistedStateFromMemory(false);
 				return true;
 			}
 
@@ -68,6 +155,7 @@ export class SafeSettings {
 					this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS, normalizedRecoveredData);
 					this.stripUnknownFields();
 					this.sanitizeTaskFileMapping();
+					this.syncPersistedStateFromMemory(false);
 					return true;
 				}
 				console.error('[Settings] Recovery failed, using default settings in memory only');
@@ -82,6 +170,7 @@ export class SafeSettings {
 			this.sanitizeTaskFileMapping();
 			// Run schema migrations (v0 → v1 → ... → CURRENT_SCHEMA_VERSION)
 			await this.runMigrations(rawData);
+			this.syncPersistedStateFromMemory(false);
 
 			return true;
 		} catch (error) {
@@ -97,6 +186,7 @@ export class SafeSettings {
 					this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS, normalizedRecoveredData);
 					this.stripUnknownFields();
 					this.sanitizeTaskFileMapping();
+					this.syncPersistedStateFromMemory(false);
 					new Notice('Settings recovered from backup after load failure');
 					return true;
 				}
@@ -105,6 +195,7 @@ export class SafeSettings {
 			}
 
 			this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS);
+			this.syncPersistedStateFromMemory(false);
 			new Notice('Settings load failed. Loaded defaults in memory only; original data was not overwritten.');
 			return false;
 		}
@@ -193,51 +284,52 @@ export class SafeSettings {
 	}
 
 	async save(): Promise<boolean> {
-		if (this.plugin.saveLock) {
-			this.plugin.debugLog('[Settings] Save already in progress, skipping...');
-			return false;
-		}
+		this.cancelDebouncedSave();
 
-		this.plugin.saveLock = true;
-		const settingsPath = StoragePathManager.SETTINGS_FILE;
-		const tempPath = StoragePathManager.SETTINGS_TEMP_FILE;
+		return this.withSettingsIOLock('save', async () => {
+			const settingsPath = StoragePathManager.SETTINGS_FILE;
+			const tempPath = StoragePathManager.SETTINGS_TEMP_FILE;
 
-		try {
-			if (!this.plugin.settings || Object.keys(this.plugin.settings).length === 0) {
-				console.error('[Settings] Settings are empty or invalid, not saving to avoid data loss.');
-				this.plugin.saveLock = false;
-				return false;
-			}
-
-			if (!this.validate(this.plugin.settings)) {
-				console.error('[Settings] Settings validation failed');
-				this.plugin.saveLock = false;
-				return false;
-			}
-
-			const settingsJson = JSON.stringify(this.plugin.settings, null, 2);
-			const adapter = this.plugin.app.vault.adapter;
-
-			await adapter.write(tempPath, settingsJson);
-			if (!await adapter.exists(tempPath)) {
-				throw new Error('Temp file was not created');
-			}
-			await adapter.write(settingsPath, settingsJson);
 			try {
-				await adapter.remove(tempPath);
-			} catch (cleanupError) {
-				console.warn('[Settings] Failed to cleanup temp file:', cleanupError);
-			}
+				if (!this.plugin.settings || Object.keys(this.plugin.settings).length === 0) {
+					console.error('[Settings] Settings are empty or invalid, not saving to avoid data loss.');
+					return false;
+				}
 
-			this.plugin.debugLog('[Settings] Settings saved successfully');
-			this.plugin.saveLock = false;
-			return true;
-		} catch (error) {
-			console.error('[Settings] Error saving settings:', error);
-			new Notice('Settings save failed, temp file preserved for recovery');
-			this.plugin.saveLock = false;
-			return false;
-		}
+				if (!this.validate(this.plugin.settings)) {
+					console.error('[Settings] Settings validation failed');
+					return false;
+				}
+
+				const settingsJson = this.buildSettingsSnapshot();
+				const adapter = this.plugin.app.vault.adapter;
+				const settingsExists = await adapter.exists(settingsPath);
+
+				if (!this.hasDirtyChanges && settingsExists && settingsJson === this.lastSavedSnapshot) {
+					this.plugin.debugLog('[Settings] No changes detected, skipping save');
+					return true;
+				}
+
+				await adapter.write(tempPath, settingsJson);
+				if (!await adapter.exists(tempPath)) {
+					throw new Error('Temp file was not created');
+				}
+				await adapter.write(settingsPath, settingsJson);
+				try {
+					await adapter.remove(tempPath);
+				} catch (cleanupError) {
+					console.warn('[Settings] Failed to cleanup temp file:', cleanupError);
+				}
+
+				this.markPersisted(settingsJson);
+				this.plugin.debugLog('[Settings] Settings saved successfully');
+				return true;
+			} catch (error) {
+				console.error('[Settings] Error saving settings:', error);
+				new Notice('Settings save failed, temp file preserved for recovery');
+				return false;
+			}
+		});
 	}
 
 	validate(data: unknown): boolean {
@@ -328,6 +420,7 @@ export class SafeSettings {
 
 		// Stamp current version and persist
 		this.plugin.settings.schemaVersion = CURRENT_SCHEMA_VERSION;
+		this.markDirty();
 		await this.save();
 		console.log(`[Settings] Migration complete — now at schema v${CURRENT_SCHEMA_VERSION}`);
 	}
@@ -344,13 +437,19 @@ export class SafeSettings {
 		await this.throttledBackup();
 		try {
 			Object.assign(this.plugin.settings, changes);
+			this.markDirty();
 			if (shouldSave) {
 				await this.save();
+			} else {
+				this.scheduleDebouncedSave();
 			}
 		} catch (error) {
 			console.error('[SafeSettings] Update failed:', error);
 			if (this.plugin.settingsBackup) {
-				await this.plugin.settingsBackup.restore();
+				const restored = await this.plugin.settingsBackup.restore();
+				if (restored) {
+					await this.reloadSettingsFromDisk();
+				}
 			}
 			throw error;
 		}
@@ -362,11 +461,15 @@ export class SafeSettings {
 		}
 		try {
 			this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS);
+			this.markDirty();
 			await this.save();
 		} catch (error) {
 			console.error('[SafeSettings] Reset failed:', error);
 			if (this.plugin.settingsBackup) {
-				await this.plugin.settingsBackup.restore();
+				const restored = await this.plugin.settingsBackup.restore();
+				if (restored) {
+					await this.reloadSettingsFromDisk();
+				}
 			}
 			throw error;
 		}
@@ -386,6 +489,49 @@ export class SettingsBackup {
 	constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
 		this.app = app;
 		this.plugin = plugin;
+	}
+
+	private async withSettingsIOLock<T>(operation: string, fn: () => Promise<T>): Promise<T> {
+		if (this.plugin.safeSettings) {
+			return this.plugin.safeSettings.withSettingsIOLock(`settings-backup:${operation}`, fn);
+		}
+		return fn();
+	}
+
+	private getBackupDirsToSearch(): string[] {
+		const dirs: string[] = [];
+
+		if (this.plugin.storagePathManager) {
+			dirs.push(this.plugin.storagePathManager.getBackupsSettingsPath());
+		}
+
+		const configuredDir = this.plugin.settings?.storageDirectory;
+		if (configuredDir) {
+			dirs.push(`${configuredDir}/backups/settings`);
+		}
+
+		const lastDir = this.plugin.settings?.lastStorageDirectory;
+		if (lastDir) {
+			dirs.push(`${lastDir}/backups/settings`);
+		}
+
+		dirs.push(`${StoragePathManager.DEFAULT_BASE_PATH}/backups/settings`);
+		dirs.push(`${StoragePathManager.LEGACY_BASE_PATH}/backups/settings`);
+
+		return Array.from(new Set(dirs));
+	}
+
+	private getSortedBackupFiles(): string[] {
+		const searchDirs = this.getBackupDirsToSearch();
+		const files = this.app.vault.getFiles()
+			.filter(file =>
+				searchDirs.some(dir => file.path.startsWith(dir + '/'))
+				&& file.name.startsWith('settings-')
+				&& file.name.endsWith('.json')
+			)
+			.sort((a, b) => b.stat.mtime - a.stat.mtime);
+
+		return files.map(file => file.path);
 	}
 
 	private getBackupDir(): string {
@@ -409,82 +555,82 @@ export class SettingsBackup {
 	}
 
 	async backup(): Promise<boolean> {
-		try {
-			await this.ensureBackupDir();
-			const settingsPath = StoragePathManager.SETTINGS_FILE;
-			const adapter = this.app.vault.adapter;
-			const exists = await adapter.exists(settingsPath);
-			if (!exists) {
-				console.warn('[SettingsBackup] No settings data to backup');
-				return false;
-			}
-			const data = await adapter.read(settingsPath);
-			if (!data) {
-				console.warn('[SettingsBackup] No settings data to backup');
-				return false;
-			}
+		return this.withSettingsIOLock('backup', async () => {
 			try {
-				JSON.parse(data);
-			} catch {
-				console.error('[SettingsBackup] Settings file contains invalid JSON, skipping backup');
+				await this.ensureBackupDir();
+				const settingsPath = StoragePathManager.SETTINGS_FILE;
+				const adapter = this.app.vault.adapter;
+				const exists = await adapter.exists(settingsPath);
+				if (!exists) {
+					console.warn('[SettingsBackup] No settings data to backup');
+					return false;
+				}
+				const data = await adapter.read(settingsPath);
+				if (!data) {
+					console.warn('[SettingsBackup] No settings data to backup');
+					return false;
+				}
+				try {
+					JSON.parse(data);
+				} catch {
+					console.error('[SettingsBackup] Settings file contains invalid JSON, skipping backup');
+					return false;
+				}
+				const now = new Date();
+				const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+				const backupPath = `${this.getBackupDir()}/settings-${timestamp}.json`;
+				await adapter.write(backupPath, data);
+				this.plugin.debugLog('[SettingsBackup] Backup created:', backupPath);
+				await this.cleanOldBackups();
+				return true;
+			} catch (error) {
+				console.error('[SettingsBackup] Backup failed:', error);
 				return false;
 			}
-			const now = new Date();
-			const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
-			const backupPath = `${this.getBackupDir()}/settings-${timestamp}.json`;
-			await adapter.write(backupPath, data);
-			this.plugin.debugLog('[SettingsBackup] Backup created:', backupPath);
-			await this.cleanOldBackups();
-			return true;
-		} catch (error) {
-			console.error('[SettingsBackup] Backup failed:', error);
-			return false;
-		}
+		});
 	}
 
 	async restore(): Promise<boolean> {
-		try {
-			const latestBackup = await this.getLatestBackup();
-			if (!latestBackup) {
-				console.warn('[SettingsBackup] No backup found to restore');
-				return false;
-			}
-			const adapter = this.app.vault.adapter;
-			const data = await adapter.read(latestBackup);
-			if (!data) {
-				console.error('[SettingsBackup] Failed to read backup file');
-				return false;
-			}
+		return this.withSettingsIOLock('restore', async () => {
 			try {
-				JSON.parse(data);
-			} catch {
-				console.error('[SettingsBackup] Backup contains invalid JSON, cannot restore');
-				new Notice('Backup file is corrupted, cannot restore');
+				const latestBackup = await this.getLatestBackup();
+				if (!latestBackup) {
+					console.warn('[SettingsBackup] No backup found to restore');
+					return false;
+				}
+				const adapter = this.app.vault.adapter;
+				const data = await adapter.read(latestBackup);
+				if (!data) {
+					console.error('[SettingsBackup] Failed to read backup file');
+					return false;
+				}
+				try {
+					JSON.parse(data);
+				} catch {
+					console.error('[SettingsBackup] Backup contains invalid JSON, cannot restore');
+					new Notice('Backup file is corrupted, cannot restore');
+					return false;
+				}
+				const settingsPath = StoragePathManager.SETTINGS_FILE;
+				const tempPath = StoragePathManager.SETTINGS_TEMP_FILE;
+				await adapter.write(tempPath, data);
+				await adapter.write(settingsPath, data);
+				await adapter.remove(tempPath).catch(() => {});
+				this.plugin.debugLog('[SettingsBackup] Settings restored from:', latestBackup);
+				new Notice('Settings restored from backup');
+				return true;
+			} catch (error) {
+				console.error('[SettingsBackup] Restore failed:', error);
+				new Notice('Failed to restore settings from backup');
 				return false;
 			}
-			const settingsPath = StoragePathManager.SETTINGS_FILE;
-			const tempPath = StoragePathManager.SETTINGS_TEMP_FILE;
-			await adapter.write(tempPath, data);
-			await adapter.write(settingsPath, data);
-			await adapter.remove(tempPath).catch(() => {});
-			this.plugin.debugLog('[SettingsBackup] Settings restored from:', latestBackup);
-			new Notice('Settings restored from backup');
-			return true;
-		} catch (error) {
-			console.error('[SettingsBackup] Restore failed:', error);
-			new Notice('Failed to restore settings from backup');
-			return false;
-		}
+		});
 	}
 
 	async getLatestBackup(): Promise<string | null> {
 		try {
-			const backupDir = this.getBackupDir();
-			if (!await this.app.vault.adapter.exists(backupDir)) return null;
-			const files = this.app.vault.getFiles()
-				.filter(f => f.path.startsWith(backupDir + '/') && f.name.startsWith('settings-') && f.name.endsWith('.json'))
-				.sort((a, b) => b.stat.mtime - a.stat.mtime);
-			return files[0]?.path ?? null;
+			const files = this.getSortedBackupFiles();
+			return files[0] ?? null;
 		} catch (error) {
 			console.error('[SettingsBackup] Failed to get latest backup:', error);
 			return null;
@@ -493,12 +639,7 @@ export class SettingsBackup {
 
 	async getBackupList(): Promise<string[]> {
 		try {
-			const backupDir = this.getBackupDir();
-			if (!await this.app.vault.adapter.exists(backupDir)) return [];
-			const files = this.app.vault.getFiles()
-				.filter(f => f.path.startsWith(backupDir + '/') && f.name.startsWith('settings-') && f.name.endsWith('.json'))
-				.sort((a, b) => b.stat.mtime - a.stat.mtime);
-			return files.map(f => f.path);
+			return this.getSortedBackupFiles();
 		} catch (error) {
 			console.error('[SettingsBackup] Failed to get backup list:', error);
 			return [];
@@ -506,63 +647,67 @@ export class SettingsBackup {
 	}
 
 	async restoreFromSpecific(backupPath: string): Promise<boolean> {
-		try {
-			const adapter = this.app.vault.adapter;
-			if (!await adapter.exists(backupPath)) {
-				console.error('[SettingsBackup] Backup file not found:', backupPath);
-				return false;
-			}
-			const data = await adapter.read(backupPath);
-			if (!data) return false;
+		return this.withSettingsIOLock('restore-from-specific', async () => {
 			try {
-				JSON.parse(data);
-			} catch {
-				new Notice('Backup file is corrupted');
+				const adapter = this.app.vault.adapter;
+				if (!await adapter.exists(backupPath)) {
+					console.error('[SettingsBackup] Backup file not found:', backupPath);
+					return false;
+				}
+				const data = await adapter.read(backupPath);
+				if (!data) return false;
+				try {
+					JSON.parse(data);
+				} catch {
+					new Notice('Backup file is corrupted');
+					return false;
+				}
+				const settingsPath = StoragePathManager.SETTINGS_FILE;
+				const tempPath = StoragePathManager.SETTINGS_TEMP_FILE;
+				await adapter.write(tempPath, data);
+				await adapter.write(settingsPath, data);
+				await adapter.remove(tempPath).catch(() => {});
+				this.plugin.debugLog('[SettingsBackup] Settings restored from specific backup:', backupPath);
+				new Notice('Settings restored from backup');
+				return true;
+			} catch (error) {
+				console.error('[SettingsBackup] Restore from specific failed:', error);
+				new Notice('Failed to restore settings from backup');
 				return false;
 			}
-			const settingsPath = StoragePathManager.SETTINGS_FILE;
-			const tempPath = StoragePathManager.SETTINGS_TEMP_FILE;
-			await adapter.write(tempPath, data);
-			await adapter.write(settingsPath, data);
-			await adapter.remove(tempPath).catch(() => {});
-			this.plugin.debugLog('[SettingsBackup] Settings restored from specific backup:', backupPath);
-			new Notice('Settings restored from backup');
-			return true;
-		} catch (error) {
-			console.error('[SettingsBackup] Restore from specific failed:', error);
-			new Notice('Failed to restore settings from backup');
-			return false;
-		}
+		});
 	}
 
 	async recoverFromTempFile(): Promise<boolean> {
-		try {
-			const tempPath = StoragePathManager.SETTINGS_TEMP_FILE;
-			const settingsPath = StoragePathManager.SETTINGS_FILE;
-			const adapter = this.app.vault.adapter;
-			if (!await adapter.exists(tempPath)) return false;
-			const data = await adapter.read(tempPath);
-			if (!data) return false;
+		return this.withSettingsIOLock('recover-temp', async () => {
 			try {
-				JSON.parse(data);
-			} catch {
-				console.error('[SettingsBackup] Temp file contains invalid JSON');
+				const tempPath = StoragePathManager.SETTINGS_TEMP_FILE;
+				const settingsPath = StoragePathManager.SETTINGS_FILE;
+				const adapter = this.app.vault.adapter;
+				if (!await adapter.exists(tempPath)) return false;
+				const data = await adapter.read(tempPath);
+				if (!data) return false;
+				try {
+					JSON.parse(data);
+				} catch {
+					console.error('[SettingsBackup] Temp file contains invalid JSON');
+					await adapter.remove(tempPath).catch(() => {});
+					return false;
+				}
+				// Atomic: write temp copy → write actual → remove temp copy
+				const recoveryTempPath = settingsPath + '.recovery.tmp';
+				await adapter.write(recoveryTempPath, data);
+				await adapter.write(settingsPath, data);
+				await adapter.remove(recoveryTempPath).catch(() => {});
 				await adapter.remove(tempPath).catch(() => {});
+				this.plugin.debugLog('[SettingsBackup] Recovered from temp file');
+				new Notice('Settings recovered from temp file');
+				return true;
+			} catch (error) {
+				console.error('[SettingsBackup] Failed to recover from temp file:', error);
 				return false;
 			}
-			// Atomic: write temp copy → write actual → remove temp copy
-			const recoveryTempPath = settingsPath + '.recovery.tmp';
-			await adapter.write(recoveryTempPath, data);
-			await adapter.write(settingsPath, data);
-			await adapter.remove(recoveryTempPath).catch(() => {});
-			await adapter.remove(tempPath).catch(() => {});
-			this.plugin.debugLog('[SettingsBackup] Recovered from temp file');
-			new Notice('Settings recovered from temp file');
-			return true;
-		} catch (error) {
-			console.error('[SettingsBackup] Failed to recover from temp file:', error);
-			return false;
-		}
+		});
 	}
 
 	async hasTempFile(): Promise<boolean> {
@@ -586,15 +731,12 @@ export class SettingsBackup {
 
 	private async cleanOldBackups(): Promise<void> {
 		try {
-			const backupDir = this.getBackupDir();
-			const files = this.app.vault.getFiles()
-				.filter(f => f.path.startsWith(backupDir + '/') && f.name.startsWith('settings-'))
-				.sort((a, b) => b.stat.mtime - a.stat.mtime);
+			const files = this.getSortedBackupFiles();
 			if (files.length > this.maxBackups) {
 				const adapter = this.app.vault.adapter;
-				for (const file of files.slice(this.maxBackups)) {
+				for (const filePath of files.slice(this.maxBackups)) {
 					try {
-						if (await adapter.exists(file.path)) await adapter.remove(file.path);
+						if (await adapter.exists(filePath)) await adapter.remove(filePath);
 					} catch {
 						// concurrent cleanup, ignore
 					}
