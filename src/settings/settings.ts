@@ -94,20 +94,66 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
         new Setting(containerEl)
             .setName('Todoist API Token')
             .setDesc('Enter your Todoist API token and click the send button to connect.')
-            .addText((text) =>
+            .addText((text) => {
                 text
                     .setPlaceholder('Enter your API token')
-                    .setValue(this.plugin.settings.todoistAPIToken)
-                    .onChange(async (value) => {
+                    .setValue(this.plugin.settings.todoistAPIToken);
+                text.inputEl.type = 'password';
+                text.inputEl.addEventListener('blur', async () => {
+                    const value = text.inputEl.value;
+                    if (value !== this.plugin.settings.todoistAPIToken) {
                         await this.plugin.safeSettings?.update({ todoistAPIToken: value, apiInitialized: false });
-                    })
-            )
+                    }
+                });
+            })
+            .addExtraButton((button) => {
+                button.setIcon('eye')
+                    .setTooltip('Toggle token visibility')
+                    .onClick(() => {
+                        const settingEl = button.extraSettingsEl.closest('.setting-item');
+                        const inputEl = settingEl?.querySelector('input') as HTMLInputElement | null;
+                        if (inputEl) {
+                            const isHidden = inputEl.type === 'password';
+                            inputEl.type = isHidden ? 'text' : 'password';
+                            button.setIcon(isHidden ? 'eye-off' : 'eye');
+                        }
+                    });
+            })
             .addExtraButton((button) => {
                 button.setIcon('send')
+                    .setTooltip('Connect to Todoist')
                     .onClick(async () => {
-                        await this.plugin.modifyTodoistAPI(this.plugin.settings.todoistAPIToken)
-                        this.display()
-                    })
+                        // Save token from input before connecting (in case blur hasn't fired)
+                        const settingEl = button.extraSettingsEl.closest('.setting-item');
+                        const inputEl = settingEl?.querySelector('input') as HTMLInputElement | null;
+                        if (inputEl) {
+                            const value = inputEl.value;
+                            if (value !== this.plugin.settings.todoistAPIToken) {
+                                await this.plugin.safeSettings?.update({ todoistAPIToken: value, apiInitialized: false });
+                            }
+                        }
+                        button.setIcon('loader');
+                        button.setDisabled(true);
+                        try {
+                            const result = await this.plugin.modifyTodoistAPI(this.plugin.settings.todoistAPIToken);
+                            if (result) {
+                                button.setIcon('check');
+                            } else {
+                                button.setIcon('x');
+                                new Notice('Failed to connect to Todoist. Please check your API token.');
+                            }
+                        } catch (error) {
+                            button.setIcon('x');
+                            new Notice(`Connection error: ${error instanceof Error ? error.message : String(error)}`);
+                        } finally {
+                            button.setDisabled(false);
+                            // Reset icon after 2 seconds
+                            setTimeout(() => {
+                                button.setIcon('send');
+                            }, 2000);
+                        }
+                        this.display();
+                    });
             });
 
         // ============================================

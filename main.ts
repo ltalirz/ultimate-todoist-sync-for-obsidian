@@ -140,8 +140,9 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		return this.safeSettings!.save();
 	}
 
-	async modifyTodoistAPI(api: string) {
-		await this.initializePlugin();
+	async modifyTodoistAPI(api: string): Promise<boolean> {
+		const result = await this.initializePlugin();
+		return result === true;
 	}
 
 	async initializePlugin() {
