@@ -120,7 +120,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                     });
             })
             .addExtraButton((button) => {
-                button.setIcon('send')
+                button.setIcon('log-in')
                     .setTooltip('Connect to Todoist')
                     .onClick(async () => {
                         // Save token from input before connecting (in case blur hasn't fired)
@@ -137,19 +137,19 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         try {
                             const result = await this.plugin.modifyTodoistAPI(this.plugin.settings.todoistAPIToken);
                             if (result) {
-                                button.setIcon('check');
+                                button.setIcon('check-circle');
                             } else {
-                                button.setIcon('x');
+                                button.setIcon('x-circle');
                                 new Notice('Failed to connect to Todoist. Please check your API token.');
                             }
                         } catch (error) {
-                            button.setIcon('x');
+                            button.setIcon('x-circle');
                             new Notice(`Connection error: ${error instanceof Error ? error.message : String(error)}`);
                         } finally {
                             button.setDisabled(false);
                             // Reset icon after 2 seconds
                             setTimeout(() => {
-                                button.setIcon('send');
+                                button.setIcon('log-in');
                             }, 2000);
                         }
                         this.display();
