@@ -376,3 +376,134 @@
 	gap: 8px;
 	justify-content: flex-end;
 }
+/* ============================================
+   List View (master-detail)
+   ============================================ */
+.tm-list-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 8px 14px;
+	cursor: pointer;
+	border-bottom: 1px solid var(--background-modifier-border-hover);
+	transition: background 0.1s ease;
+}
+.tm-list-row:last-child {
+	border-bottom: none;
+}
+.tm-list-row:hover {
+	background: var(--background-modifier-hover);
+}
+.tm-list-icon {
+	flex-shrink: 0;
+	width: 20px;
+	text-align: center;
+	font-size: 14px;
+}
+.tm-list-content {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 13px;
+	color: var(--text-normal);
+}
+.tm-list-file {
+	flex-shrink: 0;
+	max-width: 180px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 12px;
+	color: var(--text-muted);
+}
+.tm-list-badge {
+	flex-shrink: 0;
+	padding: 1px 8px;
+	border-radius: 10px;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.3px;
+}
+.tm-list-badge--conflict {
+	background: hsla(30, 100%, 50%, 0.12);
+	color: hsl(30, 100%, 45%);
+}
+.tm-list-badge--issue {
+	background: hsla(0, 80%, 55%, 0.12);
+	color: hsl(0, 80%, 50%);
+}
+.tm-list-badge--nonactive {
+	background: hsla(210, 15%, 55%, 0.12);
+	color: var(--text-muted);
+}
+/* ============================================
+   Detail View (master-detail)
+   ============================================ */
+.tm-detail-header {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 16px 24px 12px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+.tm-detail-back {
+	background: none;
+	border: none;
+	cursor: pointer;
+	font-size: 18px;
+	padding: 4px 8px;
+	border-radius: 4px;
+	color: var(--text-muted);
+	line-height: 1;
+}
+.tm-detail-back:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+.tm-detail-title {
+	font-size: 16px;
+	font-weight: 600;
+	margin: 0;
+}
+.tm-detail-body {
+	padding: 16px 24px 24px;
+	max-height: 65vh;
+	overflow-y: auto;
+}
+.tm-detail-info {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-bottom: 16px;
+	padding: 12px 14px;
+	background: var(--background-secondary);
+	border-radius: 8px;
+	border: 1px solid var(--background-modifier-border);
+}
+.tm-detail-info-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 13px;
+}
+.tm-detail-info-label {
+	color: var(--text-muted);
+	font-weight: 500;
+	min-width: 60px;
+}
+.tm-detail-info-value {
+	color: var(--text-normal);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.tm-detail-actions {
+	display: flex;
+	gap: 8px;
+	margin-top: 16px;
+	padding-top: 16px;
+	border-top: 1px solid var(--background-modifier-border);
+}
