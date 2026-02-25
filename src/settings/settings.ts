@@ -119,41 +119,39 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         }
                     });
             })
-            .addExtraButton((button) => {
-                button.setIcon('log-in')
-                    .setTooltip('Connect to Todoist')
-                    .onClick(async () => {
-                        // Save token from input before connecting (in case blur hasn't fired)
-                        const settingEl = button.extraSettingsEl.closest('.setting-item');
-                        const inputEl = settingEl?.querySelector('input') as HTMLInputElement | null;
-                        if (inputEl) {
-                            const value = inputEl.value;
-                            if (value !== this.plugin.settings.todoistAPIToken) {
-                                await this.plugin.safeSettings?.update({ todoistAPIToken: value, apiInitialized: false });
-                            }
+            .addButton((button) => {
+                button.setButtonText('Connect');
+                button.onClick(async () => {
+                    // Save token from input before connecting (in case blur hasn't fired)
+                    const settingEl = button.buttonEl.closest('.setting-item');
+                    const inputEl = settingEl?.querySelector('input') as HTMLInputElement | null;
+                    if (inputEl) {
+                        const value = inputEl.value;
+                        if (value !== this.plugin.settings.todoistAPIToken) {
+                            await this.plugin.safeSettings?.update({ todoistAPIToken: value, apiInitialized: false });
                         }
-                        button.setIcon('loader');
-                        button.setDisabled(true);
-                        try {
-                            const result = await this.plugin.modifyTodoistAPI(this.plugin.settings.todoistAPIToken);
-                            if (result) {
-                                button.setIcon('check-circle');
-                            } else {
-                                button.setIcon('x-circle');
-                                new Notice('Failed to connect to Todoist. Please check your API token.');
-                            }
-                        } catch (error) {
-                            button.setIcon('x-circle');
-                            new Notice(`Connection error: ${error instanceof Error ? error.message : String(error)}`);
-                        } finally {
-                            button.setDisabled(false);
-                            // Reset icon after 2 seconds
-                            setTimeout(() => {
-                                button.setIcon('log-in');
-                            }, 2000);
+                    }
+                    button.setButtonText('Connecting...');
+                    button.setDisabled(true);
+                    try {
+                        const result = await this.plugin.modifyTodoistAPI(this.plugin.settings.todoistAPIToken);
+                        if (result) {
+                            button.setButtonText('✓ Connected');
+                        } else {
+                            button.setButtonText('✗ Failed');
+                            new Notice('Failed to connect to Todoist. Please check your API token.');
                         }
-                        this.display();
-                    });
+                    } catch (error) {
+                        button.setButtonText('✗ Error');
+                        new Notice(`Connection error: ${error instanceof Error ? error.message : String(error)}`);
+                    } finally {
+                        button.setDisabled(false);
+                        setTimeout(() => {
+                            button.setButtonText('Connect');
+                        }, 2000);
+                    }
+                    this.display();
+                });
             });
 
         // ============================================
