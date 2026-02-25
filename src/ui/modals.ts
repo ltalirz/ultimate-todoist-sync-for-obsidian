@@ -563,6 +563,14 @@ export class TaskManagerModal extends Modal {
 		const idRow = infoCard.createDiv({ cls: 'tm-detail-info-row' });
 		idRow.createSpan({ cls: 'tm-detail-info-label', text: 'Task ID' });
 		idRow.createSpan({ cls: 'tm-detail-info-value tm-task-id', text: taskId });
+		const todoistRow = infoCard.createDiv({ cls: 'tm-detail-info-row' });
+		todoistRow.createSpan({ cls: 'tm-detail-info-label', text: 'Todoist' });
+		const todoistLink = todoistRow.createEl('a', { cls: 'tm-detail-info-value tm-todoist-link', text: 'Open in Todoist' });
+		todoistLink.addEventListener('click', (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			this.openTodoistTask(taskId);
+		});
 		const fileRow = infoCard.createDiv({ cls: 'tm-detail-info-row' });
 		fileRow.createSpan({ cls: 'tm-detail-info-label', text: 'File' });
 		const fileLink = fileRow.createEl('a', { cls: 'tm-detail-info-value tm-file-link', text: filePath || '—' });
@@ -909,16 +917,33 @@ export class TaskManagerModal extends Modal {
             document.body.appendChild(overlay);
         });
     }
-    private openFile(filePath: string) {
-        const file = this.app.vault.getAbstractFileByPath(filePath);
-        if (file instanceof TFile) {
-            this.app.workspace.getLeaf(false).openFile(file);
-        }
-    }
-    private navigateToList() {
-        this.currentView = 'list';
-        this.selectedTaskId = null;
-        this.renderCurrentView();
+	private openFile(filePath: string) {
+		const file = this.app.vault.getAbstractFileByPath(filePath);
+		if (file instanceof TFile) {
+			this.app.workspace.getLeaf(false).openFile(file);
+		}
+	}
+	private buildTodoistTaskUrl(taskId: string): string {
+		const encodedTaskId = encodeURIComponent(taskId);
+		if (this.plugin.settings.useAppURI) {
+			return `todoist://task?id=${encodedTaskId}`;
+		}
+
+		return `https://app.todoist.com/app/task/${encodedTaskId}`;
+	}
+	private openTodoistTask(taskId: string): void {
+		if (!taskId) {
+			new Notice('Task ID not found.');
+			return;
+		}
+
+		const url = this.buildTodoistTaskUrl(taskId);
+		window.open(url, '_blank', 'noopener,noreferrer');
+	}
+	private navigateToList() {
+		this.currentView = 'list';
+		this.selectedTaskId = null;
+		this.renderCurrentView();
     }
     private async getTaskLine(taskId: string, filePath: string): Promise<string | null> {
         try {

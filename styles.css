@@ -137,6 +137,16 @@
 .tm-file-link:hover {
     text-decoration: underline;
 }
+.tm-todoist-link {
+	font-size: 12px;
+	color: var(--text-accent);
+	cursor: pointer;
+	text-decoration: none;
+	white-space: nowrap;
+}
+.tm-todoist-link:hover {
+	text-decoration: underline;
+}
 /* Diff table */
 .tm-diff {
     width: 100%;
