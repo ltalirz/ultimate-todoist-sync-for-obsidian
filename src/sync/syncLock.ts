@@ -1,5 +1,3 @@
-import { Notice } from 'obsidian';
-
 import UltimateTodoistSyncForObsidian from '../../main';
 
 export type SyncDirection = 'obsidianToTodoist' | 'todoistToObsidian';
@@ -30,6 +28,15 @@ export class SyncLockManager {
 		return !this.locked;
 	}
 
+	async waitForSaveRelease(): Promise<boolean> {
+		let attempts = 0;
+		while (this.plugin.saveLock && attempts < 10) {
+			await new Promise(resolve => setTimeout(resolve, 500));
+			attempts++;
+		}
+		return !this.plugin.saveLock;
+	}
+
 
 	async acquire(direction?: SyncDirection): Promise<boolean> {
 		if (!this.plugin.settings.syncEnabled) {
@@ -45,6 +52,15 @@ export class SyncLockManager {
 		if (direction === 'todoistToObsidian' && !this.plugin.settings.todoistToObsidianEnabled) {
 			this.plugin.debugLog('Todoist → Obsidian sync is disabled by user');
 			return false;
+		}
+
+		if (this.plugin.saveLock) {
+			this.plugin.debugLog('save locked, waiting before sync acquire.');
+			const saveReleased = await this.waitForSaveRelease();
+			if (!saveReleased) {
+				this.plugin.debugLog('save lock did not release in time.');
+				return false;
+			}
 		}
 
 		if (this.locked) {
