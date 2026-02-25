@@ -34,8 +34,10 @@ export interface DatabaseCheckIssue {
         | 'unknown_issue'            // Vault 有但 mapping 和 Todoist 都没有（未知问题）
         | 'content_mismatch'         // 内容不一致
         | 'status_mismatch'          // 完成状态不一致
+        | 'due_date_mismatch'
+        | 'stale_todoist_link'
         | 'priority_mismatch'        // 优先级不一致
-        | 'label_mismatch'          // 标签不一致
+        | 'labels_mismatch'
         | 'project_mismatch'         // 项目不一致
         | 'duplicate_task';          // 重复任务（同一文件多行同一任务）
     
@@ -54,8 +56,9 @@ export interface DatabaseCheckIssue {
     obsidianStatus?: boolean;       // Obsidian 中的完成状态
     todoistStatus?: boolean;        // Todoist 中的完成状态
     
-    // 日期相关
-    dueDate?: string;               // 截止日期
+        // 日期相关
+    dueDate?: string;
+    todoistDueDate?: string;
     
     // 优先级相关
     priority?: number;              // 优先级（通用）
@@ -72,6 +75,9 @@ export interface DatabaseCheckIssue {
     labels?: string[];              // 标签（通用）
     obsidianLabels?: string[];     // Obsidian 中的标签
     todoistLabels?: string[];      // Todoist 中的标签
+
+    expectedFilePath?: string;
+    todoistFilePath?: string;
 }
 
 /**
@@ -85,6 +91,8 @@ export interface VaultTask {
     filePath: string;              // 任务所在文件路径
     lineNumber: number;            // 任务所在行号（0-indexed）
     labels: string[];              // 任务标签（#tag 格式）
+    dueDate?: string;
+    priority?: number;
 }
 
 
@@ -96,6 +104,7 @@ export interface VaultTask {
 export interface TodoistTask {
     taskId: string;                 // 任务 ID
     content: string;                // 任务内容
+    description?: string;
     checked: boolean;           // 是否已完成
     dueDate?: string;              // 截止日期
     priority: number;               // 优先级 (1-4, 1 最高)
@@ -124,11 +133,13 @@ export interface DatabaseCheckResult {
         newTaskNotSynced: number;           // 新任务未同步
         taskNonActive: number;              // 已标记为 nonActive 的任务
         taskIssue: number;                  // 已标记为 issue 的任务
+        staleTodoistLink: number;
         unknownIssue: number;               // 未知问题
         contentMismatch: number;             // 内容不一致
         statusMismatch: number;              // 状态不一致
+        dueDateMismatch: number;
         priorityMismatch: number;            // 优先级不一致
-        labelMismatch: number;               // 标签不一致
+        labelsMismatch: number;
         projectMismatch: number;            // 项目不一致
         duplicateTask: number;              // 重复任务
     };
@@ -166,6 +177,14 @@ export class DatabaseChecker {
         this.plugin = plugin;
     }
 
+    private normalizeFilePath(path: string): string {
+        try {
+            return decodeURIComponent(path).replace(/\\/g, '/');
+        } catch (_error) {
+            return path.replace(/\\/g, '/');
+        }
+    }
+
     /**
      * 主检查方法 - 执行完整的数据库一致性检查
      * 
@@ -194,11 +213,13 @@ export class DatabaseChecker {
             newTaskNotSynced: 0,              // 新任务未同步
             taskNonActive: 0,                 // 已标记为 nonActive 的任务
             taskIssue: 0,                     // 已标记为 issue 的任务
+            staleTodoistLink: 0,
             unknownIssue: 0,                  // 未知问题
             contentMismatch: 0,                // 内容不一致
             statusMismatch: 0,                 // 状态不一致
+            dueDateMismatch: 0,
             priorityMismatch: 0,              // 优先级不一致
-            labelMismatch: 0,                 // 标签不一致
+            labelsMismatch: 0,
             projectMismatch: 0,               // 项目不一致
             duplicateTask: 0                  // 重复任务
         };
@@ -372,11 +393,13 @@ export class DatabaseChecker {
             newTaskNotSynced: 0,
             taskNonActive: 0,
             taskIssue: 0,
+            staleTodoistLink: 0,
             unknownIssue: 0,
             contentMismatch: 0,
             statusMismatch: 0,
+            dueDateMismatch: 0,
             priorityMismatch: 0,
-            labelMismatch: 0,
+            labelsMismatch: 0,
             projectMismatch: 0,
             duplicateTask: 0
         };
@@ -441,33 +464,43 @@ export class DatabaseChecker {
                         summary.statusMismatch++;
                     }
 
-                    // ---- 检查优先级一致性 ----
-                    // Priority is stored as !!<n> in task text, not as labels
-                    // Skip priority check here — vault scan doesn't extract priority from text
-                    const vaultPriority = todoistTask!.priority;
-                    // Priority check disabled: vault scan doesn't extract priority from text
-                    // if (vaultPriority !== todoistTask!.priority) {
-                    //     issues.push({
-                    //         type: 'priority_mismatch',
-                    //         filePath: vaultTask!.filePath,
-                    //         taskId,
-                    //         lineNumber: vaultTask!.lineNumber,
-                    //         details: `Priority mismatch: Vault is ${vaultPriority}, Todoist is ${todoistTask!.priority}`,
-                    //         obsidianPriority: vaultPriority,
-                    //         todoistPriority: todoistTask!.priority
-                    //     });
-                    //     summary.priorityMismatch++;
-                    // }
+                    const vaultDueDate = vaultTask!.dueDate || '';
+                    const todoistDueDate = todoistTask!.dueDate || '';
+                    if (vaultDueDate !== todoistDueDate) {
+                        issues.push({
+                            type: 'due_date_mismatch',
+                            filePath: vaultTask!.filePath,
+                            taskId,
+                            lineNumber: vaultTask!.lineNumber,
+                            details: `Due date mismatch: Vault is ${vaultDueDate || '(none)'}, Todoist is ${todoistDueDate || '(none)'}`,
+                            dueDate: vaultDueDate,
+                            todoistDueDate,
+                        });
+                        summary.dueDateMismatch++;
+                    }
 
-                    // ---- 检查标签一致性 ----
-                    // vaultTask.labels 现在已经不带 # 前缀（由 fileOperation.extractLabelsFromLine 处理）
+                    const vaultPriority = vaultTask!.priority || 1;
+                    const todoistPriority = todoistTask!.priority || 1;
+                    if (vaultPriority !== todoistPriority) {
+                        issues.push({
+                            type: 'priority_mismatch',
+                            filePath: vaultTask!.filePath,
+                            taskId,
+                            lineNumber: vaultTask!.lineNumber,
+                            details: `Priority mismatch: Vault is ${vaultPriority}, Todoist is ${todoistPriority}`,
+                            obsidianPriority: vaultPriority,
+                            todoistPriority,
+                        });
+                        summary.priorityMismatch++;
+                    }
+
                     const obsidianLabels = (vaultTask!.labels || []).filter(l => l !== 'todoist');
                     const todoistLabels = (todoistTask!.labels || []).filter(l => l !== 'todoist');
                     const labelDiff = obsidianLabels.filter(l => !todoistLabels.includes(l)).length > 0 ||
                                      todoistLabels.filter(l => !obsidianLabels.includes(l)).length > 0;
                     if (labelDiff) {
                         issues.push({
-                            type: 'label_mismatch',
+                            type: 'labels_mismatch',
                             filePath: vaultTask!.filePath,
                             taskId,
                             lineNumber: vaultTask!.lineNumber,
@@ -475,7 +508,7 @@ export class DatabaseChecker {
                             obsidianLabels,
                             todoistLabels
                         });
-                        summary.labelMismatch++;
+                        summary.labelsMismatch++;
                     }
 
                     // ---- 检查项目一致性 ----
@@ -493,6 +526,26 @@ export class DatabaseChecker {
                                 todoistProjectId: todoistTask!.projectId
                             });
                             summary.projectMismatch++;
+                        }
+                    }
+
+                    const descriptionFilePath = this.plugin.taskParser?.extractFilePathFromObsidianDescription(todoistTask!.description || '');
+                    if (descriptionFilePath && mapping?.filePath) {
+                        const expectedPath = this.normalizeFilePath(mapping.filePath);
+                        const parsedPath = this.normalizeFilePath(descriptionFilePath);
+
+                        if (expectedPath !== parsedPath) {
+                            issues.push({
+                                type: 'stale_todoist_link',
+                                filePath: vaultTask!.filePath,
+                                taskId,
+                                lineNumber: vaultTask!.lineNumber,
+                                details: `Todoist description link points to ${parsedPath} but mapping expects ${expectedPath}`,
+                                expectedFilePath: expectedPath,
+                                todoistFilePath: parsedPath,
+                                todoistContent: todoistTask!.description || ''
+                            });
+                            summary.staleTodoistLink++;
                         }
                     }
                 } else {
@@ -663,8 +716,9 @@ export class DatabaseChecker {
         // 计算第二步 8 种情况的统计
         // 情况 1: Vault ✅ + Mapping ✅ + Todoist ✅ = 全部 Vault+Mapping 任务 - 有问题的任务
         const totalVaultWithMappingTasks = step1.vaultWithMapping;
-        const issuesInVaultWithMapping = result.summary.contentMismatch + result.summary.statusMismatch + 
-            result.summary.priorityMismatch + result.summary.labelMismatch + 
+        const issuesInVaultWithMapping = result.summary.contentMismatch + result.summary.statusMismatch +
+            result.summary.dueDateMismatch + result.summary.priorityMismatch + result.summary.labelsMismatch +
+            result.summary.staleTodoistLink +
             result.summary.projectMismatch;
         const c1 = totalVaultWithMappingTasks - issuesInVaultWithMapping; // 一致的任务
         
@@ -767,8 +821,10 @@ Generated: ${new Date().toLocaleString()}
                 'task_not_in_vault': 'File Missing',
                 'content_mismatch': 'Content Mismatch',
                 'status_mismatch': 'Status Mismatch',
+                'stale_todoist_link': 'Stale Obsidian Link in Todoist',
                 'priority_mismatch': 'Priority Mismatch',
-                'label_mismatch': 'Label Mismatch',
+                'due_date_mismatch': 'Due Date Mismatch',
+                'labels_mismatch': 'Labels Mismatch',
                 'project_mismatch': 'Project Mismatch',
                 'duplicate_task': 'Duplicate Task',
                 'new_task_not_synced': 'New Task Not Synced'
@@ -855,6 +911,20 @@ Generated: ${new Date().toLocaleString()}
                     markdown += '\n';
                 }
 
+                if (type === 'due_date_mismatch') {
+                    markdown += `#### Due Date Details\n\n`;
+                    for (let i = 0; i < Math.min(issues.length, 10); i++) {
+                        const issue = issues[i];
+                        const obsDue = issue.dueDate || 'none';
+                        const todoDue = issue.todoistDueDate || 'none';
+                        markdown += `- **\`${issue.taskId}\`**: Vault is **${obsDue}**, Todoist is **${todoDue}**\n`;
+                    }
+                    if (issues.length > 10) {
+                        markdown += `*... and ${issues.length - 10} more*\n`;
+                    }
+                    markdown += '\n';
+                }
+
                 // 为优先级不一致问题添加详细对比
                 if (type === 'priority_mismatch') {
                     markdown += `#### Priority Details\n\n`;
@@ -871,7 +941,7 @@ Generated: ${new Date().toLocaleString()}
                 }
 
                 // 为标签不一致问题添加详细对比
-                if (type === 'label_mismatch') {
+                if (type === 'labels_mismatch') {
                     markdown += `#### Label Details\n\n`;
                     for (let i = 0; i < Math.min(issues.length, 10); i++) {
                         const issue = issues[i];

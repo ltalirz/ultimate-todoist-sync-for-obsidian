@@ -2,6 +2,60 @@ import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../../main";
 import { LogViewerModal, TaskManagerModal } from '../ui/modals';
 import { RebuildCacheResult } from '../data/cache';
+import { deriveTaskStatusFromIssueEntries, normalizeTaskIssueTypeKey } from '../data/taskIssueUtils';
+import type { DatabaseCheckIssue, DatabaseCheckResult } from '../data/databaseChecker';
+
+export type TaskIssueType =
+    | 'content_mismatch'
+    | 'status_mismatch'
+    | 'due_date_mismatch'
+    | 'labels_mismatch'
+    | 'priority_mismatch'
+    | 'project_mismatch'
+    | 'stale_todoist_link'
+    | 'task_deleted_in_todoist'
+    | 'task_not_in_vault'
+    | 'vault_task_no_mapping'
+    | 'mapping_file_not_found'
+    | 'mapping_task_not_in_todoist'
+    | 'mapping_orphan'
+    | 'new_task_not_synced'
+    | 'task_issue'
+    | 'task_nonactive'
+    | 'duplicate_task'
+    | 'unknown_issue';
+
+export interface TaskIssueEntry {
+    state: 'open' | 'resolved' | 'ignored';
+    severity: 'low' | 'medium' | 'high';
+    source: 'database_checker' | 'runtime';
+    detectedAt: number;
+    lastSeenAt: number;
+    details?: string;
+    expected?: string;
+    actual?: string;
+    manualAction?: string;
+}
+
+export interface TaskFileMappingEntry {
+    filePath: string;
+    status?: 'active' | 'nonActive' | 'conflicted' | 'issue';
+    syncEnabled?: boolean;
+    updated_at?: string;
+    note_count?: number;
+    issues?: Record<string, TaskIssueEntry>;
+}
+
+export function normalizeTaskIssueType(issueType: string): TaskIssueType {
+    return normalizeTaskIssueTypeKey(issueType) as TaskIssueType;
+}
+
+export function deriveTaskStatusFromIssues(
+    issues: Record<string, TaskIssueEntry> | undefined,
+    fallbackStatus: 'active' | 'nonActive' | 'conflicted' | 'issue' = 'active'
+): 'active' | 'nonActive' | 'conflicted' | 'issue' {
+    return deriveTaskStatusFromIssueEntries(issues, fallbackStatus);
+}
 
 export interface UltimateTodoistSyncSettings {
     initialized: boolean;
@@ -12,13 +66,7 @@ export interface UltimateTodoistSyncSettings {
     automaticSynchronizationInterval: number;
     fileMetadata: Record<string, { defaultProjectId?: string }>;
     taskFileMapping: {
-        [taskId: string]: {
-            filePath: string;
-            status?: 'active' | 'nonActive' | 'conflicted' | 'issue';
-            syncEnabled?: boolean;
-            updated_at?: string;
-            note_count?: number;
-        };
+        [taskId: string]: TaskFileMappingEntry;
     };
     enableFullVaultSync: boolean;
     debugMode: boolean;
@@ -79,6 +127,155 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
     constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
         super(app, plugin);
         this.plugin = plugin;
+    }
+
+    private normalizeIssueType(issueType: string): TaskIssueType {
+        return normalizeTaskIssueType(issueType);
+    }
+
+    private getIssueSeverity(issueType: TaskIssueType): TaskIssueEntry['severity'] {
+        if (issueType === 'stale_todoist_link' || issueType === 'content_mismatch' || issueType === 'status_mismatch') {
+            return 'high';
+        }
+        if (issueType === 'due_date_mismatch' || issueType === 'labels_mismatch' || issueType === 'priority_mismatch' || issueType === 'project_mismatch') {
+            return 'medium';
+        }
+        return 'low';
+    }
+
+    private getIssueManualAction(issueType: TaskIssueType): string | undefined {
+        if (issueType === 'stale_todoist_link') return 'Repair in Manage Problem Tasks';
+        if (issueType === 'task_deleted_in_todoist') return 'Resolve in Manage Problem Tasks';
+        return undefined;
+    }
+
+    private buildIssueExpectedActual(issue: DatabaseCheckIssue): { expected?: string; actual?: string } {
+        const normalizedType = this.normalizeIssueType(issue.type);
+        if (normalizedType === 'stale_todoist_link') {
+            return {
+                expected: issue.expectedFilePath,
+                actual: issue.todoistFilePath,
+            };
+        }
+        if (normalizedType === 'due_date_mismatch') {
+            return {
+                expected: issue.dueDate,
+                actual: issue.todoistDueDate,
+            };
+        }
+        if (normalizedType === 'labels_mismatch') {
+            return {
+                expected: issue.obsidianLabels?.join(', '),
+                actual: issue.todoistLabels?.join(', '),
+            };
+        }
+        if (normalizedType === 'priority_mismatch') {
+            return {
+                expected: issue.obsidianPriority !== undefined ? String(issue.obsidianPriority) : undefined,
+                actual: issue.todoistPriority !== undefined ? String(issue.todoistPriority) : undefined,
+            };
+        }
+        if (normalizedType === 'status_mismatch') {
+            return {
+                expected: issue.obsidianStatus !== undefined ? String(issue.obsidianStatus) : undefined,
+                actual: issue.todoistStatus !== undefined ? String(issue.todoistStatus) : undefined,
+            };
+        }
+        if (normalizedType === 'content_mismatch') {
+            return {
+                expected: issue.obsidianContent,
+                actual: issue.todoistContent,
+            };
+        }
+
+        return {};
+    }
+
+    private async applyDatabaseIssuesToMapping(result: DatabaseCheckResult): Promise<void> {
+        const taskFileMapping = { ...this.plugin.settings.taskFileMapping };
+        const now = Date.now();
+        const seenIssueTypesByTask = new Map<string, Set<string>>();
+        const clonedEntries = new Set<string>();
+        let changed = false;
+
+        const ensureClonedEntry = (taskId: string): TaskFileMappingEntry | undefined => {
+            const originalEntry = taskFileMapping[taskId];
+            if (!originalEntry) return undefined;
+            if (!clonedEntries.has(taskId)) {
+                taskFileMapping[taskId] = {
+                    ...originalEntry,
+                    issues: originalEntry.issues ? { ...originalEntry.issues } : undefined,
+                };
+                clonedEntries.add(taskId);
+            }
+            return taskFileMapping[taskId];
+        };
+
+        for (const issue of result.issues) {
+            if (!issue.taskId) continue;
+            const mappingEntry = ensureClonedEntry(issue.taskId);
+            if (!mappingEntry) continue;
+
+            const issueType = this.normalizeIssueType(issue.type);
+            if (!mappingEntry.issues) mappingEntry.issues = {};
+
+            const existingIssue = mappingEntry.issues[issueType];
+            const expectedActual = this.buildIssueExpectedActual(issue);
+
+            mappingEntry.issues[issueType] = {
+                state: 'open',
+                severity: this.getIssueSeverity(issueType),
+                source: 'database_checker',
+                detectedAt: existingIssue?.detectedAt ?? now,
+                lastSeenAt: now,
+                details: issue.details,
+                expected: expectedActual.expected,
+                actual: expectedActual.actual,
+                manualAction: this.getIssueManualAction(issueType),
+            };
+
+            const seenIssueTypes = seenIssueTypesByTask.get(issue.taskId) || new Set<string>();
+            seenIssueTypes.add(issueType);
+            seenIssueTypesByTask.set(issue.taskId, seenIssueTypes);
+            changed = true;
+        }
+
+        for (const taskId of Object.keys(taskFileMapping)) {
+            const mappingEntry = ensureClonedEntry(taskId);
+            if (!mappingEntry) continue;
+            if (!mappingEntry.issues) continue;
+
+            const seenIssueTypes = seenIssueTypesByTask.get(taskId) || new Set<string>();
+            for (const [issueType, issueEntry] of Object.entries(mappingEntry.issues)) {
+                if (issueEntry.source !== 'database_checker') continue;
+                if (issueEntry.state !== 'open') continue;
+                if (seenIssueTypes.has(issueType)) continue;
+
+                mappingEntry.issues[issueType] = {
+                    ...issueEntry,
+                    state: 'resolved',
+                    lastSeenAt: now,
+                };
+                changed = true;
+            }
+
+            const fallbackStatus = mappingEntry.status || 'active';
+            const nextStatus = deriveTaskStatusFromIssues(mappingEntry.issues, fallbackStatus);
+            if (mappingEntry.status !== nextStatus) {
+                mappingEntry.status = nextStatus;
+                changed = true;
+            }
+
+            const nextSyncEnabled = nextStatus === 'active';
+            if (mappingEntry.syncEnabled !== nextSyncEnabled) {
+                mappingEntry.syncEnabled = nextSyncEnabled;
+                changed = true;
+            }
+        }
+
+        if (changed) {
+            await this.plugin.safeSettings?.update({ taskFileMapping }, true);
+        }
     }
 
     display(): void {
@@ -436,6 +633,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         const before = await databaseChecker.checkDatabase((msg) => {
                             progressNotice.setMessage(`Step 1/3: ${msg}`);
                         });
+                        await this.applyDatabaseIssuesToMapping(before);
                         if (before.success) {
                             progressNotice.hide();
                             await this.plugin.safeSettings?.update({
@@ -461,11 +659,11 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                             if (rebuildResult.tasksWithoutIdCount > 0) parts.push(`${rebuildResult.tasksWithoutIdCount} unsynced tasks`);
                             new Notice(parts.join(' · '), 8000);
                         }
-                        // Step 3: Re-check to see what remains
                         progressNotice.setMessage('Step 3/3: Re-checking database...');
                         const after = await databaseChecker.checkDatabase((msg) => {
                             progressNotice.setMessage(`Step 3/3: ${msg}`);
                         });
+                        await this.applyDatabaseIssuesToMapping(after);
                         progressNotice.hide();
                         const fixedCount = Math.max(0, before.totalIssues - after.totalIssues);
                         const remainingCount = after.totalIssues;
@@ -484,6 +682,9 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         }
                         if (after.reportPath) {
                             new Notice(`Report: ${after.reportPath}`, 5000);
+                        }
+                        if (after.summary.staleTodoistLink > 0) {
+                            new Notice(`🔗 Found ${after.summary.staleTodoistLink} stale Todoist links. Please repair them manually in Manage Problem Tasks.`, 8000);
                         }
                     } catch (error) {
                         progressNotice.hide();
@@ -532,7 +733,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Manage Problem Tasks')
-            .setDesc('View and resolve conflicted, issue, and inactive tasks.')
+            .setDesc('View and resolve conflicted, issue, inactive, and stale-link tasks.')
             .addButton(button => button
                 .setButtonText('Manage')
                 .onClick(() => {

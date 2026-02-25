@@ -42,9 +42,10 @@
  * ==========================================================================================
  */
 
-import { App, TFile} from 'obsidian';
+import { App, Notice, TFile} from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../../main";
 import { TaskConflict } from '../ui/modals';
+import { deriveTaskStatusFromIssueEntries, normalizeTaskIssueTypeKey } from './taskIssueUtils';
 
 export interface RebuildCacheResult {
     success: boolean;
@@ -55,6 +56,22 @@ export interface RebuildCacheResult {
     convertedCount: number;
     tasksWithoutIdCount: number;
 }
+
+type TaskIssueState = 'open' | 'resolved' | 'ignored';
+type TaskIssueSeverity = 'low' | 'medium' | 'high';
+type TaskIssueSource = 'database_checker' | 'runtime';
+
+type TaskIssueRecord = Record<string, {
+    state: TaskIssueState;
+    severity: TaskIssueSeverity;
+    source: TaskIssueSource;
+    detectedAt: number;
+    lastSeenAt: number;
+    details?: string;
+    expected?: string;
+    actual?: string;
+    manualAction?: string;
+}>;
 
 /**
  * ==========================================================================================
@@ -263,7 +280,7 @@ export class CacheOperation   {
      * @param taskId - Todoist 任务 ID
      * @returns 文件路径、状态和同步开关，如果不存在则返回 null
      */
-    getTaskFileMapping(taskId: string): { filePath: string; status?: string; syncEnabled?: boolean; updated_at?: string; note_count?: number } | null {
+    getTaskFileMapping(taskId: string): { filePath: string; status?: string; syncEnabled?: boolean; updated_at?: string; note_count?: number; issues?: Record<string, unknown> } | null {
         return this.plugin.settings.taskFileMapping[taskId] ?? null;
     }
 
@@ -283,7 +300,10 @@ export class CacheOperation   {
      */
     async setTaskFileMapping(taskId: string, filePath: string, status: 'active' | 'nonActive' | 'conflicted' | 'issue' = 'active', syncEnabled: boolean = true): Promise<void> {
         const mapping = { ...this.plugin.settings.taskFileMapping };
-        mapping[taskId] = { filePath, status, syncEnabled };
+        const existing = mapping[taskId];
+        const nextStatus = deriveTaskStatusFromIssueEntries(existing?.issues as Record<string, { state?: string }> | undefined, status);
+        const nextSyncEnabled = nextStatus === 'active' ? syncEnabled : false;
+        mapping[taskId] = { ...existing, filePath, status: nextStatus, syncEnabled: nextSyncEnabled };
         await this.plugin.safeSettings?.update({ taskFileMapping: mapping });
     }
 
@@ -295,6 +315,63 @@ export class CacheOperation   {
         if (meta.updated_at !== undefined) mapping[taskId].updated_at = meta.updated_at;
         if (meta.note_count !== undefined) mapping[taskId].note_count = meta.note_count;
         await this.plugin.safeSettings?.update({ taskFileMapping: mapping });
+    }
+
+    async upsertTaskIssue(
+        taskId: string,
+        issueType: string,
+        issue: {
+            state?: TaskIssueState;
+            severity?: TaskIssueSeverity;
+            source?: TaskIssueSource;
+            details?: string;
+            expected?: string;
+            actual?: string;
+            manualAction?: string;
+        },
+        shouldSave: boolean = true
+    ): Promise<void> {
+        const existing = this.plugin.settings.taskFileMapping[taskId];
+        if (!existing) return;
+
+        const mapping = { ...this.plugin.settings.taskFileMapping };
+        const current = mapping[taskId];
+        if (!current) return;
+
+        const now = Date.now();
+        const issueRecord: TaskIssueRecord = {};
+        if (current.issues && typeof current.issues === 'object' && !Array.isArray(current.issues)) {
+            for (const [existingIssueType, existingIssue] of Object.entries(current.issues as TaskIssueRecord)) {
+                issueRecord[normalizeTaskIssueTypeKey(existingIssueType)] = existingIssue;
+            }
+        }
+
+        const normalizedIssueType = normalizeTaskIssueTypeKey(issueType);
+        const previous = issueRecord[normalizedIssueType];
+        issueRecord[normalizedIssueType] = {
+            state: issue.state ?? 'open',
+            severity: issue.severity ?? 'medium',
+            source: issue.source ?? 'runtime',
+            detectedAt: typeof previous?.detectedAt === 'number' ? previous.detectedAt : now,
+            lastSeenAt: now,
+            details: issue.details,
+            expected: issue.expected,
+            actual: issue.actual,
+            manualAction: issue.manualAction,
+        };
+
+        const fallbackStatus = (current.status || 'active') as 'active' | 'nonActive' | 'conflicted' | 'issue';
+        const nextStatus = deriveTaskStatusFromIssueEntries(issueRecord, fallbackStatus);
+        const nextSyncEnabled = nextStatus === 'active' ? (current.syncEnabled ?? true) : false;
+
+        mapping[taskId] = {
+            ...current,
+            issues: issueRecord,
+            status: nextStatus,
+            syncEnabled: nextSyncEnabled,
+        };
+
+        await this.plugin.safeSettings?.update({ taskFileMapping: mapping }, shouldSave);
     }
 
     /**
@@ -363,13 +440,21 @@ export class CacheOperation   {
                 //search new filepath
                 this.plugin.debugLog(`file ${filepath} is not exist`) 
                 const todoistId1 = tasks[0]
+                if (!todoistId1) {
+                    continue;
+                }
+                if (!this.plugin.fileOperation) {
+                    continue;
+                }
                 this.plugin.debugLog(todoistId1)
                 const searchResult = await this.plugin.fileOperation.searchFilepathsByTaskidInVault(todoistId1)
                 this.plugin.debugLog(`new file path is`)
                 this.plugin.debugLog(searchResult)
 
 				//update metadata
-				await this.updateRenamedFilePath(filepath,searchResult)
+				if (typeof searchResult === 'string' && searchResult.length > 0) {
+					await this.updateRenamedFilePath(filepath, searchResult)
+				}
 				const saved = await this.plugin.saveSettings();
 				if (!saved) {
 					console.warn('[checkFileMetadata] saveSettings skipped or failed');
@@ -414,7 +499,7 @@ export class CacheOperation   {
             return this.plugin.settings.defaultProjectName;
         } else {
             const defaultProjectId = metadatas[filepath].defaultProjectId;
-            const project = this.plugin.todoistSyncAPI.getSyncData()?.projects?.find((p: any) => p.id === defaultProjectId);
+            const project = this.plugin.todoistSyncAPI?.getSyncData()?.projects?.find((p: any) => p.id === defaultProjectId);
             return project?.name || this.plugin.settings.defaultProjectName;
         }
     }
@@ -517,7 +602,7 @@ export class CacheOperation   {
      * @returns 项目 ID，如果不存在则返回 null
      */
     getProjectIdByNameFromCache(projectName: string): any {
-        return this.plugin.todoistSyncAPI.getSyncData()?.projects?.find((p: any) => p.name === projectName)?.id || null;
+        return this.plugin.todoistSyncAPI?.getSyncData()?.projects?.find((p: any) => p.name === projectName)?.id || null;
     }
 
     // ==========================================================================================
@@ -532,7 +617,7 @@ export class CacheOperation   {
      * @returns 项目名称，如果不存在则返回 null
      */
     getProjectNameByIdFromCache(projectId: string): any {
-        return this.plugin.todoistSyncAPI.getSyncData()?.projects?.find((p: any) => p.id === projectId)?.name || null;
+        return this.plugin.todoistSyncAPI?.getSyncData()?.projects?.find((p: any) => p.id === projectId)?.name || null;
     }
 
     // DEPRECATED: Using syncData from Todoist API instead
@@ -623,6 +708,7 @@ export class CacheOperation   {
      * @returns Promise<RebuildCacheResult>
      */
     async rebuildCache(noticeCallback?: (message: string) => void): Promise<RebuildCacheResult> {
+        const backupMapping = { ...this.plugin.settings.taskFileMapping };
         try {
             if (noticeCallback) {
                 noticeCallback('Starting cache rebuild...');
@@ -643,7 +729,6 @@ export class CacheOperation   {
             // ==========================================================================================
             
             // Step 1: Backup old mapping, then clear (restore on failure)
-            const backupMapping = { ...this.plugin.settings.taskFileMapping };
             await this.plugin.safeSettings?.update({ taskFileMapping: {} }, false);
 
             // ==========================================================================================
@@ -664,10 +749,15 @@ export class CacheOperation   {
                 this.plugin.debugLog('Ensuring sync data is loaded...');
             }
             
-            let syncData = this.plugin.todoistSyncAPI.getSyncData();
+            const todoistSyncAPI = this.plugin.todoistSyncAPI;
+            if (!todoistSyncAPI) {
+                throw new Error('Todoist Sync API is not initialized');
+            }
+
+            let syncData = todoistSyncAPI.getSyncData();
             if (!syncData) {
-                await this.plugin.todoistSyncAPI.initializeSync();
-                syncData = this.plugin.todoistSyncAPI.getSyncData();
+                await todoistSyncAPI.initializeSync();
+                syncData = todoistSyncAPI.getSyncData();
             }
 
             // ==========================================================================================
@@ -699,6 +789,9 @@ export class CacheOperation   {
             }
             
             // 使用 fileOperation 的统一扫描方法
+            if (!this.plugin.fileOperation) {
+                throw new Error('File operation module is not initialized');
+            }
             const { tasksWithId, tasksWithoutId } = await this.plugin.fileOperation.scanVaultTasks();
             
             // 转换为 fileTaskMap 格式: Map<filePath, tasks[]>
@@ -762,7 +855,7 @@ export class CacheOperation   {
             }
 
             // 获取 syncData 中所有活动的任务 ID（用于判断是否是 legacy ID）
-            const activeTaskIds = new Set(syncData?.items?.map(t => t.id) || []);
+            const activeTaskIds = new Set(syncData?.items?.map((t: { id: string }) => t.id) || []);
 
             // 找出需要转换的潜在 legacy ID（不在 syncData 中的 ID）
             const tasksNeedConversion: { taskId: string; content: string; filePath: string; lineNumber: number }[] = [];
@@ -791,7 +884,7 @@ export class CacheOperation   {
                 // 调用 todoistSyncAPI 的 convertLegacyIds 方法
                 // 该方法通过任务内容匹配来找到对应的新 ID
                 try {
-                    idMapping = await this.plugin.todoistSyncAPI.convertLegacyIds(tasksNeedConversion);
+                    idMapping = await todoistSyncAPI.convertLegacyIds(tasksNeedConversion);
                     convertedCount = Object.keys(idMapping).length;
                     this.plugin.debugLog(`[rebuildCache] Converted ${convertedCount} legacy IDs`);
                 } catch (error) {
@@ -836,11 +929,12 @@ export class CacheOperation   {
                 if (item?.id) syncItemsMap.set(item.id, item);
             }
             
-            const nextMapping: Record<string, { filePath: string; status?: 'active' | 'nonActive' | 'conflicted' | 'issue'; syncEnabled?: boolean; updated_at?: string; note_count?: number }> = {};
+            const nextMapping: Record<string, { filePath: string; status?: 'active' | 'nonActive' | 'conflicted' | 'issue'; syncEnabled?: boolean; updated_at?: string; note_count?: number; issues?: TaskIssueRecord }> = {};
             const conflicts: TaskConflict[] = [];
             let processedCount = 0;
             let nonActiveCount = 0;
             let issueCount = 0;
+            const now = Date.now();
             const totalTasks = Array.from(fileTaskMap.values())
                 .reduce((sum, tasks) => sum + tasks.length, 0);
             const invalidTaskIds: string[] = [];
@@ -853,11 +947,27 @@ export class CacheOperation   {
                         
                         if (!task) {
                             const status = taskInfo.isCompleted ? 'nonActive' : 'issue';
+                            const issueType = taskInfo.isCompleted ? 'task_nonactive' : 'task_deleted_in_todoist';
+                            const issueSeverity: TaskIssueSeverity = taskInfo.isCompleted ? 'low' : 'high';
                             if (status === 'nonActive') nonActiveCount++;
                             else issueCount++;
                             nextMapping[taskInfo.taskId] = {
                                 filePath,
-                                status, syncEnabled: false
+                                status,
+                                syncEnabled: false,
+                                issues: {
+                                    [issueType]: {
+                                        state: 'open',
+                                        severity: issueSeverity,
+                                        source: 'runtime',
+                                        detectedAt: now,
+                                        lastSeenAt: now,
+                                        details: taskInfo.isCompleted
+                                            ? 'Task is completed in vault but missing in Todoist.'
+                                            : 'Task no longer exists in Todoist.',
+                                        manualAction: 'Resolve in Manage Problem Tasks',
+                                    }
+                                }
                             };
                             this.plugin.logOperation?.log(
                                 taskInfo.isCompleted ? 'CACHE_TASK_NONACTIVE' : 'CACHE_TASK_ISSUE',
@@ -868,7 +978,7 @@ export class CacheOperation   {
                         }
                         
                         if (idMapping[taskInfo.taskId]) {
-                            await this.plugin.fileOperation.updateTaskIdInVault(
+                            await this.plugin.fileOperation!.updateTaskIdInVault(
                                 filePath,
                                 taskInfo.taskId, taskId
                             );
@@ -885,6 +995,27 @@ export class CacheOperation   {
                         const statusConflict = obsidianIsCompleted !== todoistIsCompleted;
                         
                         if (contentConflict || statusConflict) {
+                            const conflictIssues: TaskIssueRecord = {};
+                            if (contentConflict) {
+                                conflictIssues.content_mismatch = {
+                                    state: 'open',
+                                    severity: 'high',
+                                    source: 'runtime',
+                                    detectedAt: now,
+                                    lastSeenAt: now,
+                                    details: 'Task content differs between Obsidian and Todoist.',
+                                };
+                            }
+                            if (statusConflict) {
+                                conflictIssues.status_mismatch = {
+                                    state: 'open',
+                                    severity: 'high',
+                                    source: 'runtime',
+                                    detectedAt: now,
+                                    lastSeenAt: now,
+                                    details: 'Task completion status differs between Obsidian and Todoist.',
+                                };
+                            }
                             conflicts.push({
                                 taskId: mappingTaskId, filePath,
                                 obsidianContent, todoistContent,
@@ -892,7 +1023,9 @@ export class CacheOperation   {
                             });
                             nextMapping[mappingTaskId] = {
                                 filePath,
-                                status: 'conflicted', syncEnabled: false
+                                status: 'conflicted',
+                                syncEnabled: false,
+                                issues: conflictIssues,
                             };
                             this.plugin.logOperation?.log('CACHE_TASK_CONFLICTED', `Task ${mappingTaskId} marked as conflicted`, filePath, mappingTaskId);
                         } else {

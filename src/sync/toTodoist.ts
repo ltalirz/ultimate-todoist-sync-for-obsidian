@@ -305,6 +305,13 @@ export class ObsidianToTodoistSync {
                 }
                 console.warn(`[lineModifiedTaskCheck] Task ${lineTask_todoist_id} not found in Todoist (deleted?), marking as issue`);
                 await this.plugin.cacheOperation.setTaskFileMapping(lineTask_todoist_id, taskMapping.filePath, 'issue', false);
+                await this.plugin.cacheOperation.upsertTaskIssue(lineTask_todoist_id, 'task_deleted_in_todoist', {
+                    state: 'open',
+                    severity: 'high',
+                    source: 'runtime',
+                    details: 'Task no longer exists in Todoist.',
+                    manualAction: 'Resolve in Manage Problem Tasks',
+                }, false);
                 new Notice(`Task ${lineTask_todoist_id} no longer exists in Todoist. Sync disabled.`);
                 this.plugin.logOperation?.log('CONFLICT_DETECTED', `Task ${lineTask_todoist_id} missing in Todoist`, filepath, lineTask_todoist_id);
                 return;
@@ -496,6 +503,13 @@ export class ObsidianToTodoistSync {
 
             if (!savedTask) {
                 await this.plugin.cacheOperation.setTaskFileMapping(taskId, taskMapping?.filePath || '', 'issue', false);
+                await this.plugin.cacheOperation.upsertTaskIssue(taskId, 'task_deleted_in_todoist', {
+                    state: 'open',
+                    severity: 'high',
+                    source: 'runtime',
+                    details: 'Task no longer exists in Todoist.',
+                    manualAction: 'Resolve in Manage Problem Tasks',
+                }, false);
                 new Notice(`Task ${taskId} no longer exists in Todoist. Sync disabled.`);
                 return;
             }
@@ -550,6 +564,13 @@ export class ObsidianToTodoistSync {
 
             if (!savedTask) {
                 await this.plugin.cacheOperation.setTaskFileMapping(taskId, taskMapping?.filePath || '', 'issue', false);
+                await this.plugin.cacheOperation.upsertTaskIssue(taskId, 'task_deleted_in_todoist', {
+                    state: 'open',
+                    severity: 'high',
+                    source: 'runtime',
+                    details: 'Task no longer exists in Todoist.',
+                    manualAction: 'Resolve in Manage Problem Tasks',
+                }, false);
                 new Notice(`Task ${taskId} no longer exists in Todoist. Sync disabled.`);
                 return;
             }
@@ -606,7 +627,12 @@ export class ObsidianToTodoistSync {
                 const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId);
                 if (taskMapping) {
                     if (!this.plugin.cacheOperation.isTaskSyncEnabled(taskId)) continue;
-                    const description = `[[${filepath}]]`;
+                    const description = this.plugin.taskParser.getObsidianUrlFromFilepath(filepath);
+                    const todoistTask = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
+                    if (todoistTask?.description === description) {
+                        continue;
+                    }
+
                     await this.plugin.todoistSyncAPI.UpdateTask(taskId, { description });
                     this.plugin.logOperation?.log('TODOIST_TASK_UPDATED', `Updated task description: ${taskId}`, filepath, taskId, 'obsidian→todoist');
                 }

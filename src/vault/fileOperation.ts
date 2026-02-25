@@ -8,6 +8,8 @@ export interface VaultTask {
     filePath: string;
     lineNumber: number;
     labels: string[];
+    dueDate?: string;
+    priority?: number;
 }
 
 export interface VaultTaskWithoutId {
@@ -21,6 +23,7 @@ export interface VaultTaskWithoutId {
 export interface TodoistTask {
     taskId: string;
     content: string;
+    description?: string;
     checked: boolean;
     dueDate?: string;
     priority: number;
@@ -727,9 +730,11 @@ export class FileOperation   {
                     }
                     
                     const match = line.match(/%%\[todoist_id::\s*([\w-]+)\]%%/);
-                    const taskContent = this.plugin.taskParser.getTaskContentFromLineText(line);
-                    const isCompleted = /\[x\]/i.test(line);
-                    const labels = this.extractLabelsFromLine(line);
+                        const taskContent = this.plugin.taskParser.getTaskContentFromLineText(line);
+                        const isCompleted = /\[x\]/i.test(line);
+                        const labels = this.extractLabelsFromLine(line);
+                        const dueDate = this.plugin.taskParser.getDueDateFromLineText(line) || undefined;
+                        const priority = this.plugin.taskParser.getTaskPriority(line);
                     
                     if (match && match[1]) {
                         const taskId = match[1];
@@ -745,7 +750,9 @@ export class FileOperation   {
                             isCompleted,
                             filePath: file.path,
                             lineNumber: i,
-                            labels
+                            labels,
+                            dueDate,
+                            priority,
                         });
                     } else {
                         tasksWithoutId.push({
@@ -785,6 +792,7 @@ export class FileOperation   {
             todoistTasksMap.set(task.id, {
                 taskId: task.id,
                 content: task.content || '',
+                description: taskAny.description || '',
                 checked: !!taskAny.checked,
                 dueDate: task.due?.date,
                 priority: task.priority || 1,

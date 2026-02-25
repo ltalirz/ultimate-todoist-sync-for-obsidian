@@ -1,6 +1,6 @@
 import { App, Notice } from 'obsidian';
 
-import { DEFAULT_SETTINGS } from './settings';
+import { DEFAULT_SETTINGS, deriveTaskStatusFromIssues, normalizeTaskIssueType, TaskIssueEntry } from './settings';
 import { StoragePathManager } from '../storage/pathManager';
 import UltimateTodoistSyncForObsidian from '../../main';
 import { DeviceManager } from '../utils/deviceManager';
@@ -16,6 +16,7 @@ type TaskMappingEntry = {
 	syncEnabled?: boolean;
 	updated_at?: string;
 	note_count?: number;
+	issues?: Record<string, TaskIssueEntry>;
 };
 
 // ==========================================================================================
@@ -367,6 +368,9 @@ export class SafeSettings {
 		const mapping = this.plugin.settings.taskFileMapping;
 		if (!mapping) return;
 		let fixed = 0;
+		const validStates = new Set(['open', 'resolved', 'ignored']);
+		const validSeverity = new Set(['low', 'medium', 'high']);
+		const validSource = new Set(['database_checker', 'runtime']);
 		for (const [taskId, entry] of Object.entries(mapping)) {
 			// Remove entries with missing or invalid filePath
 			if (!entry || typeof entry.filePath !== 'string' || !entry.filePath.trim()) {
@@ -375,14 +379,54 @@ export class SafeSettings {
 				fixed++;
 				continue;
 			}
-			// Upgrade missing status field
-			if (!entry.status) {
-				entry.status = 'active';
+			let normalizedIssues: Record<string, TaskIssueEntry> | undefined;
+			if (entry.issues && typeof entry.issues === 'object' && !Array.isArray(entry.issues)) {
+				normalizedIssues = {};
+				for (const [issueType, issueValue] of Object.entries(entry.issues)) {
+					if (!issueValue || typeof issueValue !== 'object' || Array.isArray(issueValue)) {
+						fixed++;
+						continue;
+					}
+
+					const candidate = issueValue as Partial<TaskIssueEntry>;
+					const state = validStates.has(candidate.state as string) ? candidate.state as TaskIssueEntry['state'] : 'open';
+					const severity = validSeverity.has(candidate.severity as string) ? candidate.severity as TaskIssueEntry['severity'] : 'medium';
+					const source = validSource.has(candidate.source as string) ? candidate.source as TaskIssueEntry['source'] : 'runtime';
+					const detectedAt = typeof candidate.detectedAt === 'number' ? candidate.detectedAt : Date.now();
+					const lastSeenAt = typeof candidate.lastSeenAt === 'number' ? candidate.lastSeenAt : detectedAt;
+
+					const normalizedIssueType = normalizeTaskIssueType(issueType);
+					normalizedIssues[normalizedIssueType] = {
+						state,
+						severity,
+						source,
+						detectedAt,
+						lastSeenAt,
+						details: typeof candidate.details === 'string' ? candidate.details : undefined,
+						expected: typeof candidate.expected === 'string' ? candidate.expected : undefined,
+						actual: typeof candidate.actual === 'string' ? candidate.actual : undefined,
+						manualAction: typeof candidate.manualAction === 'string' ? candidate.manualAction : undefined,
+					};
+				}
+			}
+
+			if (normalizedIssues && Object.keys(normalizedIssues).length > 0) {
+				entry.issues = normalizedIssues;
+			} else if (entry.issues !== undefined) {
+				delete entry.issues;
 				fixed++;
 			}
-			// Upgrade missing syncEnabled field
-			if (typeof entry.syncEnabled !== 'boolean') {
-				entry.syncEnabled = true;
+
+			const fallbackStatus = entry.status || 'active';
+			const nextStatus = deriveTaskStatusFromIssues(entry.issues, fallbackStatus);
+			if (entry.status !== nextStatus) {
+				entry.status = nextStatus;
+				fixed++;
+			}
+
+			const expectedSyncEnabled = nextStatus === 'active';
+			if (entry.syncEnabled !== expectedSyncEnabled) {
+				entry.syncEnabled = expectedSyncEnabled;
 				fixed++;
 			}
 		}

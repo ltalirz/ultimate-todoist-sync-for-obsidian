@@ -94,6 +94,10 @@
     background: hsla(210, 15%, 55%, 0.12);
     color: var(--text-muted);
 }
+.tm-badge--stale-link {
+	background: hsla(215, 80%, 55%, 0.12);
+	color: hsl(215, 80%, 45%);
+}
 /* Scroll area */
 .tm-scroll {
     max-height: 70vh;
@@ -378,6 +382,10 @@
 .tm-list-badge--nonactive {
 	background: hsla(210, 15%, 55%, 0.12);
 	color: var(--text-muted);
+}
+.tm-list-badge--stale-link {
+	background: hsla(215, 80%, 55%, 0.12);
+	color: hsl(215, 80%, 45%);
 }
 /* ============================================
    Detail View (master-detail)

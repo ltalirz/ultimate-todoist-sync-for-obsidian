@@ -79,7 +79,9 @@ const REGEX = {
     TAB_INDENTATION: /^(\t+)/,
     TASK_PRIORITY: /\s!!([1-4])\s/,
     BLANK_LINE: /^\s*$/,
-    TODOIST_EVENT_DATE: /(\d{4})-(\d{2})-(\d{2})/
+    TODOIST_EVENT_DATE: /(\d{4})-(\d{2})-(\d{2})/,
+    OBSIDIAN_FILE_QUERY: /[?&]file=([^&]+)/,
+    OBSIDIAN_WIKILINK: /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/
 };
 
 export class TaskParser   {
@@ -496,6 +498,31 @@ export class TaskParser   {
         const url = encodeURI(`obsidian://open?vault=${this.app.vault.getName()}&file=${filepath}`)
         const obsidianUrl =`[${filepath}](${url})`;
         return(obsidianUrl)
+    }
+
+    extractFilePathFromObsidianDescription(description: string): string | null {
+        if (!description) return null;
+
+        const markdownLinkMatch = description.match(/\((obsidian:\/\/open\?[^)]*)\)/i);
+        if (markdownLinkMatch) {
+            const url = markdownLinkMatch[1];
+            const fileMatch = url.match(REGEX.OBSIDIAN_FILE_QUERY);
+            if (fileMatch?.[1]) {
+                try {
+                    return decodeURIComponent(fileMatch[1]);
+                } catch (error) {
+                    console.error(`[TaskParser] Failed to decode Obsidian description path: ${error}`);
+                    return fileMatch[1];
+                }
+            }
+        }
+
+        const wikiLinkMatch = description.match(REGEX.OBSIDIAN_WIKILINK);
+        if (wikiLinkMatch?.[1]) {
+            return wikiLinkMatch[1];
+        }
+
+        return null;
     }
 
 
