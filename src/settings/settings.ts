@@ -84,12 +84,12 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 
         containerEl.empty();
 
-        containerEl.createEl('h2', { text: 'Ultimate Todoist Sync Settings' });
+        containerEl.createEl('h2', { text: 'Ultimate Todoist Sync Settings', cls: 'uts-settings-title' });
 
         // ============================================
         // API Configuration Section
         // ============================================
-        containerEl.createEl('h3', { text: 'API Configuration' });
+        containerEl.createEl('h3', { text: 'API Configuration', cls: 'uts-section-heading' });
 
         new Setting(containerEl)
             .setName('Todoist API Token')
@@ -157,7 +157,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
         // ============================================
         // Sync Settings Section
         // ============================================
-        containerEl.createEl('h3', { text: 'Sync Settings' });
+        containerEl.createEl('h3', { text: 'Sync Settings', cls: 'uts-section-heading' });
 
         new Setting(containerEl)
             .setName('Automatic Sync Interval')
@@ -248,7 +248,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
         // ============================================
         // Sync Direction Control Section
         // ============================================
-        containerEl.createEl('h3', { text: 'Sync Direction' });
+        containerEl.createEl('h3', { text: 'Sync Direction', cls: 'uts-section-heading' });
 
         const syncStatusEl = containerEl.createEl('div', { cls: 'setting-item-description' });
         const updateSyncStatus = () => {
@@ -311,7 +311,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
         // ============================================
         // Device Management Section
         // ============================================
-        containerEl.createEl('h3', { text: 'Device Management' });
+        containerEl.createEl('h3', { text: 'Device Management', cls: 'uts-section-heading' });
 
         // Device status display
         const deviceStatusEl = containerEl.createEl('div', { cls: 'setting-item-description' });
@@ -347,7 +347,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                 // ============================================
         // Tools Section
         // ============================================
-        containerEl.createEl('h3', { text: 'Tools' });
+        containerEl.createEl('h3', { text: 'Tools', cls: 'uts-section-heading' });
 
         new Setting(containerEl)
             .setName('Manual Sync')
@@ -504,7 +504,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
         // ============================================
         // Logs & Debug Section
         // ============================================
-        containerEl.createEl('h3', { text: 'Logs & Debug' });
+        containerEl.createEl('h3', { text: 'Logs & Debug', cls: 'uts-section-heading' });
 
         new Setting(containerEl)
             .setName('Enable Logging')
@@ -541,7 +541,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
         // ============================================
         // Backup & Recovery Section
         // ============================================
-        containerEl.createEl('h3', { text: 'Backup & Recovery' });
+        containerEl.createEl('h3', { text: 'Backup & Recovery', cls: 'uts-section-heading' });
 
         new Setting(containerEl)
             .setName('Storage Directory')
