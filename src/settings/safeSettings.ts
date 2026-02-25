@@ -5,8 +5,10 @@ import { StoragePathManager } from '../storage/pathManager';
 import UltimateTodoistSyncForObsidian from '../../main';
 import { DeviceManager } from '../utils/deviceManager';
 
-const GHOST_FIELDS = ['todayLogs', 'todoistTasksData', 'syncToken', 'logs', 'logRetentionDays', 'statistics', 'deviceIdGenerated', 'isPrimaryDevice', 'lastDatabaseCheckPassed'];
+const KNOWN_SETTINGS_KEYS = new Set(Object.keys(DEFAULT_SETTINGS));
 const REQUIRED_FIELDS = ['initialized', 'todoistAPIToken', 'taskFileMapping'];
+const CURRENT_SCHEMA_VERSION = 1;
+
 
 type TaskMappingEntry = {
 	filePath: string;
@@ -64,7 +66,7 @@ export class SafeSettings {
 						? this.normalizeLoadedData(recoveredData)
 						: {};
 					this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS, normalizedRecoveredData);
-					this.stripGhostFields();
+					this.stripUnknownFields();
 					this.sanitizeTaskFileMapping();
 					return true;
 				}
@@ -75,24 +77,11 @@ export class SafeSettings {
 			}
 
 			const data = this.normalizeLoadedData(rawData);
-
 			this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS, data);
-			this.stripGhostFields();
+			this.stripUnknownFields();
 			this.sanitizeTaskFileMapping();
-
-			// Migration: isPrimaryDevice (boolean) → primaryDeviceId (string)
-			// If old data had isPrimaryDevice=true and no primaryDeviceId yet,
-			// read this device's ID and claim it as primary.
-			if ((data as any)?.isPrimaryDevice === true && !this.plugin.settings.primaryDeviceId) {
-				try {
-					const tempDeviceManager = new DeviceManager(this.plugin.app, this.plugin);
-					const deviceId = await tempDeviceManager.getDeviceId();
-					this.plugin.settings.primaryDeviceId = deviceId;
-					this.plugin.debugLog('[Settings] Migrated isPrimaryDevice=true → primaryDeviceId=' + deviceId);
-				} catch (migrationError) {
-					console.error('[Settings] Migration from isPrimaryDevice failed:', migrationError);
-				}
-			}
+			// Run schema migrations (v0 → v1 → ... → CURRENT_SCHEMA_VERSION)
+			await this.runMigrations(rawData);
 
 			return true;
 		} catch (error) {
@@ -106,7 +95,7 @@ export class SafeSettings {
 						? this.normalizeLoadedData(recoveredData)
 						: {};
 					this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS, normalizedRecoveredData);
-					this.stripGhostFields();
+					this.stripUnknownFields();
 					this.sanitizeTaskFileMapping();
 					new Notice('Settings recovered from backup after load failure');
 					return true;
@@ -269,16 +258,17 @@ export class SafeSettings {
 		}
 	}
 
-	private stripGhostFields(): void {
+	private stripUnknownFields(): void {
 		const settings = this.plugin.settings as unknown as Record<string, unknown>;
 		let stripped = 0;
-		for (const field of GHOST_FIELDS) {
-			if (field in settings) {
-				delete settings[field];
+		for (const key of Object.keys(settings)) {
+			if (!KNOWN_SETTINGS_KEYS.has(key)) {
+				this.plugin.debugLog(`[Settings] Stripping unknown field: ${key}`);
+				delete settings[key];
 				stripped++;
 			}
 		}
-		if (stripped > 0) this.plugin.debugLog(`[Settings] Stripped ${stripped} ghost field(s) from loaded data`);
+		if (stripped > 0) this.plugin.debugLog(`[Settings] Stripped ${stripped} unknown field(s) from loaded data`);
 	}
 
 	private sanitizeTaskFileMapping(): void {
@@ -286,11 +276,61 @@ export class SafeSettings {
 		if (!mapping) return;
 		let fixed = 0;
 		for (const [taskId, entry] of Object.entries(mapping)) {
-
+			// Remove entries with missing or invalid filePath
+			if (!entry || typeof entry.filePath !== 'string' || !entry.filePath.trim()) {
+				this.plugin.debugLog(`[Settings] Removing malformed mapping entry: ${taskId}`);
+				delete mapping[taskId];
+				fixed++;
+				continue;
+			}
+			// Upgrade missing status field
+			if (!entry.status) {
+				entry.status = 'active';
+				fixed++;
+			}
+			// Upgrade missing syncEnabled field
+			if (typeof entry.syncEnabled !== 'boolean') {
+				entry.syncEnabled = true;
+				fixed++;
+			}
 		}
 		if (fixed > 0) this.plugin.debugLog(`[Settings] Sanitized ${fixed} corrupted taskFileMapping entry(s)`);
 	}
 
+
+	private async runMigrations(rawData: Record<string, unknown>): Promise<void> {
+		const fromVersion = typeof rawData.schemaVersion === 'number' ? rawData.schemaVersion : 0;
+		if (fromVersion >= CURRENT_SCHEMA_VERSION) return;
+
+		console.log(`[Settings] Running migrations from schema v${fromVersion} to v${CURRENT_SCHEMA_VERSION}`);
+
+		// Force backup before first migration
+		try {
+			await this.plugin.settingsBackup?.backup();
+		} catch (backupError) {
+			console.warn('[Settings] Pre-migration backup failed:', backupError);
+		}
+
+		// v0 → v1: Migrate isPrimaryDevice boolean to primaryDeviceId string
+		if (fromVersion < 1) {
+			const legacyIsPrimary = rawData.isPrimaryDevice;
+			if (legacyIsPrimary === true && !this.plugin.settings.primaryDeviceId) {
+				try {
+					const tempDeviceManager = new DeviceManager(this.plugin.app, this.plugin);
+					const deviceId = await tempDeviceManager.getDeviceId();
+					this.plugin.settings.primaryDeviceId = deviceId;
+					this.plugin.debugLog('[Settings] v0→v1: Migrated isPrimaryDevice to primaryDeviceId:', deviceId);
+				} catch (error) {
+					console.error('[Settings] v0→v1: Failed to migrate isPrimaryDevice:', error);
+				}
+			}
+		}
+
+		// Stamp current version and persist
+		this.plugin.settings.schemaVersion = CURRENT_SCHEMA_VERSION;
+		await this.save();
+		console.log(`[Settings] Migration complete — now at schema v${CURRENT_SCHEMA_VERSION}`);
+	}
 
 	private async throttledBackup(): Promise<void> {
 		if (!this.plugin.settingsBackup) return;
@@ -349,12 +389,23 @@ export class SettingsBackup {
 	}
 
 	private getBackupDir(): string {
-		return this.plugin.storagePathManager?.getBackupsSettingsPath()
-			|| '.ultimate-todoist-sync/backups/settings';
+		if (this.plugin.storagePathManager) {
+			return this.plugin.storagePathManager.getBackupsSettingsPath();
+		}
+		const dir = this.plugin.settings?.storageDirectory || StoragePathManager.DEFAULT_BASE_PATH;
+		return `${dir}/backups/settings`;
 	}
 
 	private async ensureBackupDir(): Promise<void> {
-		await this.plugin.storagePathManager?.ensureDir(this.getBackupDir());
+		const dir = this.getBackupDir();
+		if (this.plugin.storagePathManager) {
+			await this.plugin.storagePathManager.ensureDir(dir);
+		} else {
+			const adapter = this.app.vault.adapter;
+			if (!await adapter.exists(dir)) {
+				await adapter.mkdir(dir);
+			}
+		}
 	}
 
 	async backup(): Promise<boolean> {
@@ -411,7 +462,11 @@ export class SettingsBackup {
 				new Notice('Backup file is corrupted, cannot restore');
 				return false;
 			}
-			await adapter.write(StoragePathManager.SETTINGS_FILE, data);
+			const settingsPath = StoragePathManager.SETTINGS_FILE;
+			const tempPath = StoragePathManager.SETTINGS_TEMP_FILE;
+			await adapter.write(tempPath, data);
+			await adapter.write(settingsPath, data);
+			await adapter.remove(tempPath).catch(() => {});
 			this.plugin.debugLog('[SettingsBackup] Settings restored from:', latestBackup);
 			new Notice('Settings restored from backup');
 			return true;
@@ -465,7 +520,11 @@ export class SettingsBackup {
 				new Notice('Backup file is corrupted');
 				return false;
 			}
-			await adapter.write(StoragePathManager.SETTINGS_FILE, data);
+			const settingsPath = StoragePathManager.SETTINGS_FILE;
+			const tempPath = StoragePathManager.SETTINGS_TEMP_FILE;
+			await adapter.write(tempPath, data);
+			await adapter.write(settingsPath, data);
+			await adapter.remove(tempPath).catch(() => {});
 			this.plugin.debugLog('[SettingsBackup] Settings restored from specific backup:', backupPath);
 			new Notice('Settings restored from backup');
 			return true;
@@ -479,6 +538,7 @@ export class SettingsBackup {
 	async recoverFromTempFile(): Promise<boolean> {
 		try {
 			const tempPath = StoragePathManager.SETTINGS_TEMP_FILE;
+			const settingsPath = StoragePathManager.SETTINGS_FILE;
 			const adapter = this.app.vault.adapter;
 			if (!await adapter.exists(tempPath)) return false;
 			const data = await adapter.read(tempPath);
@@ -490,7 +550,11 @@ export class SettingsBackup {
 				await adapter.remove(tempPath).catch(() => {});
 				return false;
 			}
-			await adapter.write(StoragePathManager.SETTINGS_FILE, data);
+			// Atomic: write temp copy → write actual → remove temp copy
+			const recoveryTempPath = settingsPath + '.recovery.tmp';
+			await adapter.write(recoveryTempPath, data);
+			await adapter.write(settingsPath, data);
+			await adapter.remove(recoveryTempPath).catch(() => {});
 			await adapter.remove(tempPath).catch(() => {});
 			this.plugin.debugLog('[SettingsBackup] Recovered from temp file');
 			new Notice('Settings recovered from temp file');

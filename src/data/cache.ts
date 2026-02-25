@@ -641,7 +641,7 @@ export class CacheOperation   {
             
             // Step 1: Backup old mapping, then clear (restore on failure)
             const backupMapping = { ...this.plugin.settings.taskFileMapping };
-            await this.plugin.safeSettings?.update({ taskFileMapping: {} }, true);
+            await this.plugin.safeSettings?.update({ taskFileMapping: {} }, false);
 
             // ==========================================================================================
             // Step 2: 确保 syncData 已加载

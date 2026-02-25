@@ -42,6 +42,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 	isProcessingModify: boolean;
 	isSyncingFromTodoist: boolean;
 	cachedDeviceId: string;
+	loadSucceeded: boolean;
 
 	syncLockManager: SyncLockManager;
 
@@ -57,6 +58,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 	}
 
 	async onload() {
+		this.loadSucceeded = false;
 		this.saveLock = false;
 		this.isSyncingFromTodoist = false;
 		this.cachedDeviceId = '';
@@ -64,6 +66,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		this.safeSettings = new SafeSettings(this);
 
 		const isSettingsLoaded = await this.safeSettings.load();
+		this.loadSucceeded = isSettingsLoaded;
 		if (!isSettingsLoaded) {
 			new Notice('Settings failed to load. Please reload the ultimate todoist sync plugin.');
 			return;
@@ -130,7 +133,11 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 		} catch (error) {
 			console.error('An error occurred in flushToFile:', error);
 		}
-		await this.saveSettings();
+		if (this.loadSucceeded) {
+			await this.saveSettings();
+		} else {
+			console.warn('[Plugin] Skipping saveSettings on unload — load did not succeed');
+		}
 	}
 
 	async loadSettings(): Promise<boolean> {

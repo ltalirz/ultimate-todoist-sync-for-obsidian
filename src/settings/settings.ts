@@ -39,6 +39,7 @@ export interface UltimateTodoistSyncSettings {
     lastFullSyncTime: number | null;
     lastDatabaseCheckAutoTime: number | null;
     primaryDeviceId: string;
+    schemaVersion: number;
 }
 
 export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
@@ -69,6 +70,7 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
     lastFullSyncTime: null,
     lastDatabaseCheckAutoTime: null,
     primaryDeviceId: '',
+    schemaVersion: 1,
 }
 
 export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
