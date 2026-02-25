@@ -60,12 +60,15 @@ export class ObsidianToTodoistSync {
             }
         }
 
-        if (deletedCount > 0) {
-            this.plugin.saveSettings();
-            try {
-                await this.plugin.todoistSyncAPI.incrementalSync();
-            } catch (syncErr) {
-                console.error('[deletedTaskCheck] Post-push incremental sync failed:', syncErr);
+		if (deletedCount > 0) {
+			const saved = await this.plugin.saveSettings();
+			if (!saved) {
+				console.warn('[deletedTaskCheck] saveSettings skipped or failed');
+			}
+			try {
+				await this.plugin.todoistSyncAPI.incrementalSync();
+			} catch (syncErr) {
+				console.error('[deletedTaskCheck] Post-push incremental sync failed:', syncErr);
             }
         }
 
@@ -106,7 +109,7 @@ export class ObsidianToTodoistSync {
                 this.plugin.logOperation?.log('OBSIDIAN_TASK_CREATED', `Created task in Obsidian: ${newTask.content}`, filepath, todoist_id, 'obsidian→todoist');
                 this.plugin.logOperation?.log('TODOIST_TASK_CREATED', `Created task in Todoist: ${newTask.content}`, filepath, todoist_id, 'obsidian→todoist');
 
-                this.plugin.cacheOperation.setTaskFileMapping(todoist_id, filepath || '');
+				await this.plugin.cacheOperation.setTaskFileMapping(todoist_id, filepath || '');
 
                 // Immediately sync so syncData contains the new task before any
                 // subsequent lineModifiedTaskCheck fires on the same line.
@@ -148,11 +151,14 @@ export class ObsidianToTodoistSync {
                     return;
                 }
 
-                try {
-                    this.plugin.saveSettings();
-                } catch (error) {
-                    console.error(error);
-                }
+				try {
+					const saved = await this.plugin.saveSettings();
+					if (!saved) {
+						console.warn('[lineContentNewTaskCheck] saveSettings skipped or failed');
+					}
+				} catch (error) {
+					console.error(error);
+				}
 
             } catch (error) {
                 console.error('Error adding task:', error);
@@ -210,7 +216,7 @@ export class ObsidianToTodoistSync {
                         this.plugin.logOperation?.log('OBSIDIAN_TASK_CREATED', `Created task in Obsidian: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
                         this.plugin.logOperation?.log('TODOIST_TASK_CREATED', `Created task in Todoist: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
 
-                        this.plugin.cacheOperation.setTaskFileMapping(todoist_id, filepath || '');
+					await this.plugin.cacheOperation.setTaskFileMapping(todoist_id, filepath || '');
                     if (currentTask.isCompleted === true) {
                             await this.plugin.todoistSyncAPI.CloseTask(newTask.id);
                             this.plugin.logOperation?.log('OBSIDIAN_TASK_COMPLETED', `Completed task in Obsidian: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
@@ -224,7 +230,10 @@ export class ObsidianToTodoistSync {
                         const newContent = lines.join('\n');
                         await this.plugin.backupOperation?.backupFile(filepath);
                         await this.app.vault.modify(file, newContent);
-            this.plugin.saveSettings();
+					const saved = await this.plugin.saveSettings();
+					if (!saved) {
+						console.warn('[fullTextNewTaskCheck] saveSettings skipped or failed');
+					}
                         try {
                             await this.plugin.todoistSyncAPI.incrementalSync();
                             const updatedTask = await this.plugin.todoistSyncAPI.GetTaskById(todoist_id);
@@ -397,7 +406,10 @@ export class ObsidianToTodoistSync {
                 if (contentChanged || statusChanged || dueDateChanged || tagsChanged || priorityChanged) {
                     this.plugin.debugLog(lineTask);
                     this.plugin.debugLog(savedTask);
-                    this.plugin.saveSettings();
+					const saved = await this.plugin.saveSettings();
+					if (!saved) {
+						console.warn('[lineModifiedTaskCheck] saveSettings skipped or failed');
+					}
                     try {
                         await this.plugin.todoistSyncAPI.incrementalSync();
                         const refreshedTask = await this.plugin.todoistSyncAPI.GetTaskById(lineTask_todoist_id);
@@ -504,8 +516,11 @@ export class ObsidianToTodoistSync {
             }
 
             await this.plugin.todoistSyncAPI.CloseTask(taskId);
-            await this.plugin.fileOperation.completeTaskInTheFile(taskId);
-            this.plugin.saveSettings();
+			await this.plugin.fileOperation.completeTaskInTheFile(taskId);
+			const saved = await this.plugin.saveSettings();
+			if (!saved) {
+				console.warn('[closeTask] saveSettings skipped or failed');
+			}
             try {
                 await this.plugin.todoistSyncAPI.incrementalSync();
                 const refreshedTask = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
@@ -555,8 +570,11 @@ export class ObsidianToTodoistSync {
             }
 
             await this.plugin.todoistSyncAPI.OpenTask(taskId);
-            await this.plugin.fileOperation.uncompleteTaskInTheFile(taskId);
-            this.plugin.saveSettings();
+			await this.plugin.fileOperation.uncompleteTaskInTheFile(taskId);
+			const saved = await this.plugin.saveSettings();
+			if (!saved) {
+				console.warn('[repoenTask] saveSettings skipped or failed');
+			}
             try {
                 await this.plugin.todoistSyncAPI.incrementalSync();
                 const refreshedTask = await this.plugin.todoistSyncAPI.GetTaskById(taskId);

@@ -44,20 +44,20 @@ export class SetDefalutProjectInTheFilepathModal extends Modal {
       
     
 
-    new Setting(contentEl)
-    .setName('Default project')
-    //.setDesc('Set default project for todoist tasks in the current file')
-    .addDropdown(component => 
-        component
-                .addOption(this.defaultProjectId,this.defaultProjectName)
-                .addOptions(myProjectsOptions)
-                .onChange((value)=>{
-                    this.plugin.debugLog(`project id  is ${value}`)
-                    this.plugin.cacheOperation.setDefaultProjectIdForFilepath(this.filepath,value)
-                    this.plugin.setStatusBarText()
-                    this.close();
-                    
-                })
+	new Setting(contentEl)
+	.setName('Default project')
+	//.setDesc('Set default project for todoist tasks in the current file')
+	.addDropdown(component => 
+		component
+				.addOption(this.defaultProjectId,this.defaultProjectName)
+				.addOptions(myProjectsOptions)
+				.onChange(async (value)=>{
+					this.plugin.debugLog(`project id  is ${value}`)
+					await this.plugin.cacheOperation.setDefaultProjectIdForFilepath(this.filepath,value)
+					this.plugin.setStatusBarText()
+					this.close();
+					
+				})
                 
         )
 
@@ -749,7 +749,7 @@ export class TaskManagerModal extends Modal {
 				if (refreshed?.updated_at) {
 					await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, { updated_at: refreshed.updated_at });
 				}
-				this.plugin.safeSettings?.update({}, true);
+				await this.plugin.safeSettings?.update({}, true);
 				new Notice(`Conflict resolved: kept Obsidian version`);
 			} else {
 				const task = this.plugin.todoistSyncAPI.getTaskByIdLocal(taskId);
@@ -840,7 +840,7 @@ export class TaskManagerModal extends Modal {
 				if (this._closed) return;
 				await this.plugin.cacheOperation.setTaskFileMapping(taskId, filePath, 'active', true);
 				await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, { updated_at: task.updated_at });
-				this.plugin.safeSettings?.update({}, true);
+				await this.plugin.safeSettings?.update({}, true);
 				new Notice(`Conflict resolved: kept Todoist version`);
 			}
 		} catch (e) {
@@ -868,8 +868,8 @@ export class TaskManagerModal extends Modal {
             if (this._closed) return;
             await this.plugin.fileOperation.unbindTaskInFile(taskId);
             await this.plugin.cacheOperation.deleteTaskFileMapping(taskId);
-            this.plugin.safeSettings?.update({}, true);
-            new Notice(`Issue task deleted`);
+			await this.plugin.safeSettings?.update({}, true);
+			new Notice(`Issue task deleted`);
         } catch (e) {
             console.error(`[TaskManagerModal] deleteIssueTask error:`, e);
             new Notice(`Error deleting task: ${e}`);
@@ -882,8 +882,8 @@ export class TaskManagerModal extends Modal {
     private async reEnableTask(taskId: string, filePath: string, skipRerender = false) {
         try {
             await this.plugin.cacheOperation.setTaskFileMapping(taskId, filePath, 'active', true);
-            this.plugin.safeSettings?.update({}, true);
-            new Notice(`Task re-enabled`);
+			await this.plugin.safeSettings?.update({}, true);
+			new Notice(`Task re-enabled`);
         } catch (e) {
             console.error(`[TaskManagerModal] reEnableTask error:`, e);
             new Notice(`Error re-enabling task: ${e}`);

@@ -368,9 +368,12 @@ export class CacheOperation   {
                 this.plugin.debugLog(`new file path is`)
                 this.plugin.debugLog(searchResult)
 
-                //update metadata
-                await this.updateRenamedFilePath(filepath,searchResult)
-                this.plugin.saveSettings()
+				//update metadata
+				await this.updateRenamedFilePath(filepath,searchResult)
+				const saved = await this.plugin.saveSettings();
+				if (!saved) {
+					console.warn('[checkFileMetadata] saveSettings skipped or failed');
+				}
 
             }
 
@@ -457,16 +460,16 @@ export class CacheOperation   {
      * @param filepath - 文件路径
      * @param defaultProjectId - 项目 ID
      */
-    setDefaultProjectIdForFilepath(filepath:string, defaultProjectId:string){
-        const metadatas = { ...this.plugin.settings.fileMetadata }
-        if (!metadatas[filepath]) {
-            metadatas[filepath] = {}
-        }
-        metadatas[filepath].defaultProjectId = defaultProjectId
-    
-        this.plugin.safeSettings?.update({ fileMetadata: metadatas })
+	async setDefaultProjectIdForFilepath(filepath:string, defaultProjectId:string): Promise<void> {
+		const metadatas = { ...this.plugin.settings.fileMetadata }
+		if (!metadatas[filepath]) {
+			metadatas[filepath] = {}
+		}
+		metadatas[filepath].defaultProjectId = defaultProjectId
 
-    }
+		await this.plugin.safeSettings?.update({ fileMetadata: metadatas }, true)
+
+	}
 
       
     // ==========================================================================================

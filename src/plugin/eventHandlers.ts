@@ -86,7 +86,6 @@ export class EventHandlers {
 		if (!await this.plugin.checkModuleClass()) return;
 
 		await this.plugin.cacheOperation!.updateRenamedFilePath(oldpath, file.path);
-		this.plugin.saveSettings();
 		this.plugin.logOperation?.log('FILE_RENAMED', `File renamed from ${oldpath} to ${file.path}`, file.path);
 
 		if (!await this.plugin.syncLockManager.acquire('obsidianToTodoist')) return;
@@ -103,6 +102,8 @@ export class EventHandlers {
 		if (!this.plugin.settings.apiInitialized) return;
 		if (this.plugin.isSyncingFromTodoist) return;
 		if (this.plugin.isProcessingModify) return;
+		if (!file.path.endsWith('.md')) return;
+		if (file.path.startsWith('.obsidian/')) return;
 		this.plugin.isProcessingModify = true;
 
 		const filepath = file.path;
