@@ -1,4 +1,4 @@
-import { App, Modal, Notice, Setting, TFile } from "obsidian";
+import { App, MarkdownRenderer, Modal, Notice, Setting, TFile } from "obsidian";
 import UltimateTodoistSyncForObsidian from "../../main";
 import {
 	CONFLICT_ISSUE_TYPE_KEYS,
@@ -337,6 +337,75 @@ export class LogViewerModal extends Modal {
     }
 }
 
+export class DatabaseReportModal extends Modal {
+	plugin: UltimateTodoistSyncForObsidian;
+	reportPath: string;
+	private reportContainerEl: HTMLElement | null = null;
+
+	constructor(app: App, plugin: UltimateTodoistSyncForObsidian, reportPath: string) {
+		super(app);
+		this.plugin = plugin;
+		this.reportPath = reportPath;
+	}
+
+	async onOpen() {
+		const { contentEl, modalEl } = this;
+		contentEl.empty();
+		modalEl.style.width = '900px';
+		modalEl.style.maxWidth = '95vw';
+
+		contentEl.createEl('h4', { text: 'Database Verification Report' });
+
+		const toolbar = contentEl.createDiv({ cls: 'database-report-toolbar' });
+		toolbar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;';
+
+		const pathEl = toolbar.createDiv({ text: this.reportPath });
+		pathEl.style.cssText = 'color:var(--text-muted);font-size:12px;word-break:break-all;';
+
+		const actions = toolbar.createDiv({ cls: 'database-report-actions' });
+		actions.style.cssText = 'display:flex;gap:8px;align-items:center;';
+
+		const refreshBtn = actions.createEl('button', { text: 'Refresh' });
+		refreshBtn.style.cssText = 'padding:4px 10px;border-radius:4px;cursor:pointer;background:var(--interactive-normal);color:var(--text-normal);border:1px solid var(--background-modifier-border);';
+		refreshBtn.addEventListener('click', async () => {
+			await this.renderReport();
+		});
+
+		const openFileBtn = actions.createEl('button', { text: 'Open File' });
+		openFileBtn.style.cssText = 'padding:4px 10px;border-radius:4px;cursor:pointer;background:var(--interactive-normal);color:var(--text-normal);border:1px solid var(--background-modifier-border);';
+		openFileBtn.addEventListener('click', async () => {
+			const reportFile = this.app.vault.getAbstractFileByPath(this.reportPath);
+			if (!(reportFile instanceof TFile)) {
+				new Notice('Report file was not found in vault.');
+				return;
+			}
+			await this.app.workspace.getLeaf(true).openFile(reportFile);
+		});
+
+		this.reportContainerEl = contentEl.createDiv({ cls: 'database-report-scroll' });
+		this.reportContainerEl.style.cssText = 'max-height:70vh;overflow-y:auto;padding:12px;border:1px solid var(--background-modifier-border);border-radius:6px;background:var(--background-secondary);';
+
+		await this.renderReport();
+	}
+
+	private async renderReport() {
+		if (!this.reportContainerEl) return;
+		this.reportContainerEl.empty();
+		try {
+			const markdownContent = await this.app.vault.adapter.read(this.reportPath);
+			await MarkdownRenderer.renderMarkdown(markdownContent, this.reportContainerEl, this.reportPath, this.plugin);
+		} catch (error) {
+			console.error('[DatabaseReportModal] Failed to load report:', error);
+			this.reportContainerEl.createEl('p', { text: `Failed to load report: ${error instanceof Error ? error.message : String(error)}` });
+		}
+	}
+
+	onClose() {
+		const { contentEl } = this;
+		contentEl.empty();
+	}
+}
+
 
 // ==========================================================================================
 // TaskManagerModal - 问题任务管理器 (Master-Detail Pattern)
@@ -574,7 +643,6 @@ export class TaskManagerModal extends Modal {
 		const allTasks: { taskId: string, type: TaskListType }[] = [];
 		const seenTaskIds = new Set<string>();
 		for (const id of this.taskData.conflicted) allTasks.push({ taskId: id, type: 'conflicted' });
-		for (const id of this.taskData.nonActive) allTasks.push({ taskId: id, type: 'nonActive' });
 		for (const id of staleLinkDisplayTaskIds) {
 			if (this.taskData.conflicted.includes(id) || this.taskData.nonActive.includes(id)) continue;
 			allTasks.push({ taskId: id, type: 'staleLink' });
@@ -583,6 +651,7 @@ export class TaskManagerModal extends Modal {
 			if (staleDisplayTaskIdsSet.has(id)) continue;
 			allTasks.push({ taskId: id, type: 'issue' });
 		}
+		for (const id of this.taskData.nonActive) allTasks.push({ taskId: id, type: 'nonActive' });
 		for (const { taskId, type } of allTasks) {
 			if (seenTaskIds.has(taskId)) continue;
 			seenTaskIds.add(taskId);

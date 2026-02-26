@@ -1,6 +1,6 @@
 import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../../main";
-import { LogViewerModal, TaskManagerModal } from '../ui/modals';
+import { DatabaseReportModal, LogViewerModal, TaskManagerModal } from '../ui/modals';
 import type { DatabaseCheckIssue, DatabaseCheckResult } from '../data/databaseChecker';
 
 export interface TaskIssueEntry {
@@ -430,10 +430,47 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
         updateCheckStatus();
 
         new Setting(containerEl)
-            .setName('Fix Database')
-            .setDesc('Check for inconsistencies and run safe auto-repair only for two classes: (A) mapping repair when Vault/Todoist match, (B) completed-in-Vault + confirmed-missing-in-Todoist => nonActive.')
+            .setName('Verify Database')
+            .setDesc('Run a read-only health check across Vault, Todoist, and mapping (match-first). No data will be changed.')
             .addButton(button => button
-                .setButtonText('Fix Database')
+                .setButtonText('Run Verification')
+                .onClick(async () => {
+                    if (!this.plugin.settings.apiInitialized) {
+                        new Notice('Please set the Todoist API first');
+                        return;
+                    }
+                    if (!this.plugin.databaseChecker) {
+                        new Notice('Database checker not initialized');
+                        return;
+                    }
+                    const verifyNotice = new Notice('Verifying database...', 0);
+                    try {
+                        const result = await this.plugin.databaseChecker.checkDatabase((msg) => {
+                            verifyNotice.setMessage(msg);
+                        });
+                        verifyNotice.hide();
+                        const todoistCount = this.plugin.todoistSyncAPI?.getSyncData()?.items?.length ?? 0;
+                        const vaultCount = Object.keys(this.plugin.settings.taskFileMapping).length;
+                        const status = result.success ? '✅ Healthy' : `⚠️ ${result.totalIssues} issues`;
+                        new Notice(
+                            `Verify complete — ${status}\nTodoist: ${todoistCount} tasks | Vault: ${vaultCount} mapped tasks`,
+                            8000
+                        );
+                        if (result.reportPath) {
+                            new DatabaseReportModal(this.app, this.plugin, result.reportPath).open();
+                        }
+                    } catch (error) {
+                        verifyNotice.hide();
+                        new Notice(`Verify error: ${error instanceof Error ? error.message : String(error)}`);
+                    }
+                })
+            );
+
+        new Setting(containerEl)
+            .setName('Fix Database')
+            .setDesc('Run safe auto-repair for eligible issues only: (A) repair missing/stale mapping when Vault and Todoist already match, (B) mark completed-in-Vault and confirmed-missing-in-Todoist tasks as nonActive. Then re-check and report what still needs manual handling.')
+            .addButton(button => button
+                .setButtonText('Run Safe Repair')
                 .onClick(async () => {
                     if (!this.plugin.settings.apiInitialized) {
                         new Notice('Please set the Todoist API first');
@@ -512,49 +549,12 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                 })
             );
 
-        new Setting(containerEl)
-            .setName('Verify Database')
-            .setDesc('Scan Vault and Todoist in match-first mode, then validate mapping integrity. No changes made.')
-            .addButton(button => button
-                .setButtonText('Verify')
-                .onClick(async () => {
-                    if (!this.plugin.settings.apiInitialized) {
-                        new Notice('Please set the Todoist API first');
-                        return;
-                    }
-                    if (!this.plugin.databaseChecker) {
-                        new Notice('Database checker not initialized');
-                        return;
-                    }
-                    const verifyNotice = new Notice('Verifying database...', 0);
-                    try {
-                        const result = await this.plugin.databaseChecker.checkDatabase((msg) => {
-                            verifyNotice.setMessage(msg);
-                        });
-                        verifyNotice.hide();
-                        const todoistCount = this.plugin.todoistSyncAPI?.getSyncData()?.items?.length ?? 0;
-                        const vaultCount = Object.keys(this.plugin.settings.taskFileMapping).length;
-                        const status = result.success ? '✅ Healthy' : `⚠️ ${result.totalIssues} issues`;
-                        new Notice(
-                            `Verify complete — ${status}\nTodoist: ${todoistCount} tasks | Vault: ${vaultCount} mapped tasks`,
-                            8000
-                        );
-                        if (result.reportPath) {
-                            new Notice(`Report: ${result.reportPath}`, 5000);
-                        }
-                    } catch (error) {
-                        verifyNotice.hide();
-                        new Notice(`Verify error: ${error instanceof Error ? error.message : String(error)}`);
-                    }
-                })
-            );
-
 
         new Setting(containerEl)
             .setName('Manage Problem Tasks')
-            .setDesc('Manually resolve remaining tasks that are not covered by safe auto-repair.')
+            .setDesc('Open the task manager to manually resolve unresolved conflicts, stale links, and issue tasks that require decisions.')
             .addButton(button => button
-                .setButtonText('Manage')
+                .setButtonText('Open Task Manager')
                 .onClick(() => {
                     new TaskManagerModal(this.app, this.plugin).open();
                 })
