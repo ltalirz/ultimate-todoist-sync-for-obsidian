@@ -429,9 +429,19 @@ export class CacheOperation   {
         const clonedEntries = new Set<string>();
         let changed = false;
 
-        const ensureClonedEntry = (taskId: string): typeof taskFileMapping[string] | undefined => {
+        const ensureClonedEntry = (taskId: string, filePath?: string): typeof taskFileMapping[string] | undefined => {
             const originalEntry = taskFileMapping[taskId];
-            if (!originalEntry) return undefined;
+            if (!originalEntry) {
+                if (!filePath) return undefined;
+                taskFileMapping[taskId] = {
+                    filePath,
+                    status: 'active' as const,
+                    syncEnabled: true,
+                };
+                clonedEntries.add(taskId);
+                changed = true;
+                return taskFileMapping[taskId];
+            }
             if (!clonedEntries.has(taskId)) {
                 taskFileMapping[taskId] = {
                     ...originalEntry,
@@ -444,7 +454,7 @@ export class CacheOperation   {
 
         for (const issue of resultIssues) {
             if (!issue.taskId) continue;
-            const mappingEntry = ensureClonedEntry(issue.taskId);
+            const mappingEntry = ensureClonedEntry(issue.taskId, issue.filePath);
             if (!mappingEntry) continue;
 
             const issueType = normalizeTaskIssueTypeKey(issue.type);
