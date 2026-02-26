@@ -466,11 +466,14 @@ export class TaskParser   {
     //this.plugin.debugLog(dateStr); // 输出 2023-03-27
     ISOStringToLocalDateString(utcTimeString:string) {
         try {
-          if(utcTimeString === null){
+          if(!utcTimeString){
             return null
           }
           let utcDateString = utcTimeString;
           let dateObj = new Date(utcDateString); // 将UTC格式字符串转换为Date对象
+          if (Number.isNaN(dateObj.getTime())) {
+            return null
+          }
           let year = dateObj.getFullYear();
           let month = (dateObj.getMonth() + 1).toString().padStart(2, '0');
           let date = dateObj.getDate().toString().padStart(2, '0');

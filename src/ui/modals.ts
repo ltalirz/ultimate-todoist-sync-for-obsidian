@@ -1120,69 +1120,10 @@ export class TaskManagerModal extends Modal {
 					}
 					const todoistDueDate = task.due?.date || '';
 					await fileOperation.syncTaskDueDateToFile(taskId, todoistDueDate);
-					// Invalidate file cache after content/date writes so tag/priority sync reads fresh data
+					await fileOperation.syncTaskLabelsToFile(taskId, task.labels || []);
+					await fileOperation.syncTaskPriorityToFile(taskId, task.priority || 1);
 					this._fileCache.delete(filePath);
-					// Sync tags (labels) from Todoist to file
-					const todoistLabels = taskParser.normalizeLabelsForCompare([...(task.labels || []), 'todoist']);
 					let currentLine = await this.getTaskLine(taskId, filePath);
-					if (currentLine && todoistLabels.length > 0) {
-						const existingTags = taskParser.getAllTagsFromLineText(currentLine);
-						let updatedLine = currentLine;
-						for (const tag of existingTags) {
-							updatedLine = updatedLine.replace(new RegExp(`#${tag}\\b`, 'g'), '');
-						}
-						// Add Todoist labels as tags before #todoist
-						const todoistTagPos = updatedLine.indexOf('#todoist');
-						if (todoistTagPos > 0) {
-							const labelTags = todoistLabels.map((l: string) => `#${l}`).join(' ');
-							updatedLine = updatedLine.substring(0, todoistTagPos) + labelTags + ' ' + updatedLine.substring(todoistTagPos);
-						}
-						// Clean up multiple spaces
-						updatedLine = updatedLine.replace(/  +/g, ' ');
-						if (updatedLine !== currentLine) {
-							const file = this.app.vault.getAbstractFileByPath(filePath);
-							if (file instanceof TFile) {
-								const fileContent = await this.app.vault.read(file);
-								const newContent = fileContent.replace(currentLine, updatedLine);
-								await this.app.vault.modify(file, newContent);
-								this._fileCache.delete(filePath);
-							}
-						}
-					}
-					// Sync priority from Todoist to file
-					currentLine = await this.getTaskLine(taskId, filePath);
-					if (currentLine) {
-						const todoistPriority = task.priority || 1;
-						const existingPriorityMatch = currentLine.match(/\s!!(\d)\s/);
-						const existingPriority = existingPriorityMatch ? parseInt(existingPriorityMatch[1]) : 1;
-						if (todoistPriority !== existingPriority) {
-							let updatedLine: string;
-							if (existingPriorityMatch) {
-								updatedLine = currentLine.replace(/\s!!(\d)\s/, ` !!${todoistPriority} `);
-							} else if (todoistPriority > 1) {
-								// Insert priority before #todoist
-								const todoistTagPos = currentLine.indexOf('#todoist');
-								if (todoistTagPos > 0) {
-									updatedLine = currentLine.substring(0, todoistTagPos) + `!!${todoistPriority} ` + currentLine.substring(todoistTagPos);
-								} else {
-									updatedLine = currentLine + ` !!${todoistPriority}`;
-								}
-							} else {
-								updatedLine = currentLine;
-							}
-							if (updatedLine !== currentLine) {
-								const file = this.app.vault.getAbstractFileByPath(filePath);
-								if (file instanceof TFile) {
-									const fileContent = await this.app.vault.read(file);
-									const newContent = fileContent.replace(currentLine, updatedLine);
-									await this.app.vault.modify(file, newContent);
-									this._fileCache.delete(filePath);
-								}
-							}
-						}
-					}
-					// Sync completion status
-					currentLine = await this.getTaskLine(taskId, filePath);
 					const obsidianChecked = currentLine ? /\[(x|X)\]/.test(currentLine) : false;
 					const todoistChecked = task.checked || false;
 					if (todoistChecked && !obsidianChecked) {
