@@ -505,6 +505,7 @@ export class CacheOperation   {
         const taskFileMapping = { ...this.plugin.settings.taskFileMapping };
         const touchedTaskIds = new Set<string>();
         const legacyConversionCandidates = new Map<string, { taskId: string; newTaskId: string; filePath: string }>();
+        console.log(`[applyMatchFirstAutoRepairs] start: issues=${resultIssues.length} shouldSave=${shouldSave}`);
         let changed = false;
         let mappingRepaired = 0;
         let nonActiveMarked = 0;
@@ -543,6 +544,7 @@ export class CacheOperation   {
             const filePath = issue.filePath || '';
 
             if (!taskId || !filePath) {
+                console.log(`[applyMatchFirstAutoRepairs] skip-invalid-issue type=${normalizedIssueType} taskId=${taskId || '(empty)'} filePath=${filePath || '(empty)'}`);
                 skipped++;
                 continue;
             }
@@ -550,11 +552,13 @@ export class CacheOperation   {
             if (normalizedIssueType === 'mapping_legacy_id') {
                 const mappedTaskId = (issue.details.match(/migrated to (\S+)/)?.[1] || '').trim();
                 if (!mappedTaskId || mappedTaskId === taskId) {
+                    console.log(`[applyMatchFirstAutoRepairs] skip-legacy-parse taskId=${taskId} details="${issue.details || ''}"`);
                     skipped++;
                     continue;
                 }
 
                 if (!legacyConversionCandidates.has(taskId)) {
+                    console.log(`[applyMatchFirstAutoRepairs] queue-legacy-candidate oldId=${taskId} newId=${mappedTaskId} file=${filePath}`);
                     legacyConversionCandidates.set(taskId, {
                         taskId,
                         newTaskId: mappedTaskId,
@@ -634,20 +638,25 @@ export class CacheOperation   {
         }
 
         if (legacyConversionCandidates.size > 0) {
+            console.log(`[applyMatchFirstAutoRepairs] legacy-migration start: candidates=${legacyConversionCandidates.size}`);
             const fileOperation = this.plugin.fileOperation;
             if (!fileOperation) {
+                console.log(`[applyMatchFirstAutoRepairs] skip-all-legacy: fileOperation not initialized candidates=${legacyConversionCandidates.size}`);
                 skipped += legacyConversionCandidates.size;
             } else {
                 for (const [oldTaskId, candidate] of legacyConversionCandidates.entries()) {
                     const newTaskId = candidate.newTaskId;
+                    console.log(`[applyMatchFirstAutoRepairs] migrate-attempt oldId=${oldTaskId} newId=${newTaskId} file=${candidate.filePath}`);
 
-                    const oldEntry = taskFileMapping[oldTaskId];
-                    if (!oldEntry) {
-                        skipped++;
-                        continue;
-                    }
+                    const oldEntry = taskFileMapping[oldTaskId] || {
+                        filePath: candidate.filePath,
+                        status: 'active' as const,
+                        syncEnabled: true,
+                    };
+                    console.log(`[applyMatchFirstAutoRepairs] migrate-attempt oldEntry=${taskFileMapping[oldTaskId] ? 'existing' : 'created'} oldId=${oldTaskId}`);
 
                     const vaultUpdated = await fileOperation.updateTaskIdInVault(candidate.filePath, oldTaskId, newTaskId);
+                    console.log(`[applyMatchFirstAutoRepairs] vault-update-result oldId=${oldTaskId} newId=${newTaskId} success=${vaultUpdated}`);
                     if (!vaultUpdated) {
                         skipped++;
                         continue;
@@ -684,8 +693,11 @@ export class CacheOperation   {
                     touchedTaskIds.add(newTaskId);
                     mappingRepaired++;
                     changed = true;
+                    console.log(`[applyMatchFirstAutoRepairs] migrate-success oldId=${oldTaskId} newId=${newTaskId}`);
                 }
             }
+        } else {
+            console.log('[applyMatchFirstAutoRepairs] legacy-migration skipped: no candidates');
         }
 
         for (const taskId of touchedTaskIds) {
@@ -701,6 +713,8 @@ export class CacheOperation   {
         if (changed) {
             await this.plugin.safeSettings?.update({ taskFileMapping }, shouldSave);
         }
+
+        console.log(`[applyMatchFirstAutoRepairs] done: changed=${changed} mappingRepaired=${mappingRepaired} nonActiveMarked=${nonActiveMarked} skipped=${skipped}`);
 
         return {
             changed,
@@ -1258,6 +1272,7 @@ export class CacheOperation   {
 
             // 获取 syncData 中所有活动的任务 ID（用于判断是否是 legacy ID）
             const activeTaskIds = new Set(syncData?.items?.map((t: { id: string }) => t.id) || []);
+            console.log(`[rebuildCache][legacy] activeTodoistTaskIds=${activeTaskIds.size}`);
 
             // 找出需要转换的潜在 legacy ID（不在 syncData 中的 ID）
             const tasksNeedConversion: { taskId: string; content: string; filePath: string; lineNumber: number }[] = [];
@@ -1275,6 +1290,7 @@ export class CacheOperation   {
                     }
                 }
             }
+            console.log(`[rebuildCache][legacy] candidatesNeedConversion=${tasksNeedConversion.length}`);
 
             // 如果有需要转换的 ID，调用 convertLegacyIds 进行转换
             let idMapping: { [oldId: string]: string } = {};
@@ -1286,14 +1302,19 @@ export class CacheOperation   {
                 // 调用 todoistSyncAPI 的 convertLegacyIds 方法
                 // 该方法通过任务内容匹配来找到对应的新 ID
                 try {
+                    console.log(`[rebuildCache][legacy] convertLegacyIds start input=${tasksNeedConversion.length}`);
                     idMapping = await todoistSyncAPI.convertLegacyIds(tasksNeedConversion);
                     this.plugin.debugLog(`[rebuildCache] Found ${Object.keys(idMapping).length} legacy ID candidates to migrate`);
+                    console.log(`[rebuildCache][legacy] convertLegacyIds done mapped=${Object.keys(idMapping).length}`);
                 } catch (error) {
                     console.warn(`[rebuildCache] Legacy ID conversion failed: ${(error as Error).message}. These tasks will remain with their old IDs and may trigger conversion again on next rebuild.`);
                     this.plugin.debugLog('[rebuildCache] Will continue without converting legacy IDs');
+                    console.log(`[rebuildCache][legacy] convertLegacyIds failed: ${(error as Error).message}`);
                     // 继续执行，不使用转换后的 ID
                     idMapping = {};
                 }
+            } else {
+                console.log('[rebuildCache][legacy] no conversion candidates detected');
             }
 
             // ==========================================================================================
@@ -1381,11 +1402,13 @@ export class CacheOperation   {
 
                         let mappingTaskId = taskInfo.taskId;
                         if (convertedTaskId && convertedTaskId !== taskInfo.taskId) {
+                            console.log(`[rebuildCache][legacy] vault-id-update start oldId=${taskInfo.taskId} newId=${convertedTaskId} file=${filePath}`);
                             const vaultUpdated = await this.plugin.fileOperation!.updateTaskIdInVault(
                                 filePath,
                                 taskInfo.taskId,
                                 convertedTaskId
                             );
+                            console.log(`[rebuildCache][legacy] vault-id-update result oldId=${taskInfo.taskId} newId=${convertedTaskId} success=${vaultUpdated}`);
 
                             if (!vaultUpdated) {
                                 issueCount++;
