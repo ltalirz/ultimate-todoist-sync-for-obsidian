@@ -71,46 +71,12 @@ const TASK_ISSUE_TYPE_VALUES = new Set<string>([
 	'issue_unclassified',
 ]);
 
-const LEGACY_TASK_ISSUE_TYPE_ALIASES: Record<string, string> = {
-	label_mismatch: 'sync_labels_mismatch',
-	labelsMismatch: 'sync_labels_mismatch',
-	dueDateMismatch: 'sync_due_mismatch',
-	duedateMismatch: 'sync_due_mismatch',
-	priorityMismatch: 'sync_priority_mismatch',
-	projectMismatch: 'sync_project_mismatch',
-	contentMismatch: 'sync_content_mismatch',
-	statusMismatch: 'sync_completion_mismatch',
-	staleTodoistLink: 'todoist_link_stale',
-	taskNonActive: 'task_marked_nonactive',
-	taskIssue: 'task_requires_review',
-	unknownIssue: 'issue_unclassified',
-	duplicateTask: 'task_duplicate_candidate',
-	content_mismatch: 'sync_content_mismatch',
-	status_mismatch: 'sync_completion_mismatch',
-	due_date_mismatch: 'sync_due_mismatch',
-	labels_mismatch: 'sync_labels_mismatch',
-	priority_mismatch: 'sync_priority_mismatch',
-	project_mismatch: 'sync_project_mismatch',
-	stale_todoist_link: 'todoist_link_stale',
-	task_deleted_in_todoist: 'todoist_task_missing',
-	task_not_in_vault: 'vault_task_missing',
-	vault_task_no_mapping: 'mapping_missing_for_task',
-	mapping_file_not_found: 'mapping_file_missing',
-	mapping_task_not_in_todoist: 'mapping_target_missing_in_todoist',
-	mapping_orphan: 'mapping_orphaned',
-	new_task_not_synced: 'task_unsynced_new',
-	task_issue: 'task_requires_review',
-	task_nonactive: 'task_marked_nonactive',
-	duplicate_task: 'task_duplicate_candidate',
-	unknown_issue: 'issue_unclassified',
-};
-
 export function normalizeTaskIssueTypeKey(issueType: string): string {
 	if (TASK_ISSUE_TYPE_VALUES.has(issueType)) {
 		return issueType;
 	}
 
-	return LEGACY_TASK_ISSUE_TYPE_ALIASES[issueType] || 'issue_unclassified';
+	return 'issue_unclassified';
 }
 
 export function normalizeDerivedTaskStatus(status: string | undefined): DerivedTaskStatus {
