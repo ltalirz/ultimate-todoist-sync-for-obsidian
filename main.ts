@@ -211,30 +211,46 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			this.debugLog('[Plugin] Auto-claimed as primary device: ' + this.cachedDeviceId);
 		}
 
-		new Notice(`Ultimate Todoist Sync loaded successfully.`);
 		this.logOperation?.log('PLUGIN_INITIALIZED', 'Plugin initialized successfully');
-		this.runStartupDatabaseCheck();
+		const startupDatabaseCheckSucceeded = await this.runStartupDatabaseCheck();
+		if (startupDatabaseCheckSucceeded) {
+			new Notice(`Ultimate Todoist Sync loaded successfully.`);
+		} else {
+			new Notice(`Ultimate Todoist Sync loaded with startup sync warnings. Please check console logs.`, 8000);
+		}
 		return true;
 	}
 
-	async runStartupDatabaseCheck(): Promise<void> {
+	async runStartupDatabaseCheck(): Promise<boolean> {
 		try {
 			if (!this.databaseChecker) {
 				this.debugLog('Database checker not initialized, skipping startup check');
-				return;
+				return true;
 			}
 			this.debugLog('Running startup database check...');
 			const result = await this.databaseChecker.checkDatabase();
 			await this.safeSettings?.update({
 				lastDatabaseCheckTime: Date.now()
 			}, true);
+
+			const startupCheckFailed = result.issues.some((issue) =>
+				issue.type === 'issue_unclassified' && issue.details.startsWith('Database check failed:')
+			);
+			if (startupCheckFailed) {
+				new Notice('Startup database check failed to reach Todoist. Please verify network/API status and try sync again.', 10000);
+				return false;
+			}
+
 			if (result.success) {
 				this.debugLog('Startup database check passed');
+				return true;
 			} else {
 				new Notice(`Found ${result.totalIssues} database issue(s). Please use "Fix Database" in settings to resolve them.`);
+				return true;
 			}
 		} catch (error) {
 			console.error('Startup database check failed:', error);
+			return false;
 		}
 	}
 
@@ -265,9 +281,7 @@ export default class UltimateTodoistSyncForObsidian extends Plugin {
 			if (!loaded) {
 				await this.todoistSyncAPI?.initializeSync();
 			} else {
-				this.todoistSyncAPI?.incrementalSync().catch(err => {
-					console.error('[Plugin] Incremental sync after cache load failed:', err);
-				});
+				this.debugLog('[Plugin] Loaded sync cache from settings; startup database check will refresh incrementally.');
 			}
 		} catch (error) {
 			console.error('[Plugin] Failed to initialize sync:', error);

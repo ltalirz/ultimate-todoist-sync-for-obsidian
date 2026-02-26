@@ -213,18 +213,18 @@ export class DatabaseChecker {
         return labelsA.every((label, index) => label === labelsB[index]);
     }
 
-    private async confirmTodoistTaskMissing(taskId: string): Promise<boolean> {
-        const todoistSyncAPI = this.plugin.todoistSyncAPI;
-        if (!todoistSyncAPI) return false;
+	private async confirmTodoistTaskMissing(taskId: string): Promise<boolean> {
+		const todoistSyncAPI = this.plugin.todoistSyncAPI;
+		if (!todoistSyncAPI) return false;
 
-        try {
-            const task = await todoistSyncAPI.GetTaskById(taskId);
-            return !task;
-        } catch (error) {
-            console.error(`[DatabaseChecker] confirmTodoistTaskMissing failed for ${taskId}:`, error);
-            return false;
-        }
-    }
+		try {
+			const task = await todoistSyncAPI.GetTaskById(taskId, { allowNetworkRefresh: false });
+			return !task;
+		} catch (error) {
+			console.error(`[DatabaseChecker] confirmTodoistTaskMissing failed for ${taskId}:`, error);
+			return false;
+		}
+	}
 
     /**
      * 主检查方法 - 执行完整的数据库一致性检查
@@ -295,6 +295,12 @@ export class DatabaseChecker {
                 // 如果 syncData 为空，初始化同步
                 await todoistSyncAPI.initializeSync();
                 // 重新获取 syncData
+                syncData = todoistSyncAPI.getSyncData();
+            } else {
+                if (noticeCallback) {
+                    noticeCallback('Step 2/4: Refreshing Todoist cache...');
+                }
+                await todoistSyncAPI.incrementalSync();
                 syncData = todoistSyncAPI.getSyncData();
             }
             // 使用 fileOperation 的方法从 syncData 中获取 Todoist 任务

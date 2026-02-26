@@ -20,6 +20,16 @@ type FilterOptions = {
   object_type?: string;
 };
 
+type ApiHttpError = Error & {
+	statusCode: number;
+	context: string;
+	retryAfterSeconds?: number;
+	isRetryable: boolean;
+	isAuthError: boolean;
+};
+
+type RequestUrlResponse = Awaited<ReturnType<typeof requestUrl>>;
+
 export class TodoistSyncAPI   {
 	app:App;
   	plugin: UltimateTodoistSyncForObsidian;
@@ -27,13 +37,9 @@ export class TodoistSyncAPI   {
 
 	private readonly PARTIAL_SYNC_LIMIT = 1000;
 	private readonly FULL_SYNC_LIMIT = 100;
-	private readonly WINDOW_DURATION = 15 * 60 * 1000;
-
-	private rateLimitState = {
-		partialSyncCount: 0,
-		fullSyncCount: 0,
-		windowStartTime: Date.now()
-	};
+	private readonly ROLLING_WINDOW_MINUTES = 15;
+	private readonly RATE_LIMIT_BUCKET_MS = 60 * 1000;
+	private rateLimitBuckets = new Map<number, { partial: number; full: number }>();
 
 	// Store complete raw API response
 	// Store complete raw API response
@@ -42,6 +48,12 @@ export class TodoistSyncAPI   {
 	private _syncRunning = false;
 	private _syncDirty = false;
 	private _syncWaiters: Array<{ resolve: () => void; reject: (err: any) => void }> = [];
+	private authFailureStatusCode: 401 | 403 | null = null;
+	private authFailureToken = '';
+	private authFailureBlockedUntil = 0;
+	private lastAuthNoticeAt = 0;
+	private readonly AUTH_NOTICE_COOLDOWN_MS = 30 * 1000;
+	private readonly AUTH_FAILURE_BLOCK_MS = 60 * 1000;
 
 	constructor(app:App, plugin:UltimateTodoistSyncForObsidian) {
 		//super(app,settings);
@@ -50,38 +62,100 @@ export class TodoistSyncAPI   {
 		this.deviceManager = new DeviceManager(app, plugin);
 	}
 
-	private resetRateLimits(): void {
-		this.rateLimitState.partialSyncCount = 0;
-		this.rateLimitState.fullSyncCount = 0;
-		this.rateLimitState.windowStartTime = Date.now();
+	private getCurrentMinuteEpoch(): number {
+		return Math.floor(Date.now() / this.RATE_LIMIT_BUCKET_MS);
 	}
 
-	private checkRateLimitWindow(): void {
-		if (Date.now() - this.rateLimitState.windowStartTime > this.WINDOW_DURATION) {
-			this.resetRateLimits();
+	private pruneRateLimitBuckets(nowMinute: number): void {
+		const minMinute = nowMinute - (this.ROLLING_WINDOW_MINUTES - 1);
+		for (const minute of this.rateLimitBuckets.keys()) {
+			if (minute < minMinute) {
+				this.rateLimitBuckets.delete(minute);
+			}
 		}
 	}
 
-	private async checkRateLimit(isFullSync: boolean): Promise<void> {
-		this.checkRateLimitWindow();
+	private getRateLimitUsage(nowMinute = this.getCurrentMinuteEpoch()): { partial: number; full: number } {
+		this.pruneRateLimitBuckets(nowMinute);
+		let partial = 0;
+		let full = 0;
+		for (const bucket of this.rateLimitBuckets.values()) {
+			partial += bucket.partial;
+			full += bucket.full;
+		}
+		return { partial, full };
+	}
 
+	private incrementRateLimitUsage(isFullSync: boolean): void {
+		const nowMinute = this.getCurrentMinuteEpoch();
+		this.pruneRateLimitBuckets(nowMinute);
+		const existing = this.rateLimitBuckets.get(nowMinute) ?? { partial: 0, full: 0 };
+		if (isFullSync) {
+			existing.full++;
+		} else {
+			existing.partial++;
+		}
+		this.rateLimitBuckets.set(nowMinute, existing);
+	}
+
+	private estimateWaitMinutes(isFullSync: boolean, nowMinute: number): number {
 		const limit = isFullSync ? this.FULL_SYNC_LIMIT : this.PARTIAL_SYNC_LIMIT;
-		const used = isFullSync ? this.rateLimitState.fullSyncCount : this.rateLimitState.partialSyncCount;
+		const key = isFullSync ? 'full' : 'partial';
+		const entries = Array.from(this.rateLimitBuckets.entries())
+			.filter(([minute]) => minute >= nowMinute - (this.ROLLING_WINDOW_MINUTES - 1))
+			.sort((a, b) => a[0] - b[0]);
+
+		let total = entries.reduce((sum, [, bucket]) => sum + bucket[key], 0);
+		if (total < limit) return 0;
+
+		for (const [minute, bucket] of entries) {
+			total -= bucket[key];
+			const wait = Math.max(1, minute + this.ROLLING_WINDOW_MINUTES - nowMinute);
+			if (total < limit) return wait;
+		}
+
+		return this.ROLLING_WINDOW_MINUTES;
+	}
+
+	private async checkRateLimit(isFullSync: boolean): Promise<void> {
+		const nowMinute = this.getCurrentMinuteEpoch();
+		const usage = this.getRateLimitUsage(nowMinute);
+		const limit = isFullSync ? this.FULL_SYNC_LIMIT : this.PARTIAL_SYNC_LIMIT;
+		const used = isFullSync ? usage.full : usage.partial;
 
 		if (used >= limit) {
-			const waitMinutes = Math.ceil((this.WINDOW_DURATION - (Date.now() - this.rateLimitState.windowStartTime)) / 60000);
-			throw new Error(`RATE_LIMIT_EXCEEDED:${waitMinutes}`);
+			const waitMinutes = this.estimateWaitMinutes(isFullSync, nowMinute);
+			const kind = isFullSync ? 'full' : 'partial';
+			throw new Error(`RATE_LIMIT_EXCEEDED:${kind}:${waitMinutes}`);
 		}
 	}
 
 	private handleRateLimitError(error: Error): void {
 		const message = error.message;
+		if (this.isApiHttpError(error) && error.statusCode === 429) {
+			const retryAfter = error.retryAfterSeconds ?? 15 * 60;
+			const waitMinutes = Math.max(1, Math.ceil(retryAfter / 60));
+			new Notice(
+				`⚠️ Too Many Requests to Todoist!\n\n` +
+				`Please wait about ${waitMinutes} minutes before next sync.\n\n` +
+				`Tip: Reduce sync frequency to avoid hitting rate limits.`,
+				15000
+			);
+			return;
+		}
 
 		if (message.includes('RATE_LIMIT_EXCEEDED')) {
-			const waitMinutes = message.split(':')[1] || '15';
+			const parts = message.split(':');
+			const limitTypeFromError = parts.length >= 3 ? parts[1] : undefined;
+			const waitMinutes = parts.length >= 3 ? parts[2] : (parts[1] || '15');
+			const usage = this.getRateLimitUsage();
+			const derivedType = usage.full >= this.FULL_SYNC_LIMIT ? 'full' : 'partial';
+			const limitType = (limitTypeFromError === 'full' || limitTypeFromError === 'partial')
+				? limitTypeFromError
+				: derivedType;
 			new Notice(
 				`⚠️ Todoist API Rate Limit Reached!\n\n` +
-				`You have reached the ${this.rateLimitState.fullSyncCount >= this.FULL_SYNC_LIMIT ? 'full' : 'partial'} sync limit.\n` +
+				`You have reached the ${limitType} sync limit.\n` +
 				`Please wait ${waitMinutes} minutes before next sync.\n\n` +
 				`Tip: Reduce sync frequency to avoid hitting limits.`,
 				15000
@@ -94,6 +168,147 @@ export class TodoistSyncAPI   {
 				15000
 			);
 		}
+	}
+
+	private isApiHttpError(error: unknown): error is ApiHttpError {
+		if (!(error instanceof Error)) return false;
+		const candidate = error as Partial<ApiHttpError>;
+		return typeof candidate.statusCode === 'number' && typeof candidate.context === 'string';
+	}
+
+	private normalizeRequestUrlThrownHttpError(context: string, error: unknown): ApiHttpError | null {
+		if (!error || typeof error !== 'object') return null;
+		const candidate = error as {
+			status?: unknown;
+			statusCode?: unknown;
+			headers?: unknown;
+		};
+
+		const statusCode = typeof candidate.status === 'number'
+			? candidate.status
+			: (typeof candidate.statusCode === 'number' ? candidate.statusCode : null);
+		if (statusCode === null) return null;
+
+		let retryAfterSeconds: number | undefined;
+		if (statusCode === 429 && candidate.headers && typeof candidate.headers === 'object') {
+			const headerRecord = candidate.headers as Record<string, unknown>;
+			const retryAfterRaw = headerRecord['retry-after'] ?? headerRecord['Retry-After'];
+			if (typeof retryAfterRaw === 'string') {
+				const parsed = Number.parseInt(retryAfterRaw, 10);
+				if (Number.isFinite(parsed) && parsed > 0) {
+					retryAfterSeconds = parsed;
+				}
+			}
+		}
+
+		return Object.assign(new Error(`${context} failed: HTTP ${statusCode}`), {
+			statusCode,
+			context,
+			retryAfterSeconds,
+			isRetryable: statusCode === 429 || statusCode >= 500,
+			isAuthError: statusCode === 401 || statusCode === 403,
+		}) as ApiHttpError;
+	}
+
+	private getRetryAfterSeconds(response: RequestUrlResponse): number | undefined {
+		const body = response.json as { error_extra?: { retry_after?: unknown } } | undefined;
+		const retryAfterFromBody = body?.error_extra?.retry_after;
+		if (typeof retryAfterFromBody === 'number' && Number.isFinite(retryAfterFromBody) && retryAfterFromBody > 0) {
+			return retryAfterFromBody;
+		}
+
+		const headers = response.headers as unknown;
+		if (headers && typeof headers === 'object') {
+			const headerRecord = headers as Record<string, unknown>;
+			const raw = headerRecord['retry-after'] ?? headerRecord['Retry-After'];
+			if (typeof raw === 'string') {
+				const parsed = Number.parseInt(raw, 10);
+				if (Number.isFinite(parsed) && parsed > 0) return parsed;
+			}
+		}
+
+		return undefined;
+	}
+
+	private createApiHttpError(context: string, response: RequestUrlResponse): ApiHttpError {
+		const statusCode = response.status;
+		const retryAfterSeconds = statusCode === 429 ? this.getRetryAfterSeconds(response) : undefined;
+		let message = `${context} failed: HTTP ${statusCode}`;
+		if (statusCode === 400) message = `${context} failed: HTTP 400 Bad Request`;
+		if (statusCode === 401) message = `${context} failed: HTTP 401 Unauthorized`;
+		if (statusCode === 403) message = `${context} failed: HTTP 403 Forbidden`;
+		if (statusCode === 404) message = `${context} failed: HTTP 404 Not Found`;
+		if (statusCode === 429) {
+			message = `${context} failed: HTTP 429 Too Many Requests${retryAfterSeconds ? ` (retry_after=${retryAfterSeconds}s)` : ''}`;
+		}
+
+		return Object.assign(new Error(message), {
+			statusCode,
+			context,
+			retryAfterSeconds,
+			isRetryable: statusCode === 429 || statusCode >= 500,
+			isAuthError: statusCode === 401 || statusCode === 403,
+		});
+	}
+
+	private maybeNotifyAuthFailure(statusCode: 401 | 403): void {
+		const now = Date.now();
+		if (now - this.lastAuthNoticeAt < this.AUTH_NOTICE_COOLDOWN_MS) return;
+		this.lastAuthNoticeAt = now;
+
+		if (statusCode === 401) {
+			new Notice('Todoist authentication failed (401). Please verify or refresh your API token.', 10000);
+			return;
+		}
+
+		new Notice('Todoist access forbidden (403). Token or permission may be invalid. Please re-check Todoist authorization.', 10000);
+	}
+
+	private registerAuthFailure(statusCode: 401 | 403): void {
+		this.authFailureStatusCode = statusCode;
+		this.authFailureToken = this.plugin.settings.todoistAPIToken || '';
+		this.authFailureBlockedUntil = Date.now() + this.AUTH_FAILURE_BLOCK_MS;
+		this.maybeNotifyAuthFailure(statusCode);
+	}
+
+	private clearAuthFailureIfTokenChanged(): void {
+		const currentToken = this.plugin.settings.todoistAPIToken || '';
+		if (this.authFailureStatusCode !== null && this.authFailureToken !== currentToken) {
+			this.authFailureStatusCode = null;
+			this.authFailureToken = '';
+			this.authFailureBlockedUntil = 0;
+		}
+	}
+
+	private ensureAuthFailureNotBlocked(context: string): void {
+		this.clearAuthFailureIfTokenChanged();
+		if (this.authFailureStatusCode === null) return;
+		if (Date.now() >= this.authFailureBlockedUntil) {
+			this.authFailureStatusCode = null;
+			this.authFailureToken = '';
+			this.authFailureBlockedUntil = 0;
+			return;
+		}
+
+		const statusCode = this.authFailureStatusCode;
+		const message = `${context} aborted: previous Todoist auth failure (${statusCode}). Update token/permissions before retrying.`;
+		const blockedError = Object.assign(new Error(message), {
+			statusCode,
+			context,
+			isRetryable: false,
+			isAuthError: true,
+		}) as ApiHttpError;
+		throw blockedError;
+	}
+
+	private assertSuccessfulResponse(context: string, response: RequestUrlResponse): void {
+		if (response.status >= 200 && response.status < 300) return;
+
+		const httpError = this.createApiHttpError(context, response);
+		if (httpError.statusCode === 401 || httpError.statusCode === 403) {
+			this.registerAuthFailure(httpError.statusCode);
+		}
+		throw httpError;
 	}
 
 	private async getClientHeader(): Promise<string> {
@@ -162,6 +377,7 @@ export class TodoistSyncAPI   {
 		} catch (error) {
 			console.error('[TodoistSyncAPI] Incremental sync failed:', error);
 			waiters.forEach(w => w.reject(error));
+			throw error;
 		} finally {
 			this._syncRunning = false;
 		}
@@ -219,8 +435,9 @@ export class TodoistSyncAPI   {
 	}
 
     async getAllResources(fullSync = false) { 
+		this.ensureAuthFailureNotBlocked('getAllResources');
 		const clientId = await this.getClientHeader();
-    	const accessToken = this.plugin.settings.todoistAPIToken;
+     	const accessToken = this.plugin.settings.todoistAPIToken;
 		const syncToken = fullSync ? '*' : (this.syncData?.sync_token || '*');
 		
 		await this.checkRateLimit(fullSync);
@@ -240,37 +457,56 @@ export class TodoistSyncAPI   {
     		}).toString()
     	};
   
-    	try {
-    		const response = await requestUrl(options);
-
-			if (response.status === 429) {
-				throw new Error('RATE_LIMIT_429');
-			}
+	    	try {
+	    		const response = await requestUrl(options);
+			this.assertSuccessfulResponse('getAllResources', response);
   
-			if (response.status >= 400) {
- 				throw new Error(`Failed to fetch all resources: ${response.status} ${response.text}`);
- 			}
-  
- 			const data = response.json;
+  			const data = response.json;
 
-		if (fullSync) {
-			this.rateLimitState.fullSyncCount++;
-		} else {
-			this.rateLimitState.partialSyncCount++;
-		}
+		this.incrementRateLimitUsage(fullSync);
   
       		return data;
-    	} catch (error: any) {
-			if (error.message && (error.message.includes('RATE_LIMIT') || error.message.includes('429'))) {
-				this.handleRateLimitError(error);
+	    	} catch (error) {
+			if (this.isApiHttpError(error)) {
+				if (error.statusCode === 401 || error.statusCode === 403) {
+					this.registerAuthFailure(error.statusCode);
+				}
+				if (error.statusCode === 429) {
+					this.handleRateLimitError(error);
+				}
+				console.error(error);
+				throw error;
 			}
-      		console.error(error);
-      		throw new Error('Failed to fetch all resources due to network error');
-    	}
+
+			const normalizedHttpError = this.normalizeRequestUrlThrownHttpError('getAllResources', error);
+			if (normalizedHttpError) {
+				if (normalizedHttpError.statusCode === 401 || normalizedHttpError.statusCode === 403) {
+					this.registerAuthFailure(normalizedHttpError.statusCode);
+				}
+				if (normalizedHttpError.statusCode === 429) {
+					this.handleRateLimitError(normalizedHttpError);
+				}
+				console.error(error);
+				throw normalizedHttpError;
+			}
+
+			if (error instanceof Error && (error.message.includes('RATE_LIMIT') || error.message.includes('429'))) {
+				this.handleRateLimitError(error);
+				console.error(error);
+				throw error;
+			}
+
+			console.error(error);
+			if (error instanceof Error) {
+				throw error;
+			}
+			throw new Error('Failed to fetch all resources due to network error');
+	    	}
     }
 
     //backup todoist
     async getUserResource() { 
+	  this.ensureAuthFailureNotBlocked('getUserResource');
       const accessToken = this.plugin.settings.todoistAPIToken
       const url = 'https://api.todoist.com/api/v1/sync';
       const options = {
@@ -288,15 +524,15 @@ export class TodoistSyncAPI   {
     
       try {
         const response = await requestUrl(options);
-    
-        if (response.status >= 400) {
-          throw new Error(`Failed to fetch all resources: ${response.status} ${response.text}`);
-        }
+		this.assertSuccessfulResponse('getUserResource', response);
     
         const data = response.json;
         this.plugin.debugLog(data)
         return data;
       } catch (error) {
+		if (this.isApiHttpError(error)) {
+			throw error;
+		}
         console.error(error)
         throw new Error('Failed to fetch user resources due to network error');
       }
@@ -305,6 +541,7 @@ export class TodoistSyncAPI   {
 
       //update user timezone
       async updateUserTimezone() { 
+		this.ensureAuthFailureNotBlocked('updateUserTimezone');
         const unixTimestampString: string = Math.floor(Date.now() / 1000).toString();
         const accessToken = this.plugin.settings.todoistAPIToken
         const url = 'https://api.todoist.com/api/v1/sync';
@@ -327,15 +564,15 @@ export class TodoistSyncAPI   {
       
         try {
           const response = await requestUrl(options);
-      
-          if (response.status >= 400) {
-            throw new Error(`Failed to fetch all resources: ${response.status} ${response.text}`);
-          }
+		  this.assertSuccessfulResponse('updateUserTimezone', response);
       
           const data = response.json;
           this.plugin.debugLog(data)
           return data;
         } catch (error) {
+		  if (this.isApiHttpError(error)) {
+			  throw error;
+		  }
           console.error('[updateUserTimezone] Failed:', error);
           throw new Error('Failed to fetch user resources due to network error');
         }
@@ -344,7 +581,8 @@ export class TodoistSyncAPI   {
     //get activity logs
     //result  {results:[],next_cursor:null}
     async getAllActivityEvents() {
- 	const clientId = await this.getClientHeader();
+	this.ensureAuthFailureNotBlocked('getAllActivityEvents');
+  	const clientId = await this.getClientHeader();
     const accessToken = this.plugin.settings.todoistAPIToken
     
       try {
@@ -357,9 +595,7 @@ export class TodoistSyncAPI   {
           }
         });
     
-        if (response.status >= 400) {
-          throw new Error(`API returned error status: ${response.status}`);
-        }
+		this.assertSuccessfulResponse('getAllActivityEvents', response);
     
         const data = response.json;
     
@@ -367,6 +603,9 @@ export class TodoistSyncAPI   {
         // 转换为旧格式: { events: [] }
         return { events: data.results || [] };
       } catch (error) {
+		if (this.isApiHttpError(error)) {
+			throw error;
+		}
         throw error;
       }
     }
@@ -388,6 +627,7 @@ export class TodoistSyncAPI   {
     //get completed items activity
     //result  {results:[],next_cursor:null}
     async getCompletedItemsActivity() {
+		this.ensureAuthFailureNotBlocked('getCompletedItemsActivity');
         const accessToken = this.plugin.settings.todoistAPIToken
         const url = 'https://api.todoist.com/api/v1/activities?event_type=completed';
         
@@ -400,9 +640,7 @@ export class TodoistSyncAPI   {
                 }
             });
         
-            if (response.status >= 400) {
-            throw new Error(`Failed to fetch completed items: ${response.status} ${response.text}`);
-            }
+			this.assertSuccessfulResponse('getCompletedItemsActivity', response);
         
             const data = response.json;
         
@@ -410,6 +648,9 @@ export class TodoistSyncAPI   {
             // 转换为旧格式: { events: [] }
             return { events: data.results || [] };
         } catch (error) {
+			if (this.isApiHttpError(error)) {
+				throw error;
+			}
             console.error(error);
             throw new Error('Failed to fetch completed items due to network error');
         }
@@ -420,6 +661,7 @@ export class TodoistSyncAPI   {
     //get uncompleted items activity
     //result  {results:[],next_cursor:null}
     async getUncompletedItemsActivity() {
+		this.ensureAuthFailureNotBlocked('getUncompletedItemsActivity');
         const accessToken = this.plugin.settings.todoistAPIToken
         const url = 'https://api.todoist.com/api/v1/activities?event_type=uncompleted';
     
@@ -432,9 +674,7 @@ export class TodoistSyncAPI   {
                 }
             });
     
-            if (response.status >= 400) {
-                throw new Error(`Failed to fetch uncompleted items: ${response.status} ${response.text}`);
-            }
+			this.assertSuccessfulResponse('getUncompletedItemsActivity', response);
     
             const data = response.json;
     
@@ -442,6 +682,9 @@ export class TodoistSyncAPI   {
             // 转换为旧格式: { events: [] }
             return { events: data.results || [] };
         } catch (error) {
+			if (this.isApiHttpError(error)) {
+				throw error;
+			}
             console.error(error);
             throw new Error('Failed to fetch uncompleted items due to network error');
         }
@@ -457,6 +700,7 @@ export class TodoistSyncAPI   {
     //get updated items activity
     //result  {results:[],next_cursor:null}
     async getUpdatedItemsActivity() {
+		this.ensureAuthFailureNotBlocked('getUpdatedItemsActivity');
         const accessToken = this.plugin.settings.todoistAPIToken
         const url = 'https://api.todoist.com/api/v1/activities?event_type=updated';
     
@@ -469,9 +713,7 @@ export class TodoistSyncAPI   {
                 }
             });
     
-            if (response.status >= 400) {
-                throw new Error(`Failed to fetch updated items: ${response.status} ${response.text}`);
-            }
+			this.assertSuccessfulResponse('getUpdatedItemsActivity', response);
     
             const data = response.json;
     
@@ -479,6 +721,9 @@ export class TodoistSyncAPI   {
             // 转换为旧格式: { events: [] }
             return { events: data.results || [] };
         } catch (error) {
+			if (this.isApiHttpError(error)) {
+				throw error;
+			}
             console.error(error);
             throw new Error('Failed to fetch updated items due to network error');
         }
@@ -490,6 +735,7 @@ export class TodoistSyncAPI   {
 //get projects activity
     //result  {results:[],next_cursor:null}
     async getProjectsActivity() {
+	  this.ensureAuthFailureNotBlocked('getProjectsActivity');
       const accessToken = this.plugin.settings.todoistAPIToken
       const url = 'https://api.todoist.com/api/v1/activities?object_type=project';
       
@@ -502,9 +748,7 @@ export class TodoistSyncAPI   {
               }
           });
       
-          if (response.status >= 400) {
-            throw new Error(`Failed to fetch projects activities: ${response.status} ${response.text}`);
-          }
+		  this.assertSuccessfulResponse('getProjectsActivity', response);
       
           const data = response.json;
       
@@ -512,6 +756,9 @@ export class TodoistSyncAPI   {
           // 转换为旧格式: { events: [] }
           return { events: data.results || [] };
       } catch (error) {
+		  if (this.isApiHttpError(error)) {
+			  throw error;
+		  }
           console.error(error);
           throw new Error('Failed to fetch projects activities due to network error');
       }
@@ -532,7 +779,8 @@ export class TodoistSyncAPI   {
 
   // Execute Sync API commands
   async executeCommands(commands: any[]): Promise<any> {
- 	await this.checkRateLimit(false);
+	this.ensureAuthFailureNotBlocked('executeCommands');
+  	await this.checkRateLimit(false);
 
  	const clientId = await this.getClientHeader();
     const accessToken = this.plugin.settings.todoistAPIToken;
@@ -553,14 +801,7 @@ export class TodoistSyncAPI   {
 
     try {
       const response = await requestUrl(options);
-
- 		if (response.status === 429) {
- 			throw new Error('RATE_LIMIT_429');
- 		}
-
-      if (response.status >= 400) {
-        throw new Error(`Failed to execute commands: ${response.status} - ${response.text}`);
-      }
+		this.assertSuccessfulResponse('executeCommands', response);
       const data = response.json;
 
 		if (data?.sync_status) {
@@ -572,16 +813,22 @@ export class TodoistSyncAPI   {
 			}
 		}
 
-		this.rateLimitState.partialSyncCount++;
+		this.incrementRateLimitUsage(false);
 
 
       return data;
-    } catch (error: any) {
-		if (error.message && (error.message.includes('RATE_LIMIT') || error.message.includes('429'))) {
+    } catch (error) {
+		if (this.isApiHttpError(error)) {
+			if (error.statusCode === 429) this.handleRateLimitError(error);
+			console.error('Error executing commands:', error);
+			throw error;
+		}
+
+		if (error instanceof Error && (error.message.includes('RATE_LIMIT') || error.message.includes('429'))) {
 			this.handleRateLimitError(error);
 		}
-      	console.error('Error executing commands:', error);
-      	throw error;
+	      	console.error('Error executing commands:', error);
+	      	throw error;
     }
   }
 
@@ -760,14 +1007,23 @@ export class TodoistSyncAPI   {
   }
 
   // Compatible wrapper: GetTaskById
-  async GetTaskById(taskId: string): Promise<any> {
+  async GetTaskById(taskId: string, options?: { allowNetworkRefresh?: boolean }): Promise<any> {
     try {
+      const allowNetworkRefresh = options?.allowNetworkRefresh !== false;
+
       if (!this.syncData) {
+        if (!allowNetworkRefresh) {
+          return undefined;
+        }
         this.syncData = await this.getAllResources(true);
       }
       const tasks = this.syncData?.items || [];
       const found = tasks.find((t: any) => t.id === taskId);
       if (found) return found;
+
+      if (!allowNetworkRefresh) {
+        return undefined;
+      }
 
       // Not in local cache — do an incremental sync and retry once.
       // This handles the race where a task was just created and syncData
@@ -775,8 +1031,8 @@ export class TodoistSyncAPI   {
       // after lineContentNewTaskCheck).
       try {
         await this.incrementalSync();
-      } catch (_) {
-        // ignore sync errors here; fall through to return undefined
+      } catch (error) {
+        console.warn(`[TodoistSyncAPI] Incremental refresh in GetTaskById failed for ${taskId}:`, error);
       }
       const refreshed = this.syncData?.items || [];
       return refreshed.find((t: any) => t.id === taskId);
@@ -933,5 +1189,3 @@ export class TodoistSyncAPI   {
   }
         
 }
-
-
