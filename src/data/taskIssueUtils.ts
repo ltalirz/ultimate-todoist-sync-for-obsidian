@@ -66,6 +66,7 @@ const TASK_ISSUE_TYPE_VALUES = new Set<string>([
 	'task_unsynced_new',
 	'task_requires_review',
 	'task_marked_nonactive',
+	'mapping_legacy_id',
 	'task_duplicate_candidate',
 	'issue_source_unconfirmed',
 	'issue_unclassified',

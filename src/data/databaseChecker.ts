@@ -41,6 +41,7 @@ export interface DatabaseCheckIssue {
         | 'sync_priority_mismatch'
         | 'sync_labels_mismatch'
         | 'sync_project_mismatch'
+        | 'mapping_legacy_id'
         | 'task_duplicate_candidate';
     
     // 基本信息
@@ -143,6 +144,7 @@ export interface DatabaseCheckResult {
         priorityMismatch: number;            // 优先级不一致
         labelsMismatch: number;
         projectMismatch: number;            // 项目不一致
+        legacyIdIssue: number;
         duplicateTask: number;              // 重复任务
     };
     reportPath?: string;             // 生成的报告文件路径
@@ -245,6 +247,7 @@ export class DatabaseChecker {
             dueDateMismatch: 0,
             priorityMismatch: 0,              // 优先级不一致
             labelsMismatch: 0,
+            legacyIdIssue: 0,
             projectMismatch: 0,               // 项目不一致
             duplicateTask: 0                  // 重复任务
         };
@@ -446,6 +449,7 @@ export class DatabaseChecker {
             dueDateMismatch: 0,
             priorityMismatch: 0,
             labelsMismatch: 0,
+            legacyIdIssue: 0,
             projectMismatch: 0,
             duplicateTask: 0
         };
@@ -524,6 +528,9 @@ export class DatabaseChecker {
                 case 'sync_labels_mismatch':
                     summary.labelsMismatch++;
                     break;
+                case 'mapping_legacy_id':
+                    summary.legacyIdIssue++;
+                    break;
                 case 'sync_project_mismatch':
                     summary.projectMismatch++;
                     break;
@@ -573,6 +580,35 @@ export class DatabaseChecker {
 
         const allPrimaryTaskIds = new Set<string>([...vaultTasksMap.keys(), ...todoistTasksMap.keys()]);
         const processedMappingTaskIds = new Set<string>();
+
+        const todoistSyncAPI = this.plugin.todoistSyncAPI;
+        const potentialLegacyCandidates: { taskId: string; content: string; filePath: string; lineNumber: number }[] = [];
+        for (const taskId of allPrimaryTaskIds) {
+            const vaultTask = vaultTasksMap.get(taskId);
+            const todoistTask = todoistTasksMap.get(taskId);
+            if (vaultTask && !todoistTask) {
+                potentialLegacyCandidates.push({
+                    taskId,
+                    content: vaultTask.content,
+                    filePath: vaultTask.filePath,
+                    lineNumber: vaultTask.lineNumber,
+                });
+            }
+        }
+
+        const legacyIdMapping = new Map<string, string>();
+        if (todoistSyncAPI && potentialLegacyCandidates.length > 0) {
+            try {
+                const converted = await todoistSyncAPI.convertLegacyIds(potentialLegacyCandidates);
+                for (const [oldTaskId, newTaskId] of Object.entries(converted)) {
+                    if (newTaskId && newTaskId !== oldTaskId) {
+                        legacyIdMapping.set(oldTaskId, newTaskId);
+                    }
+                }
+            } catch (error) {
+                console.error('[DatabaseChecker] legacy ID preflight failed:', error);
+            }
+        }
 
         for (const taskId of allPrimaryTaskIds) {
             const vaultTask = vaultTasksMap.get(taskId);
@@ -718,6 +754,21 @@ export class DatabaseChecker {
 
             if (vaultTask && !todoistTask) {
                 if (mapping) processedMappingTaskIds.add(taskId);
+
+                const mappedLegacyId = legacyIdMapping.get(taskId);
+                if (mappedLegacyId) {
+                    const mappedTodoistTask = todoistTasksMap.get(mappedLegacyId);
+                    emitIssue({
+                        type: 'mapping_legacy_id',
+                        filePath: vaultTask.filePath,
+                        taskId,
+                        lineNumber: vaultTask.lineNumber,
+                        details: `Legacy task ID ${taskId} can be migrated to ${mappedLegacyId}`,
+                        obsidianContent: vaultTask.content,
+                        todoistContent: mappedTodoistTask?.content,
+                    });
+                    continue;
+                }
 
                 if (vaultTask.isCompleted) {
                     const missingConfirmed = await this.confirmTodoistTaskMissing(taskId);
@@ -958,6 +1009,7 @@ Generated: ${new Date().toLocaleString()}
                 'todoist_link_stale': 'Stale Obsidian Link in Todoist',
                 'sync_priority_mismatch': 'Priority Mismatch',
                 'sync_labels_mismatch': 'Labels Mismatch',
+                'mapping_legacy_id': 'Legacy ID Migration Required',
                 'sync_project_mismatch': 'Project Mismatch',
                 'task_duplicate_candidate': 'Duplicate Task Candidate'
             };
