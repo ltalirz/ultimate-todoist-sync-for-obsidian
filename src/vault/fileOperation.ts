@@ -261,8 +261,10 @@ export class FileOperation   {
                     console.error(`Task ${taskID} not found in taskFileMapping`);
                     continue;
                 }
-                const todoistTask = await this.plugin.todoistSyncAPI.GetTaskById(taskID)
-                const todoistLink = todoistTask?.url || ''
+                await this.plugin.todoistSyncAPI.GetTaskById(taskID)
+                const todoistLink = this.plugin.settings.useAppURI
+                    ? `todoist://task?id=${taskID}`
+                    : `https://app.todoist.com/app/task/${taskID}`
                 const link = `[link](${todoistLink})`
                 const newLine = this.plugin.taskParser.addTodoistLink(line,link)
                 this.plugin.debugLog(newLine)
@@ -501,6 +503,109 @@ export class FileOperation   {
         return modified;
     }
 
+    private normalizeLabelsForSync(labels: string[] | undefined): string[] {
+        if (!labels || labels.length === 0) return [];
+        const normalized = labels
+            .map(label => (label || '').trim().replace(/^#/, ''))
+            .filter(label => label.length > 0);
+        return Array.from(new Set(normalized));
+    }
+
+    async syncTaskPriorityToFile(taskId: string, newPriority: number): Promise<boolean> {
+        const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId);
+        if (!taskMapping) return false;
+        const filepath = taskMapping.filePath;
+
+        const file = this.app.vault.getAbstractFileByPath(filepath);
+        const fileContent = await this.app.vault.read(file);
+        const lines = fileContent.split('\n');
+        let modified = false;
+
+        const numericPriority = Number(newPriority);
+        const targetPriority = Number.isFinite(numericPriority) && numericPriority >= 1 && numericPriority <= 4
+            ? Math.floor(numericPriority)
+            : 1;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (!line.includes(taskId) || !this.plugin.taskParser.hasTodoistTag(line)) continue;
+
+            const currentPriority = this.plugin.taskParser.getTaskPriority(line);
+            if (currentPriority === targetPriority) break;
+
+            const metadataIndex = line.indexOf('%%[todoist_id::');
+            const prefix = (metadataIndex >= 0 ? line.slice(0, metadataIndex) : line)
+                .replace(/\s!!([1-4])(?=\s|$)/g, '')
+                .replace(/ {2,}/g, ' ')
+                .trimEnd();
+            const suffix = metadataIndex >= 0 ? line.slice(metadataIndex).trimStart() : '';
+
+            const nextPrefix = targetPriority > 1 ? `${prefix} !!${targetPriority}` : prefix;
+            lines[i] = suffix ? `${nextPrefix} ${suffix}` : nextPrefix;
+            modified = true;
+            break;
+        }
+
+        if (modified) {
+            const newFileContent = lines.join('\n');
+            await this.plugin.backupOperation?.backupFile(filepath);
+            await this.app.vault.modify(file, newFileContent);
+            this.plugin.logOperation?.log('FILE_TASK_PRIORITY_SYNCED', `Synced priority from Todoist: ${taskId}`, filepath, taskId, this.plugin.isSyncingFromTodoist ? 'todoist→obsidian' : 'obsidian→todoist');
+        }
+
+        return modified;
+    }
+
+    async syncTaskLabelsToFile(taskId: string, newLabels: string[]): Promise<boolean> {
+        const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId);
+        if (!taskMapping) return false;
+        const filepath = taskMapping.filePath;
+
+        const file = this.app.vault.getAbstractFileByPath(filepath);
+        const fileContent = await this.app.vault.read(file);
+        const lines = fileContent.split('\n');
+        let modified = false;
+
+        const todoistLabels = this.normalizeLabelsForSync(newLabels);
+        const desiredLabels = this.plugin.taskParser.normalizeLabelsForCompare([...todoistLabels, 'todoist']);
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (!line.includes(taskId) || !this.plugin.taskParser.hasTodoistTag(line)) continue;
+
+            const currentLabels = this.plugin.taskParser.normalizeLabelsForCompare(
+                this.plugin.taskParser.getAllTagsFromLineText(line)
+            );
+            const isSame = currentLabels.length === desiredLabels.length
+                && currentLabels.every((label, idx) => label === desiredLabels[idx]);
+            if (isSame) break;
+
+            const metadataIndex = line.indexOf('%%[todoist_id::');
+            const prefix = metadataIndex >= 0 ? line.slice(0, metadataIndex) : line;
+            const suffix = metadataIndex >= 0 ? line.slice(metadataIndex).trimStart() : '';
+
+            const prefixWithoutTags = prefix
+                .replace(/#[\w\u4e00-\u9fa5-]+/g, '')
+                .replace(/ {2,}/g, ' ')
+                .trimEnd();
+            const tagText = desiredLabels.map(label => `#${label}`).join(' ');
+            const nextPrefix = tagText ? `${prefixWithoutTags} ${tagText}` : prefixWithoutTags;
+
+            lines[i] = suffix ? `${nextPrefix} ${suffix}` : nextPrefix;
+            modified = true;
+            break;
+        }
+
+        if (modified) {
+            const newFileContent = lines.join('\n');
+            await this.plugin.backupOperation?.backupFile(filepath);
+            await this.app.vault.modify(file, newFileContent);
+            this.plugin.logOperation?.log('FILE_TASK_LABELS_SYNCED', `Synced labels from Todoist: ${taskId}`, filepath, taskId, this.plugin.isSyncingFromTodoist ? 'todoist→obsidian' : 'obsidian→todoist');
+        }
+
+        return modified;
+    }
+
     async syncTaskNoteToFile(taskId: string, noteContent: string, noteDate: string): Promise<boolean> {
         const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId);
         if (!taskMapping) return false;
@@ -663,10 +768,15 @@ export class FileOperation   {
                 hasChanges = true;
             }
             
-            // 3. Replace Web URL: https://todoist.com/app/task/oldId -> https://todoist.com/app/task/newId
-            const oldWebUrlPattern = new RegExp(`https://todoist\\.com/app/task/${oldId}`, 'g');
-            if (oldWebUrlPattern.test(line)) {
-                line = line.replace(oldWebUrlPattern, `https://todoist.com/app/task/${newId}`);
+            const oldWebUrlPatternLegacy = new RegExp(`https://todoist\\.com/app/task/${oldId}`, 'g');
+            if (oldWebUrlPatternLegacy.test(line)) {
+                line = line.replace(oldWebUrlPatternLegacy, `https://todoist.com/app/task/${newId}`);
+                hasChanges = true;
+            }
+
+            const oldWebUrlPatternNew = new RegExp(`https://app\\.todoist\\.com/app/task/${oldId}`, 'g');
+            if (oldWebUrlPatternNew.test(line)) {
+                line = line.replace(oldWebUrlPatternNew, `https://app.todoist.com/app/task/${newId}`);
                 hasChanges = true;
             }
             
@@ -811,8 +921,7 @@ export class FileOperation   {
      * @returns 标签数组（不带 # 前缀）
      */
     private extractLabelsFromLine(line: string): string[] {
-        return this.plugin.taskParser.getAllTagsFromLineText(line)
-            .filter(l => l !== 'todoist');
+        return this.plugin.taskParser.getAllTagsFromLineText(line);
     }
 
 

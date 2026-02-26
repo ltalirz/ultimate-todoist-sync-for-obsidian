@@ -1117,14 +1117,12 @@ export class TaskManagerModal extends Modal {
 					// Invalidate file cache after content/date writes so tag/priority sync reads fresh data
 					this._fileCache.delete(filePath);
 					// Sync tags (labels) from Todoist to file
-					const todoistLabels = task.labels || [];
+					const todoistLabels = taskParser.normalizeLabelsForCompare([...(task.labels || []), 'todoist']);
 					let currentLine = await this.getTaskLine(taskId, filePath);
 					if (currentLine && todoistLabels.length > 0) {
 						const existingTags = taskParser.getAllTagsFromLineText(currentLine);
-						// Remove existing tags (except #todoist and project tags)
 						let updatedLine = currentLine;
 						for (const tag of existingTags) {
-							if (tag === 'todoist') continue;
 							updatedLine = updatedLine.replace(new RegExp(`#${tag}\\b`, 'g'), '');
 						}
 						// Add Todoist labels as tags before #todoist

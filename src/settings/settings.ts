@@ -272,8 +272,8 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
             );
 
         new Setting(containerEl)
-            .setName('Use Desktop URIs')
-            .setDesc('Open Todoist tasks in desktop app (todoist://) instead of browser (https://).')
+            .setName('Use App URI Scheme')
+            .setDesc('When enabled, generated task links use todoist:// (desktop app). When disabled, links use https://app.todoist.com/app/task/... (web).')
             .addToggle(component =>
                 component
                     .setValue(this.plugin.settings.useAppURI)

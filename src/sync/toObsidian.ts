@@ -135,6 +135,16 @@ export class TodoistToObsidianSync {
             await this.plugin.fileOperation.syncTaskDueDateToFile(taskId, task.due?.date || "");
             this.plugin.logOperation?.log('FILE_TASK_DUEDATE_SYNCED', `Synced due date: ${taskId}`, mapping.filePath, taskId, 'todoist→obsidian');
         }
+
+        const prioritySynced = await this.plugin.fileOperation.syncTaskPriorityToFile(taskId, task.priority || 1);
+        if (prioritySynced) {
+            this.plugin.logOperation?.log('FILE_TASK_PRIORITY_SYNCED', `Synced priority: ${taskId}`, mapping.filePath, taskId, 'todoist→obsidian');
+        }
+
+        const labelsSynced = await this.plugin.fileOperation.syncTaskLabelsToFile(taskId, task.labels || []);
+        if (labelsSynced) {
+            this.plugin.logOperation?.log('FILE_TASK_LABELS_SYNCED', `Synced labels: ${taskId}`, mapping.filePath, taskId, 'todoist→obsidian');
+        }
     }
 
     private async syncNotesToObsidian(
