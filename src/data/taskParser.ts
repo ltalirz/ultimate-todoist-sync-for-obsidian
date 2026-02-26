@@ -41,6 +41,26 @@ interface todoistTaskObject {
     due_lang?: string;
     assignee_id?: string;
 }
+
+type ParentTaskLookup = {
+    project_id?: string;
+};
+
+type LineTaskComparable = {
+    content?: string;
+    labels?: string[];
+    isCompleted?: boolean;
+    dueDate?: string;
+    projectId?: string;
+};
+
+type TodoistTaskComparable = {
+    content?: string;
+    labels?: string[];
+    checked?: boolean;
+    due?: { date?: string };
+    projectId?: string;
+};
   
 
 const keywords = {
@@ -100,13 +120,31 @@ export class TaskParser   {
     //convert line text to a task object
     async convertTextToTodoistTaskObject(lineText:string,filepath:string,lineNumber?:number,fileContent?:string) {
         //this.plugin.debugLog(`linetext is:${lineText}`)
+        const todoistSyncAPI = this.plugin.todoistSyncAPI;
+        const cacheOperation = this.plugin.cacheOperation;
+        if (!todoistSyncAPI || !cacheOperation) {
+            const fallbackContent = this.getTaskContentFromLineText(lineText);
+            return {
+                projectId: this.plugin.settings.defaultProjectId,
+                content: fallbackContent || '',
+                parentId: null,
+                dueDate: this.getDueDateFromLineText(lineText) || '',
+                labels: this.getAllTagsFromLineText(lineText) || [],
+                description: '',
+                isCompleted: this.isTaskCheckboxChecked(lineText),
+                todoist_id: this.getTodoistIdFromLineText(lineText) || null,
+                hasParent: false,
+                priority: this.getTaskPriority(lineText)
+            };
+        }
     
         let hasParent = false
-        let parentId = null
-        let parentTaskObject = null
+        let parentId: string | null = null
+        let parentTaskObject: ParentTaskLookup | null = null
         // 检测 parentID
         let textWithoutIndentation = lineText
-        if(this.getTabIndentation(lineText) > 0){
+        const safeLineNumber = typeof lineNumber === 'number' && lineNumber > 0 ? lineNumber : 0;
+        if(this.getTabIndentation(lineText) > 0 && typeof fileContent === 'string' && safeLineNumber > 0){
         //this.plugin.debugLog(`缩进为 ${this.getTabIndentation(lineText)}`)
         textWithoutIndentation = this.removeTaskIndentation(lineText)
         //this.plugin.debugLog(textWithoutIndentation)
@@ -116,9 +154,9 @@ export class TaskParser   {
         //遍历 line
         const lines = fileContent.split('\n')
         //this.plugin.debugLog(lines)
-        for (let i = (lineNumber - 1 ); i >= 0; i--) {
+        for (let i = (safeLineNumber - 1 ); i >= 0; i--) {
             //this.plugin.debugLog(`正在check${i}行的缩进`)
-            const line = lines[i]
+            const line = lines[i] ?? ''
             //this.plugin.debugLog(line)
             //如果是空行说明没有parent
             if(this.isLineBlank(line)){
@@ -133,9 +171,11 @@ export class TaskParser   {
                 //this.plugin.debugLog(`缩进为 ${this.getTabIndentation(line)}`)
                 if(this.hasTodoistId(line)){
                     parentId = this.getTodoistIdFromLineText(line)
-                    hasParent = true
                     //this.plugin.debugLog(`parent id is ${parentId}`)
-                    parentTaskObject = await this.plugin.todoistSyncAPI.GetTaskById(parentId)
+                    if (parentId) {
+                        parentTaskObject = await todoistSyncAPI.GetTaskById(parentId)
+                    }
+                    hasParent = !!parentTaskObject
                     break
                 }
                 else{
@@ -156,12 +196,14 @@ export class TaskParser   {
         //const projectId = await this.plugin.cacheOperation.getProjectIdByNameFromCache(projectName)
         //use tag as project name
 
-        let projectId = this.plugin.cacheOperation.getDefaultProjectIdForFilepath(filepath as string)
-        let projectName = (await this.plugin.todoistSyncAPI.getProjectById(projectId))?.name ?? this.plugin.settings.defaultProjectName
+        let projectId = cacheOperation.getDefaultProjectIdForFilepath(filepath) || this.plugin.settings.defaultProjectId || ''
+        let projectName = projectId
+            ? ((await todoistSyncAPI.getProjectById(projectId))?.name ?? this.plugin.settings.defaultProjectName)
+            : this.plugin.settings.defaultProjectName
 
-        if(hasParent){
+        if(hasParent && parentTaskObject && parentTaskObject.project_id){
             projectId = parentTaskObject.project_id
-            projectName =(await this.plugin.todoistSyncAPI.getProjectById(projectId))?.name ?? this.plugin.settings.defaultProjectName
+            projectName = (await todoistSyncAPI.getProjectById(projectId))?.name ?? this.plugin.settings.defaultProjectName
         }
         if(!hasParent){
                     //匹配 tag 和 peoject
@@ -170,7 +212,7 @@ export class TaskParser   {
                 //this.plugin.debugLog(label)
                 let labelName = label.replace(/#/g, "");
                 //this.plugin.debugLog(labelName)
-                let hasProjectId = (await this.plugin.todoistSyncAPI.getProjectByName(labelName))?.id
+                let hasProjectId = (await todoistSyncAPI.getProjectByName(labelName))?.id
                 if(!hasProjectId){
                     continue
                 }
@@ -253,12 +295,12 @@ export class TaskParser   {
         return result ? result[1] : null;
     }
   
-    getDueDateFromDataview(dataviewTask:object){
+    getDueDateFromDataview(dataviewTask:{ due?: unknown }){
         if(!dataviewTask.due){
         return ""
         }
         else{
-        const dataviewTaskDue = dataviewTask.due.toString().slice(0, 10)
+        const dataviewTaskDue = String(dataviewTask.due).slice(0, 10)
         return(dataviewTaskDue)
         }
 
@@ -313,7 +355,7 @@ export class TaskParser   {
   
   
     //task content compare
-    taskContentCompare(lineTask:Object,todoistTask:Object) {
+    taskContentCompare(lineTask:LineTaskComparable,todoistTask:TodoistTaskComparable) {
         const lineTaskContent = lineTask.content
         //this.plugin.debugLog(dataviewTaskContent)
         
@@ -352,7 +394,7 @@ export class TaskParser   {
     
   
     //task project id compare
-    async  taskProjectCompare(lineTask:Object,todoistTask:Object) {
+    async  taskProjectCompare(lineTask:LineTaskComparable,todoistTask:TodoistTaskComparable) {
         //project 是否修改
         //this.plugin.debugLog(dataviewTaskProjectId)
         //this.plugin.debugLog(todoistTask.projectId)
@@ -384,7 +426,7 @@ export class TaskParser   {
   
   
     //remove task indentation
-    removeTaskIndentation(text) {
+    removeTaskIndentation(text:string) {
         const regex = /^([ \t]*)?- \[(x| )\] /;
         return text.replace(regex, "- [$2] ");
     }
@@ -397,7 +439,7 @@ export class TaskParser   {
   
   
   //在linetext中插入日期
-    insertDueDateBeforeTodoist(text, dueDate) {
+    insertDueDateBeforeTodoist(text:string, dueDate:string) {
         const regex = new RegExp(`(${keywords.TODOIST_TAG})`)
         return text.replace(regex, `📅 ${dueDate} $1`);
   }
