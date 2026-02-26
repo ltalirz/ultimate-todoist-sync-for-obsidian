@@ -347,7 +347,7 @@ export class ObsidianToTodoistSync {
             const tagsModified = !this.plugin.taskParser.taskTagCompare(lineTask, savedTask);
             const statusModified = !this.plugin.taskParser.taskStatusCompare(lineTask, savedTask);
             const dueDateModified = !this.plugin.taskParser.compareTaskDueDate(lineTask, savedTask);
-            const priorityModified = !(lineTask.priority === savedTask.priority);
+            const priorityModified = !this.plugin.taskParser.taskPriorityCompare(lineTask, savedTask);
 
             try {
                 let contentChanged = false;

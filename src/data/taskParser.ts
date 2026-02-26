@@ -52,6 +52,7 @@ type LineTaskComparable = {
     isCompleted?: boolean;
     dueDate?: string;
     projectId?: string;
+    priority?: number;
 };
 
 type TodoistTaskComparable = {
@@ -59,7 +60,9 @@ type TodoistTaskComparable = {
     labels?: string[];
     checked?: boolean;
     due?: { date?: string };
+    dueDate?: string;
     projectId?: string;
+    priority?: number;
 };
   
 
@@ -356,10 +359,10 @@ export class TaskParser   {
   
     //task content compare
     taskContentCompare(lineTask:LineTaskComparable,todoistTask:TodoistTaskComparable) {
-        const lineTaskContent = lineTask.content
+        const lineTaskContent = (lineTask.content || '').trim();
         //this.plugin.debugLog(dataviewTaskContent)
         
-        const todoistTaskContent = todoistTask.content
+        const todoistTaskContent = (todoistTask.content || '').trim();
         //this.plugin.debugLog(todoistTask.content)
 
         //content 是否修改
@@ -368,28 +371,40 @@ export class TaskParser   {
     }
   
   
-    taskTagCompare(lineTask:Object,todoistTask:Object) {
-        const lineTaskTags = (lineTask as any).labels || [];
-        const todoistTaskTags = (todoistTask as any).labels || [];
-        const sortedLine = [...lineTaskTags].sort();
-        const sortedTodoist = [...todoistTaskTags].sort();
-        return sortedLine.length === sortedTodoist.length && sortedLine.every((val: string, index: number) => val === sortedTodoist[index]);
+    normalizeLabelsForCompare(labels: string[] | undefined): string[] {
+        if (!labels || labels.length === 0) return [];
+        const normalized = labels
+            .map(label => (label ?? '').trim())
+            .filter(label => label.length > 0);
+        const deduped = Array.from(new Set(normalized));
+        return deduped.sort();
+    }
+
+    taskTagCompare(lineTask:LineTaskComparable,todoistTask:TodoistTaskComparable) {
+        const lineTaskTags = this.normalizeLabelsForCompare(lineTask.labels || []);
+        const todoistTaskTags = this.normalizeLabelsForCompare(todoistTask.labels || []);
+        return lineTaskTags.length === todoistTaskTags.length && lineTaskTags.every((val: string, index: number) => val === todoistTaskTags[index]);
     }
   
-    taskStatusCompare(lineTask:Object,todoistTask:Object) {
-        return (lineTask as any).isCompleted === !!(todoistTask as any).checked;
+    taskStatusCompare(lineTask:LineTaskComparable,todoistTask:TodoistTaskComparable) {
+        return !!lineTask.isCompleted === !!todoistTask.checked;
     }
   
   
-    compareTaskDueDate(lineTask: object, todoistTask: object): boolean {
-        const lineTaskDue = (lineTask as any).dueDate || "";
-        const todoistDue = (todoistTask as any).due;
-        const todoistDueDate = todoistDue?.date || "";
+    compareTaskDueDate(lineTask: LineTaskComparable, todoistTask: TodoistTaskComparable): boolean {
+        const lineTaskDue = lineTask.dueDate || "";
+        const todoistDueDate = todoistTask.due?.date || todoistTask.dueDate || "";
 
         if (lineTaskDue === "" && todoistDueDate === "") return true;
         if (lineTaskDue === "" || todoistDueDate === "") return false;
 
         return lineTaskDue === todoistDueDate;
+    }
+
+    taskPriorityCompare(lineTask:LineTaskComparable, todoistTask:TodoistTaskComparable): boolean {
+        const linePriority = lineTask.priority || 1;
+        const todoistPriority = todoistTask.priority || 1;
+        return linePriority === todoistPriority;
     }
     
   

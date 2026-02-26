@@ -197,22 +197,6 @@ export class DatabaseChecker {
         }
     }
 
-    private normalizeLabels(labels: string[] | undefined): string[] {
-        if (!labels || labels.length === 0) return [];
-        return labels
-            .filter(label => label && label !== 'todoist')
-            .map(label => label.trim())
-            .filter(label => label.length > 0)
-            .sort();
-    }
-
-    private labelsEqual(a: string[] | undefined, b: string[] | undefined): boolean {
-        const labelsA = this.normalizeLabels(a);
-        const labelsB = this.normalizeLabels(b);
-        if (labelsA.length !== labelsB.length) return false;
-        return labelsA.every((label, index) => label === labelsB[index]);
-    }
-
 	private async confirmTodoistTaskMissing(taskId: string): Promise<boolean> {
 		const todoistSyncAPI = this.plugin.todoistSyncAPI;
 		if (!todoistSyncAPI) return false;
@@ -273,7 +257,8 @@ export class DatabaseChecker {
         try {
             const fileOperation = this.plugin.fileOperation;
             const todoistSyncAPI = this.plugin.todoistSyncAPI;
-            if (!fileOperation || !todoistSyncAPI) {
+            const taskParser = this.plugin.taskParser;
+            if (!fileOperation || !todoistSyncAPI || !taskParser) {
                 throw new Error('Required modules are not initialized for database check');
             }
 
@@ -438,6 +423,11 @@ export class DatabaseChecker {
         unknownIssueCount: number,
         caseStats: NonNullable<DatabaseCheckResult['caseStats']>
     }> {
+        const taskParser = this.plugin.taskParser;
+        if (!taskParser) {
+            throw new Error('TaskParser is not initialized for database comparison');
+        }
+
         const issues: DatabaseCheckIssue[] = [];
         const summary = {
             mappingFileNotFound: 0,
@@ -594,7 +584,7 @@ export class DatabaseChecker {
 
                 let hasSemanticMismatch = false;
 
-                if (vaultTask.content.trim() !== todoistTask.content.trim()) {
+                if (!taskParser.taskContentCompare(vaultTask, todoistTask)) {
                     emitIssue({
                         type: 'sync_content_mismatch',
                         filePath: vaultTask.filePath,
@@ -607,8 +597,8 @@ export class DatabaseChecker {
                     hasSemanticMismatch = true;
                 }
 
-                const todoistChecked = !!(todoistTask as unknown as { checked?: boolean }).checked;
-                if (vaultTask.isCompleted !== todoistChecked) {
+                const todoistChecked = !!todoistTask.checked;
+                if (!taskParser.taskStatusCompare(vaultTask, todoistTask)) {
                     emitIssue({
                         type: 'sync_completion_mismatch',
                         filePath: vaultTask.filePath,
@@ -623,7 +613,7 @@ export class DatabaseChecker {
 
                 const vaultDueDate = vaultTask.dueDate || '';
                 const todoistDueDate = todoistTask.dueDate || '';
-                if (vaultDueDate !== todoistDueDate) {
+                if (!taskParser.compareTaskDueDate(vaultTask, todoistTask)) {
                     emitIssue({
                         type: 'sync_due_mismatch',
                         filePath: vaultTask.filePath,
@@ -638,7 +628,7 @@ export class DatabaseChecker {
 
                 const vaultPriority = vaultTask.priority || 1;
                 const todoistPriority = todoistTask.priority || 1;
-                if (vaultPriority !== todoistPriority) {
+                if (!taskParser.taskPriorityCompare(vaultTask, todoistTask)) {
                     emitIssue({
                         type: 'sync_priority_mismatch',
                         filePath: vaultTask.filePath,
@@ -651,9 +641,9 @@ export class DatabaseChecker {
                     hasSemanticMismatch = true;
                 }
 
-                const obsidianLabels = this.normalizeLabels(vaultTask.labels);
-                const todoistLabels = this.normalizeLabels(todoistTask.labels);
-                if (!this.labelsEqual(obsidianLabels, todoistLabels)) {
+                const obsidianLabels = taskParser.normalizeLabelsForCompare(vaultTask.labels);
+                const todoistLabels = taskParser.normalizeLabelsForCompare(todoistTask.labels);
+                if (!taskParser.taskTagCompare(vaultTask, todoistTask)) {
                     emitIssue({
                         type: 'sync_labels_mismatch',
                         filePath: vaultTask.filePath,
@@ -668,7 +658,7 @@ export class DatabaseChecker {
 
                 const fileMetadata = this.plugin.settings.fileMetadata?.[vaultTask.filePath];
                 const expectedProjectId = fileMetadata?.defaultProjectId;
-                if (expectedProjectId && expectedProjectId !== todoistTask.projectId) {
+                if (expectedProjectId && !(await taskParser.taskProjectCompare({ projectId: expectedProjectId }, todoistTask))) {
                     emitIssue({
                         type: 'sync_project_mismatch',
                         filePath: vaultTask.filePath,
