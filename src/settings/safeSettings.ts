@@ -1,9 +1,10 @@
 import { App, Notice } from 'obsidian';
 
-import { DEFAULT_SETTINGS, deriveTaskStatusFromIssues, normalizeTaskIssueType, TaskIssueEntry } from './settings';
+import { DEFAULT_SETTINGS, TaskIssueEntry } from './settings';
 import { StoragePathManager } from '../storage/pathManager';
 import UltimateTodoistSyncForObsidian from '../../main';
 import { DeviceManager } from '../utils/deviceManager';
+import { normalizeTaskIssueTypeKey, reconcileTaskEntryDerivedState } from '../data/taskIssueUtils';
 
 const KNOWN_SETTINGS_KEYS = new Set(Object.keys(DEFAULT_SETTINGS));
 const REQUIRED_FIELDS = ['initialized', 'todoistAPIToken', 'taskFileMapping'];
@@ -395,7 +396,7 @@ export class SafeSettings {
 					const detectedAt = typeof candidate.detectedAt === 'number' ? candidate.detectedAt : Date.now();
 					const lastSeenAt = typeof candidate.lastSeenAt === 'number' ? candidate.lastSeenAt : detectedAt;
 
-					const normalizedIssueType = normalizeTaskIssueType(issueType);
+					const normalizedIssueType = normalizeTaskIssueTypeKey(issueType);
 					normalizedIssues[normalizedIssueType] = {
 						state,
 						severity,
@@ -417,16 +418,12 @@ export class SafeSettings {
 				fixed++;
 			}
 
-			const fallbackStatus = entry.status || 'active';
-			const nextStatus = deriveTaskStatusFromIssues(entry.issues, fallbackStatus);
-			if (entry.status !== nextStatus) {
-				entry.status = nextStatus;
-				fixed++;
-			}
-
-			const expectedSyncEnabled = nextStatus === 'active';
-			if (entry.syncEnabled !== expectedSyncEnabled) {
-				entry.syncEnabled = expectedSyncEnabled;
+			const reconciled = reconcileTaskEntryDerivedState(entry as {
+				status?: 'active' | 'nonActive' | 'conflicted' | 'issue';
+				syncEnabled?: boolean;
+				issues?: Record<string, TaskIssueEntry>;
+			});
+			if (reconciled.changed) {
 				fixed++;
 			}
 		}

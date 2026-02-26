@@ -305,7 +305,7 @@ export class ObsidianToTodoistSync {
                 }
                 console.warn(`[lineModifiedTaskCheck] Task ${lineTask_todoist_id} not found in Todoist (deleted?), marking as issue`);
                 await this.plugin.cacheOperation.setTaskFileMapping(lineTask_todoist_id, taskMapping.filePath, 'issue', false);
-                await this.plugin.cacheOperation.upsertTaskIssue(lineTask_todoist_id, 'task_deleted_in_todoist', {
+				await this.plugin.cacheOperation.upsertTaskIssue(lineTask_todoist_id, 'todoist_task_missing', {
                     state: 'open',
                     severity: 'high',
                     source: 'runtime',
@@ -503,7 +503,7 @@ export class ObsidianToTodoistSync {
 
             if (!savedTask) {
                 await this.plugin.cacheOperation.setTaskFileMapping(taskId, taskMapping?.filePath || '', 'issue', false);
-                await this.plugin.cacheOperation.upsertTaskIssue(taskId, 'task_deleted_in_todoist', {
+				await this.plugin.cacheOperation.upsertTaskIssue(taskId, 'todoist_task_missing', {
                     state: 'open',
                     severity: 'high',
                     source: 'runtime',
@@ -564,7 +564,7 @@ export class ObsidianToTodoistSync {
 
             if (!savedTask) {
                 await this.plugin.cacheOperation.setTaskFileMapping(taskId, taskMapping?.filePath || '', 'issue', false);
-                await this.plugin.cacheOperation.upsertTaskIssue(taskId, 'task_deleted_in_todoist', {
+				await this.plugin.cacheOperation.upsertTaskIssue(taskId, 'todoist_task_missing', {
                     state: 'open',
                     severity: 'high',
                     source: 'runtime',

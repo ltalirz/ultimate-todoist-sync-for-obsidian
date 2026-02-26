@@ -1,6 +1,12 @@
 import { App, Modal, Notice, Setting, TFile } from "obsidian";
 import UltimateTodoistSyncForObsidian from "../../main";
-import { CONFLICT_ISSUE_TYPE_KEYS, deriveTaskStatusFromIssueEntries, type DerivedTaskStatus, normalizeTaskIssueTypeKey } from '../data/taskIssueUtils';
+import {
+	CONFLICT_ISSUE_TYPE_KEYS,
+	deriveTaskProblemViewFromEntry,
+	getOpenIssueEntries,
+	normalizeDerivedTaskStatus,
+	type ProblemTaskDisplayType,
+} from '../data/taskIssueUtils';
 import type { TaskIssueEntry } from '../settings/settings';
 
 
@@ -341,18 +347,12 @@ export class TaskManagerModal extends Modal {
 	private _fileCache = new Map<string, string>();
 	private currentView: 'list' | 'detail' = 'list';
 	private selectedTaskId: string | null = null;
+	private selectedDetailType: ProblemTaskDisplayType | null = null;
 	private taskData: { conflicted: string[], issue: string[], nonActive: string[], staleLink: string[] } = { conflicted: [], issue: [], nonActive: [], staleLink: [] };
 	private staleLinkIssues: Record<string, { currentPath: string; expectedPath: string; currentDescription: string; expectedDescription: string }> = {};
 	private scrollArea: HTMLElement | null = null;
 	private _activeOverlay: HTMLElement | null = null;
 	private readonly conflictIssueTypes = new Set<string>(CONFLICT_ISSUE_TYPE_KEYS);
-
-	private normalizeFallbackStatus(status: string): DerivedTaskStatus {
-		if (status === 'active' || status === 'nonActive' || status === 'conflicted' || status === 'issue') {
-			return status;
-		}
-		return 'active';
-	}
 
 	private getTodoistSyncAPI(showNotice = true): NonNullable<UltimateTodoistSyncForObsidian['todoistSyncAPI']> | null {
 		const todoistSyncAPI = this.plugin.todoistSyncAPI;
@@ -391,8 +391,7 @@ export class TaskManagerModal extends Modal {
 	}
 
 	private getStaleLinkDisplayTaskIds(): string[] {
-		const staleTaskIds = Array.from(new Set(this.taskData.staleLink));
-		return staleTaskIds.filter(taskId => !this.taskData.conflicted.includes(taskId) && !this.taskData.nonActive.includes(taskId));
+		return Array.from(new Set(this.taskData.staleLink));
 	}
 
 	private async resolveIssuesAndRecomputeStatus(
@@ -400,63 +399,9 @@ export class TaskManagerModal extends Modal {
 		shouldResolve: (issueType: string) => boolean,
 		shouldSave: boolean
 	): Promise<boolean> {
-		const currentEntry = this.plugin.settings.taskFileMapping[taskId];
-		if (!currentEntry) return false;
-
-		const mapping = { ...this.plugin.settings.taskFileMapping };
-		const entry = mapping[taskId];
-		if (!entry) return false;
-
-		let changed = false;
-		let normalizedIssues: Record<string, TaskIssueEntry> | undefined;
-		if (entry.issues && typeof entry.issues === 'object' && !Array.isArray(entry.issues)) {
-			normalizedIssues = {};
-			for (const [rawIssueType, issueValue] of Object.entries(entry.issues)) {
-				const issueType = normalizeTaskIssueTypeKey(rawIssueType);
-				const issueRecord: TaskIssueEntry = { ...issueValue };
-				if (issueRecord.state === 'open' && shouldResolve(issueType)) {
-					issueRecord.state = 'resolved';
-					issueRecord.lastSeenAt = Date.now();
-					changed = true;
-				}
-				if (rawIssueType !== issueType) changed = true;
-
-				const existing = normalizedIssues[issueType];
-				if (!existing) {
-					normalizedIssues[issueType] = issueRecord;
-					continue;
-				}
-				if (existing.state !== 'open' && issueRecord.state === 'open') {
-					normalizedIssues[issueType] = issueRecord;
-					changed = true;
-				}
-			}
-		}
-
-		if (normalizedIssues && Object.keys(normalizedIssues).length > 0) {
-			entry.issues = normalizedIssues;
-		} else if (entry.issues !== undefined) {
-			delete entry.issues;
-			changed = true;
-		}
-
-		const fallbackStatus = this.normalizeFallbackStatus(entry.status || 'active');
-		const nextStatus = deriveTaskStatusFromIssueEntries(entry.issues as Record<string, { state?: string }> | undefined, fallbackStatus);
-		if (entry.status !== nextStatus) {
-			entry.status = nextStatus;
-			changed = true;
-		}
-
-		const nextSyncEnabled = nextStatus === 'active';
-		if (entry.syncEnabled !== nextSyncEnabled) {
-			entry.syncEnabled = nextSyncEnabled;
-			changed = true;
-		}
-
-		if (!changed) return false;
-		mapping[taskId] = { ...entry };
-		await this.plugin.safeSettings?.update({ taskFileMapping: mapping }, shouldSave);
-		return true;
+		const cacheOperation = this.getCacheOperation(false);
+		if (!cacheOperation) return false;
+		return cacheOperation.resolveTaskIssues(taskId, shouldResolve, shouldSave);
 	}
 
 	constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
@@ -465,32 +410,7 @@ export class TaskManagerModal extends Modal {
 	}
 	private getOpenIssueEntries(taskId: string): Array<{ issueType: string; details?: string; expected?: string; actual?: string; manualAction?: string }> {
 		const info = this.plugin.settings.taskFileMapping[taskId];
-		const issues = info?.issues;
-		if (!issues) return [];
-
-		const normalizedIssues = new Map<string, { issueType: string; details?: string; expected?: string; actual?: string; manualAction?: string }>();
-		for (const [rawIssueType, issue] of Object.entries(issues)) {
-			if (issue?.state !== 'open') continue;
-			const issueType = normalizeTaskIssueTypeKey(rawIssueType);
-			if (!normalizedIssues.has(issueType)) {
-				normalizedIssues.set(issueType, {
-					issueType,
-					details: issue.details,
-					expected: issue.expected,
-					actual: issue.actual,
-					manualAction: issue.manualAction,
-				});
-			}
-		}
-
-		return Array.from(normalizedIssues.values());
-	}
-	private deriveStatusFromOpenIssues(taskId: string, fallbackStatus: string): string {
-		const info = this.plugin.settings.taskFileMapping[taskId];
-		return deriveTaskStatusFromIssueEntries(
-			info?.issues as Record<string, { state?: string }> | undefined,
-			this.normalizeFallbackStatus(fallbackStatus)
-		);
+		return getOpenIssueEntries(info?.issues as Record<string, TaskIssueEntry> | undefined);
 	}
 	private formatIssueTypeLabel(issueType: string): string {
 		return issueType.replace(/_/g, ' ').toUpperCase();
@@ -531,13 +451,17 @@ export class TaskManagerModal extends Modal {
 		const mapping = this.plugin.settings.taskFileMapping;
 		this.taskData = { conflicted: [], issue: [], nonActive: [], staleLink: [] };
 		this.staleLinkIssues = {};
-		for (const [taskId, info] of Object.entries(mapping)) {
-			const derivedStatus = this.deriveStatusFromOpenIssues(taskId, info.status || 'active');
-			if (derivedStatus === 'conflicted') this.taskData.conflicted.push(taskId);
-			else if (derivedStatus === 'issue') this.taskData.issue.push(taskId);
-			else if (derivedStatus === 'nonActive') this.taskData.nonActive.push(taskId);
-		}
 		this.collectStaleTodoistLinkIssues();
+		for (const [taskId, info] of Object.entries(mapping)) {
+			const taskView = deriveTaskProblemViewFromEntry(info as { status?: string; issues?: Record<string, TaskIssueEntry> }, {
+				hasSyntheticStaleLinkIssue: !!this.staleLinkIssues[taskId],
+				fallbackStatus: normalizeDerivedTaskStatus(info.status),
+			});
+			if (taskView.displayType === 'conflicted') this.taskData.conflicted.push(taskId);
+			else if (taskView.displayType === 'issue') this.taskData.issue.push(taskId);
+			else if (taskView.displayType === 'nonActive') this.taskData.nonActive.push(taskId);
+			else if (taskView.displayType === 'staleLink') this.taskData.staleLink.push(taskId);
+		}
 		// Header with summary badges
 		const header = contentEl.createDiv({ cls: 'tm-header' });
 		header.createEl('h3', { text: 'Task Manager' });
@@ -546,6 +470,7 @@ export class TaskManagerModal extends Modal {
 		refreshBtn.addEventListener('click', () => {
 			this.currentView = 'list';
 			this.selectedTaskId = null;
+			this.selectedDetailType = null;
 			this.loadAndRender();
 		});
 		const summary = header.createDiv({ cls: 'tm-summary' });
@@ -588,7 +513,7 @@ export class TaskManagerModal extends Modal {
 		for (const [taskId, info] of Object.entries(this.plugin.settings.taskFileMapping)) {
 			if (!info?.filePath) continue;
 
-			const openStaleIssue = this.getOpenIssueEntries(taskId).find(item => item.issueType === 'stale_todoist_link');
+			const openStaleIssue = this.getOpenIssueEntries(taskId).find(item => item.issueType === 'todoist_link_stale');
 			if (openStaleIssue) {
 				this.staleLinkIssues[taskId] = {
 					currentPath: openStaleIssue.actual || '',
@@ -596,7 +521,6 @@ export class TaskManagerModal extends Modal {
 					currentDescription: openStaleIssue.details || '',
 					expectedDescription: taskParser.getObsidianUrlFromFilepath(info.filePath)
 				};
-				if (!this.taskData.staleLink.includes(taskId)) this.taskData.staleLink.push(taskId);
 				continue;
 			}
 
@@ -615,7 +539,6 @@ export class TaskManagerModal extends Modal {
 				currentDescription: task.description,
 				expectedDescription: taskParser.getObsidianUrlFromFilepath(expectedPath)
 			};
-			if (!this.taskData.staleLink.includes(taskId)) this.taskData.staleLink.push(taskId);
 		}
 	}
 	private async renderCurrentView() {
@@ -639,108 +562,6 @@ export class TaskManagerModal extends Modal {
 
 		type TaskListType = 'conflicted' | 'issue' | 'nonActive' | 'staleLink';
 		const staleLinkDisplayTaskIds = this.getStaleLinkDisplayTaskIds();
-
-		// Bulk operations bar
-		const bulkBar = scrollArea.createDiv({ cls: 'tm-bulk-bar' });
-		let hasBulkOps = false;
-		if (this.taskData.conflicted.length > 0) {
-			hasBulkOps = true;
-			const bulkObsBtn = bulkBar.createEl('button', { cls: 'tm-btn tm-btn--primary', text: 'Resolve All: Obsidian' });
-			bulkObsBtn.addEventListener('click', async () => {
-				bulkObsBtn.disabled = true;
-				const ids = [...this.taskData.conflicted];
-				let index = 0;
-				for (const conflictedTaskId of ids) {
-					if (this._closed) return;
-					index++;
-					const fp = this.plugin.settings.taskFileMapping[conflictedTaskId]?.filePath || '';
-					bulkObsBtn.textContent = `Resolving ${index}/${ids.length}...`;
-					await this.resolveConflict(conflictedTaskId, fp, 'obsidian', true);
-				}
-				if (!this._closed) await this.loadAndRender();
-			});
-			const bulkTodBtn = bulkBar.createEl('button', { cls: 'tm-btn tm-btn--secondary', text: 'Resolve All: Todoist' });
-			bulkTodBtn.addEventListener('click', async () => {
-				bulkTodBtn.disabled = true;
-				const ids = [...this.taskData.conflicted];
-				let index = 0;
-				for (const conflictedTaskId of ids) {
-					if (this._closed) return;
-					index++;
-					const fp = this.plugin.settings.taskFileMapping[conflictedTaskId]?.filePath || '';
-					bulkTodBtn.textContent = `Resolving ${index}/${ids.length}...`;
-					await this.resolveConflict(conflictedTaskId, fp, 'todoist', true);
-				}
-				if (!this._closed) await this.loadAndRender();
-			});
-		}
-		if (this.taskData.issue.length > 0) {
-			hasBulkOps = true;
-			const bulkDelBtn = bulkBar.createEl('button', { cls: 'tm-btn tm-btn--danger', text: 'Delete All Issues' });
-			bulkDelBtn.addEventListener('click', async () => {
-				const confirmed = await this.showConfirmDialog(`Delete all ${this.taskData.issue.length} issue tasks?`);
-				if (!confirmed) return;
-				bulkDelBtn.disabled = true;
-				const ids = [...this.taskData.issue];
-				let index = 0;
-				for (const issueTaskId of ids) {
-					if (this._closed) return;
-					index++;
-					bulkDelBtn.textContent = `Deleting ${index}/${ids.length}...`;
-					await this.deleteIssueTask(issueTaskId, true);
-				}
-				if (!this._closed) await this.loadAndRender();
-			});
-		}
-		if (this.taskData.nonActive.length > 0) {
-			hasBulkOps = true;
-			const bulkReBtn = bulkBar.createEl('button', { cls: 'tm-btn tm-btn--primary', text: 'Re-enable All' });
-			bulkReBtn.addEventListener('click', async () => {
-				bulkReBtn.disabled = true;
-				const ids = [...this.taskData.nonActive];
-				let index = 0;
-				for (const nonActiveTaskId of ids) {
-					if (this._closed) return;
-					index++;
-					const fp = this.plugin.settings.taskFileMapping[nonActiveTaskId]?.filePath || '';
-					bulkReBtn.textContent = `Re-enabling ${index}/${ids.length}...`;
-					await this.reEnableTask(nonActiveTaskId, fp, true);
-				}
-				if (!this._closed) await this.loadAndRender();
-			});
-			const bulkDelInBtn = bulkBar.createEl('button', { cls: 'tm-btn tm-btn--danger', text: 'Delete All Inactive' });
-			bulkDelInBtn.addEventListener('click', async () => {
-				const confirmed = await this.showConfirmDialog(`Delete all ${this.taskData.nonActive.length} inactive tasks?`);
-				if (!confirmed) return;
-				bulkDelInBtn.disabled = true;
-				const ids = [...this.taskData.nonActive];
-				let index = 0;
-				for (const nonActiveTaskId of ids) {
-					if (this._closed) return;
-					index++;
-					bulkDelInBtn.textContent = `Deleting ${index}/${ids.length}...`;
-					await this.deleteIssueTask(nonActiveTaskId, true);
-				}
-				if (!this._closed) await this.loadAndRender();
-			});
-		}
-		if (staleLinkDisplayTaskIds.length > 0) {
-			hasBulkOps = true;
-			const bulkRepairBtn = bulkBar.createEl('button', { cls: 'tm-btn tm-btn--secondary', text: 'Repair All Stale Links' });
-			bulkRepairBtn.addEventListener('click', async () => {
-				bulkRepairBtn.disabled = true;
-				const ids = [...staleLinkDisplayTaskIds];
-				let index = 0;
-				for (const staleTaskId of ids) {
-					if (this._closed) return;
-					index++;
-					bulkRepairBtn.textContent = `Repairing ${index}/${ids.length}...`;
-					await this.repairStaleLink(staleTaskId, true);
-				}
-				if (!this._closed) await this.loadAndRender();
-			});
-		}
-		if (!hasBulkOps) bulkBar.remove();
 		// Unified task list
 		const iconMap: Record<string, string> = { conflicted: '⚠️', issue: '❗', nonActive: '📋', staleLink: '🔗' };
 		const badgeMap: Record<string, { cls: string, text: string }> = {
@@ -774,6 +595,7 @@ export class TaskManagerModal extends Modal {
 			const row = scrollArea.createDiv({ cls: 'tm-list-row' });
 			row.addEventListener('click', () => {
 				this.selectedTaskId = taskId;
+				this.selectedDetailType = type;
 				this.currentView = 'detail';
 				this.renderCurrentView();
 			});
@@ -796,13 +618,16 @@ export class TaskManagerModal extends Modal {
 			new Notice('Task no longer exists in cache');
 			this.currentView = 'list';
 			this.selectedTaskId = null;
+			this.selectedDetailType = null;
 			await this.renderCurrentView();
 			return;
 		}
 		const filePath = info.filePath || '';
-		const status = this.deriveStatusFromOpenIssues(taskId, info.status || 'active');
-		const hasStaleLinkIssue = !!this.staleLinkIssues[taskId];
-		const detailType = status === 'conflicted' || status === 'nonActive' ? status : (hasStaleLinkIssue ? 'staleLink' : status);
+		const taskView = deriveTaskProblemViewFromEntry(info as { status?: string; issues?: Record<string, TaskIssueEntry> }, {
+			hasSyntheticStaleLinkIssue: !!this.staleLinkIssues[taskId],
+			fallbackStatus: normalizeDerivedTaskStatus(info.status),
+		});
+		const detailType: ProblemTaskDisplayType = this.selectedDetailType || taskView.displayType;
 		// Detail header — insert before scrollArea
 		const detailHeader = this.contentEl.createDiv({ cls: 'tm-detail-header' });
 		this.contentEl.insertBefore(detailHeader, scrollArea);
@@ -810,6 +635,7 @@ export class TaskManagerModal extends Modal {
 		backBtn.addEventListener('click', () => {
 			this.currentView = 'list';
 			this.selectedTaskId = null;
+			this.selectedDetailType = null;
 			this.renderCurrentView();
 		});
 		detailHeader.createSpan({ cls: 'tm-detail-title', text: 'Task Detail' });
@@ -853,6 +679,8 @@ export class TaskManagerModal extends Modal {
 			await this.renderInactiveDetail(body, taskId);
 		} else if (detailType === 'staleLink') {
 			await this.renderStaleLinkDetail(body, taskId);
+		} else {
+			body.createDiv({ cls: 'tm-content-preview', text: 'This task is currently active and has no open issues.' });
 		}
 	}
 	private async renderConflictDetail(container: HTMLElement, taskId: string) {
@@ -967,7 +795,7 @@ export class TaskManagerModal extends Modal {
 		}
 
 		const actions = container.createDiv({ cls: 'tm-detail-actions' });
-		if (openIssues.some(issue => issue.issueType === 'stale_todoist_link')) {
+		if (openIssues.some(issue => issue.issueType === 'todoist_link_stale')) {
 			const repairBtn = actions.createEl('button', { cls: 'tm-btn tm-btn--primary', text: 'Repair Todoist Link' });
 			repairBtn.addEventListener('click', async () => {
 				repairBtn.disabled = true;
@@ -996,11 +824,6 @@ export class TaskManagerModal extends Modal {
 		const previewEl = container.createDiv({ cls: 'tm-content-preview' });
 		previewEl.textContent = preview;
 		const actions = container.createDiv({ cls: 'tm-detail-actions' });
-		const reEnableBtn = actions.createEl('button', { cls: 'tm-btn tm-btn--primary', text: 'Re-enable' });
-		reEnableBtn.addEventListener('click', async () => {
-			reEnableBtn.disabled = true;
-			await this.reEnableTask(taskId, filePath);
-		});
 		const delBtn = actions.createEl('button', { cls: 'tm-btn tm-btn--danger', text: 'Delete' });
 		delBtn.addEventListener('click', async () => {
 			delBtn.disabled = true;
@@ -1074,10 +897,10 @@ export class TaskManagerModal extends Modal {
 				if (refreshed?.updated_at) {
 					await cacheOperation.updateTaskMappingSyncMeta(taskId, { updated_at: refreshed.updated_at });
 				}
-				const resolved = await this.resolveIssuesAndRecomputeStatus(taskId, issueType => issueType === 'stale_todoist_link', true);
+				const resolved = await this.resolveIssuesAndRecomputeStatus(taskId, issueType => issueType === 'todoist_link_stale', true);
 				new Notice(resolved ? 'Todoist description link repaired.' : 'Todoist description link repaired (no open stale-link issue remained).');
 			} else {
-				const resolved = await this.resolveIssuesAndRecomputeStatus(taskId, issueType => issueType === 'stale_todoist_link', true);
+				const resolved = await this.resolveIssuesAndRecomputeStatus(taskId, issueType => issueType === 'todoist_link_stale', true);
 				new Notice(resolved ? 'Link already up to date. Cleared stale-link issue.' : 'Todoist description link is already up to date.');
 			}
 		} catch (error) {
@@ -1090,6 +913,7 @@ export class TaskManagerModal extends Modal {
 		if (this._closed || skipRerender) return;
 		this.currentView = 'list';
 		this.selectedTaskId = null;
+		this.selectedDetailType = null;
 		await this.loadAndRender();
 	}
 	private async resolveConflict(taskId: string, filePath: string, choice: 'obsidian' | 'todoist', skipRerender = false) {
@@ -1279,6 +1103,7 @@ export class TaskManagerModal extends Modal {
 		if (this._closed || skipRerender) return;
 		this.currentView = 'list';
 		this.selectedTaskId = null;
+		this.selectedDetailType = null;
 		await this.loadAndRender();
 	}
     private async deleteIssueTask(taskId: string, skipRerender = false) {
@@ -1328,32 +1153,12 @@ export class TaskManagerModal extends Modal {
         if (this._closed || skipRerender) return;
         this.currentView = 'list';
         this.selectedTaskId = null;
+        this.selectedDetailType = null;
         await this.loadAndRender();
     }
-    private async reEnableTask(taskId: string, filePath: string, skipRerender = false) {
-		const cacheOperation = this.getCacheOperation();
-		if (!cacheOperation) {
-			if (!skipRerender) await this.loadAndRender();
-			return;
-		}
-
-        try {
-            await this.resolveIssuesAndRecomputeStatus(taskId, issueType => issueType === 'task_nonactive', false);
-			await cacheOperation.setTaskFileMapping(taskId, filePath, 'active', true);
-			await this.plugin.safeSettings?.update({}, true);
-			new Notice(`Task re-enabled`);
-        } catch (e) {
-            console.error(`[TaskManagerModal] reEnableTask error:`, e);
-            new Notice(`Error re-enabling task: ${e}`);
-        }
-        if (this._closed || skipRerender) return;
-        this.currentView = 'list';
-        this.selectedTaskId = null;
-        await this.loadAndRender();
-    }
-    private showConfirmDialog(message: string): Promise<boolean> {
-        return new Promise((resolve) => {
-            const overlay = document.createElement('div');
+	private showConfirmDialog(message: string): Promise<boolean> {
+		return new Promise((resolve) => {
+			const overlay = document.createElement('div');
             overlay.className = 'tm-confirm-overlay';
             this._activeOverlay = overlay;
             const cleanup = () => { overlay.remove(); this._activeOverlay = null; };
@@ -1384,6 +1189,7 @@ export class TaskManagerModal extends Modal {
 	private navigateToList() {
 		this.currentView = 'list';
 		this.selectedTaskId = null;
+		this.selectedDetailType = null;
 		this.renderCurrentView();
     }
     private async getTaskLine(taskId: string, filePath: string): Promise<string | null> {

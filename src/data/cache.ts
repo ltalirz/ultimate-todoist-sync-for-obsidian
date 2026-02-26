@@ -45,7 +45,14 @@
 import { App, Notice, TFile} from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../../main";
 import { TaskConflict } from '../ui/modals';
-import { deriveTaskStatusFromIssueEntries, normalizeTaskIssueTypeKey } from './taskIssueUtils';
+import {
+    deriveTaskStatusFromIssueEntries,
+    normalizeTaskIssueTypeKey,
+    reconcileTaskEntryDerivedState,
+    resolveOpenIssuesFromSourceNotSeen,
+    resolveTaskIssuesByType,
+    upsertTaskIssueEntry,
+} from './taskIssueUtils';
 
 export interface RebuildCacheResult {
     success: boolean;
@@ -55,6 +62,13 @@ export interface RebuildCacheResult {
     issueCount: number;
     convertedCount: number;
     tasksWithoutIdCount: number;
+}
+
+export interface MatchFirstAutoRepairResult {
+    changed: boolean;
+    mappingRepaired: number;
+    nonActiveMarked: number;
+    skipped: number;
 }
 
 type TaskIssueState = 'open' | 'resolved' | 'ignored';
@@ -72,6 +86,25 @@ type TaskIssueRecord = Record<string, {
     actual?: string;
     manualAction?: string;
 }>;
+
+type DatabaseCheckIssueLike = {
+    type: string;
+    taskId?: string;
+    filePath?: string;
+    details: string;
+    expectedFilePath?: string;
+    todoistFilePath?: string;
+    dueDate?: string;
+    todoistDueDate?: string;
+    obsidianLabels?: string[];
+    todoistLabels?: string[];
+    obsidianPriority?: number;
+    todoistPriority?: number;
+    obsidianStatus?: boolean;
+    todoistStatus?: boolean;
+    obsidianContent?: string;
+    todoistContent?: string;
+};
 
 /**
  * ==========================================================================================
@@ -301,7 +334,7 @@ export class CacheOperation   {
     async setTaskFileMapping(taskId: string, filePath: string, status: 'active' | 'nonActive' | 'conflicted' | 'issue' = 'active', syncEnabled: boolean = true): Promise<void> {
         const mapping = { ...this.plugin.settings.taskFileMapping };
         const existing = mapping[taskId];
-        const nextStatus = deriveTaskStatusFromIssueEntries(existing?.issues as Record<string, { state?: string }> | undefined, status);
+        const nextStatus = deriveTaskStatusFromIssueEntries(existing?.issues as TaskIssueRecord | undefined, status);
         const nextSyncEnabled = nextStatus === 'active' ? syncEnabled : false;
         mapping[taskId] = { ...existing, filePath, status: nextStatus, syncEnabled: nextSyncEnabled };
         await this.plugin.safeSettings?.update({ taskFileMapping: mapping });
@@ -338,40 +371,327 @@ export class CacheOperation   {
         const current = mapping[taskId];
         if (!current) return;
 
-        const now = Date.now();
-        const issueRecord: TaskIssueRecord = {};
-        if (current.issues && typeof current.issues === 'object' && !Array.isArray(current.issues)) {
-            for (const [existingIssueType, existingIssue] of Object.entries(current.issues as TaskIssueRecord)) {
-                issueRecord[normalizeTaskIssueTypeKey(existingIssueType)] = existingIssue;
-            }
-        }
-
-        const normalizedIssueType = normalizeTaskIssueTypeKey(issueType);
-        const previous = issueRecord[normalizedIssueType];
-        issueRecord[normalizedIssueType] = {
-            state: issue.state ?? 'open',
-            severity: issue.severity ?? 'medium',
-            source: issue.source ?? 'runtime',
-            detectedAt: typeof previous?.detectedAt === 'number' ? previous.detectedAt : now,
-            lastSeenAt: now,
-            details: issue.details,
-            expected: issue.expected,
-            actual: issue.actual,
-            manualAction: issue.manualAction,
-        };
-
-        const fallbackStatus = (current.status || 'active') as 'active' | 'nonActive' | 'conflicted' | 'issue';
-        const nextStatus = deriveTaskStatusFromIssueEntries(issueRecord, fallbackStatus);
-        const nextSyncEnabled = nextStatus === 'active' ? (current.syncEnabled ?? true) : false;
+        const upsertResult = upsertTaskIssueEntry(current.issues as TaskIssueRecord | undefined, issueType, issue);
 
         mapping[taskId] = {
             ...current,
-            issues: issueRecord,
-            status: nextStatus,
-            syncEnabled: nextSyncEnabled,
+            issues: upsertResult.issues as TaskIssueRecord,
         };
 
+        const reconciled = reconcileTaskEntryDerivedState(
+            mapping[taskId] as { status?: 'active' | 'nonActive' | 'conflicted' | 'issue'; syncEnabled?: boolean; issues?: TaskIssueRecord },
+            (current.status || 'active') as 'active' | 'nonActive' | 'conflicted' | 'issue'
+        );
+        mapping[taskId] = { ...mapping[taskId], ...reconciled.entry };
+
         await this.plugin.safeSettings?.update({ taskFileMapping: mapping }, shouldSave);
+    }
+
+    async resolveTaskIssues(
+        taskId: string,
+        shouldResolve: (issueType: string) => boolean,
+        shouldSave = true
+    ): Promise<boolean> {
+        const currentEntry = this.plugin.settings.taskFileMapping[taskId];
+        if (!currentEntry) return false;
+
+        const mapping = { ...this.plugin.settings.taskFileMapping };
+        const entry = mapping[taskId];
+        if (!entry) return false;
+
+        const resolved = resolveTaskIssuesByType(entry.issues as TaskIssueRecord | undefined, shouldResolve);
+        let changed = resolved.changed;
+
+        if (resolved.issues && Object.keys(resolved.issues).length > 0) {
+            entry.issues = resolved.issues as TaskIssueRecord;
+        } else if (entry.issues !== undefined) {
+            delete entry.issues;
+            changed = true;
+        }
+
+        const reconciled = reconcileTaskEntryDerivedState(
+            entry as { status?: 'active' | 'nonActive' | 'conflicted' | 'issue'; syncEnabled?: boolean; issues?: TaskIssueRecord },
+            (entry.status || 'active') as 'active' | 'nonActive' | 'conflicted' | 'issue'
+        );
+        if (reconciled.changed) changed = true;
+
+        if (!changed) return false;
+
+        mapping[taskId] = { ...entry };
+        await this.plugin.safeSettings?.update({ taskFileMapping: mapping }, shouldSave);
+        return true;
+    }
+
+    async applyDatabaseCheckerIssues(resultIssues: DatabaseCheckIssueLike[], shouldSave = true): Promise<boolean> {
+        const taskFileMapping = { ...this.plugin.settings.taskFileMapping };
+        const now = Date.now();
+        const seenIssueTypesByTask = new Map<string, Set<string>>();
+        const clonedEntries = new Set<string>();
+        let changed = false;
+
+        const ensureClonedEntry = (taskId: string): typeof taskFileMapping[string] | undefined => {
+            const originalEntry = taskFileMapping[taskId];
+            if (!originalEntry) return undefined;
+            if (!clonedEntries.has(taskId)) {
+                taskFileMapping[taskId] = {
+                    ...originalEntry,
+                    issues: originalEntry.issues ? { ...originalEntry.issues } : undefined,
+                };
+                clonedEntries.add(taskId);
+            }
+            return taskFileMapping[taskId];
+        };
+
+        for (const issue of resultIssues) {
+            if (!issue.taskId) continue;
+            const mappingEntry = ensureClonedEntry(issue.taskId);
+            if (!mappingEntry) continue;
+
+            const issueType = normalizeTaskIssueTypeKey(issue.type);
+            const upsertedIssue = upsertTaskIssueEntry(mappingEntry.issues as TaskIssueRecord | undefined, issueType, {
+                state: 'open',
+                severity: this.getIssueSeverity(issueType),
+                source: 'database_checker',
+                details: issue.details,
+                ...this.buildIssueExpectedActual(issue),
+                manualAction: this.getIssueManualAction(issueType),
+            }, now);
+
+            mappingEntry.issues = upsertedIssue.issues as TaskIssueRecord;
+
+            const seenIssueTypes = seenIssueTypesByTask.get(issue.taskId) || new Set<string>();
+            seenIssueTypes.add(issueType);
+            seenIssueTypesByTask.set(issue.taskId, seenIssueTypes);
+            changed = true;
+        }
+
+        for (const taskId of Object.keys(taskFileMapping)) {
+            const mappingEntry = ensureClonedEntry(taskId);
+            if (!mappingEntry) continue;
+
+            const seenIssueTypes = seenIssueTypesByTask.get(taskId) || new Set<string>();
+            const resolved = resolveOpenIssuesFromSourceNotSeen(
+                mappingEntry.issues as TaskIssueRecord | undefined,
+                'database_checker',
+                seenIssueTypes,
+                now
+            );
+
+            if (resolved.issues && Object.keys(resolved.issues).length > 0) {
+                mappingEntry.issues = resolved.issues as TaskIssueRecord;
+            } else if (mappingEntry.issues !== undefined) {
+                delete mappingEntry.issues;
+                changed = true;
+            }
+
+            if (resolved.changed) changed = true;
+
+            const reconciled = reconcileTaskEntryDerivedState(
+                mappingEntry as { status?: 'active' | 'nonActive' | 'conflicted' | 'issue'; syncEnabled?: boolean; issues?: TaskIssueRecord },
+                (mappingEntry.status || 'active') as 'active' | 'nonActive' | 'conflicted' | 'issue'
+            );
+
+            if (reconciled.changed) changed = true;
+        }
+
+        if (changed) {
+            await this.plugin.safeSettings?.update({ taskFileMapping }, shouldSave);
+        }
+
+        return changed;
+    }
+
+    async applyMatchFirstAutoRepairs(resultIssues: DatabaseCheckIssueLike[], shouldSave = true): Promise<MatchFirstAutoRepairResult> {
+        const taskFileMapping = { ...this.plugin.settings.taskFileMapping };
+        const touchedTaskIds = new Set<string>();
+        let changed = false;
+        let mappingRepaired = 0;
+        let nonActiveMarked = 0;
+        let skipped = 0;
+
+        const ensureEntry = (taskId: string, filePath: string): typeof taskFileMapping[string] => {
+            const existing = taskFileMapping[taskId];
+            if (existing) {
+                const nextFilePath = filePath || existing.filePath;
+                if (existing.filePath !== nextFilePath) {
+                    taskFileMapping[taskId] = { ...existing, filePath: nextFilePath };
+                    changed = true;
+                } else {
+                    taskFileMapping[taskId] = { ...existing };
+                }
+            } else {
+                taskFileMapping[taskId] = {
+                    filePath,
+                    status: 'active',
+                    syncEnabled: true,
+                };
+                changed = true;
+            }
+
+            if (taskFileMapping[taskId].issues) {
+                taskFileMapping[taskId].issues = { ...taskFileMapping[taskId].issues };
+            }
+
+            touchedTaskIds.add(taskId);
+            return taskFileMapping[taskId];
+        };
+
+        for (const issue of resultIssues) {
+            const normalizedIssueType = normalizeTaskIssueTypeKey(issue.type);
+            const taskId = issue.taskId;
+            const filePath = issue.filePath || '';
+
+            if (!taskId || !filePath) {
+                skipped++;
+                continue;
+            }
+
+            if (normalizedIssueType === 'mapping_missing_for_task' || normalizedIssueType === 'mapping_pointer_stale') {
+                const entry = ensureEntry(taskId, filePath);
+
+                const resolvedMappingIssues = resolveTaskIssuesByType(
+                    entry.issues as TaskIssueRecord | undefined,
+                    (issueType) => issueType === 'mapping_missing_for_task' || issueType === 'mapping_pointer_stale'
+                );
+
+                if (resolvedMappingIssues.issues && Object.keys(resolvedMappingIssues.issues).length > 0) {
+                    entry.issues = resolvedMappingIssues.issues as TaskIssueRecord;
+                } else if (entry.issues !== undefined) {
+                    delete entry.issues;
+                }
+
+                if (resolvedMappingIssues.changed) changed = true;
+
+                const reconciled = reconcileTaskEntryDerivedState(
+                    entry as { status?: 'active' | 'nonActive' | 'conflicted' | 'issue'; syncEnabled?: boolean; issues?: TaskIssueRecord },
+                    'active'
+                );
+                if (reconciled.changed) changed = true;
+
+                mappingRepaired++;
+                continue;
+            }
+
+            if (normalizedIssueType === 'task_marked_nonactive') {
+                const entry = ensureEntry(taskId, filePath);
+
+                const upserted = upsertTaskIssueEntry(
+                    entry.issues as TaskIssueRecord | undefined,
+                    'task_marked_nonactive',
+                    {
+                        state: 'open',
+                        severity: 'low',
+                        source: 'database_checker',
+                        details: issue.details,
+                        manualAction: 'Review in Manage Problem Tasks',
+                    }
+                );
+                entry.issues = upserted.issues as TaskIssueRecord;
+                changed = true;
+
+                const resolvedRelatedIssues = resolveTaskIssuesByType(
+                    entry.issues as TaskIssueRecord,
+                    (issueType) => issueType === 'todoist_task_missing' || issueType === 'task_requires_review'
+                );
+
+                if (resolvedRelatedIssues.issues && Object.keys(resolvedRelatedIssues.issues).length > 0) {
+                    entry.issues = resolvedRelatedIssues.issues as TaskIssueRecord;
+                } else if (entry.issues !== undefined) {
+                    delete entry.issues;
+                }
+
+                if (resolvedRelatedIssues.changed) changed = true;
+
+                const reconciled = reconcileTaskEntryDerivedState(
+                    entry as { status?: 'active' | 'nonActive' | 'conflicted' | 'issue'; syncEnabled?: boolean; issues?: TaskIssueRecord },
+                    'nonActive'
+                );
+                if (reconciled.changed) changed = true;
+
+                nonActiveMarked++;
+                continue;
+            }
+
+            skipped++;
+        }
+
+        for (const taskId of touchedTaskIds) {
+            const entry = taskFileMapping[taskId];
+            const reconciled = reconcileTaskEntryDerivedState(
+                entry as { status?: 'active' | 'nonActive' | 'conflicted' | 'issue'; syncEnabled?: boolean; issues?: TaskIssueRecord },
+                (entry.status || 'active') as 'active' | 'nonActive' | 'conflicted' | 'issue'
+            );
+            if (reconciled.changed) changed = true;
+        }
+
+        if (changed) {
+            await this.plugin.safeSettings?.update({ taskFileMapping }, shouldSave);
+        }
+
+        return {
+            changed,
+            mappingRepaired,
+            nonActiveMarked,
+            skipped,
+        };
+    }
+
+    private getIssueSeverity(issueType: string): TaskIssueSeverity {
+        if (issueType === 'todoist_link_stale' || issueType === 'sync_content_mismatch' || issueType === 'sync_completion_mismatch') {
+            return 'high';
+        }
+        if (issueType === 'sync_due_mismatch' || issueType === 'sync_labels_mismatch' || issueType === 'sync_priority_mismatch' || issueType === 'sync_project_mismatch') {
+            return 'medium';
+        }
+        return 'low';
+    }
+
+    private getIssueManualAction(issueType: string): string | undefined {
+        if (issueType === 'todoist_link_stale') return 'Repair in Manage Problem Tasks';
+        if (issueType === 'todoist_task_missing') return 'Resolve in Manage Problem Tasks';
+        return undefined;
+    }
+
+    private buildIssueExpectedActual(issue: DatabaseCheckIssueLike): { expected?: string; actual?: string } {
+        const normalizedType = normalizeTaskIssueTypeKey(issue.type);
+        if (normalizedType === 'todoist_link_stale') {
+            return {
+                expected: issue.expectedFilePath,
+                actual: issue.todoistFilePath,
+            };
+        }
+        if (normalizedType === 'sync_due_mismatch') {
+            return {
+                expected: issue.dueDate,
+                actual: issue.todoistDueDate,
+            };
+        }
+        if (normalizedType === 'sync_labels_mismatch') {
+            return {
+                expected: issue.obsidianLabels?.join(', '),
+                actual: issue.todoistLabels?.join(', '),
+            };
+        }
+        if (normalizedType === 'sync_priority_mismatch') {
+            return {
+                expected: issue.obsidianPriority !== undefined ? String(issue.obsidianPriority) : undefined,
+                actual: issue.todoistPriority !== undefined ? String(issue.todoistPriority) : undefined,
+            };
+        }
+        if (normalizedType === 'sync_completion_mismatch') {
+            return {
+                expected: issue.obsidianStatus !== undefined ? String(issue.obsidianStatus) : undefined,
+                actual: issue.todoistStatus !== undefined ? String(issue.todoistStatus) : undefined,
+            };
+        }
+        if (normalizedType === 'sync_content_mismatch') {
+            return {
+                expected: issue.obsidianContent,
+                actual: issue.todoistContent,
+            };
+        }
+
+        return {};
     }
 
     /**
@@ -951,7 +1271,7 @@ export class CacheOperation   {
                         
                         if (!task) {
                             const status = taskInfo.isCompleted ? 'nonActive' : 'issue';
-                            const issueType = taskInfo.isCompleted ? 'task_nonactive' : 'task_deleted_in_todoist';
+                        const issueType = taskInfo.isCompleted ? 'task_marked_nonactive' : 'todoist_task_missing';
                             const issueSeverity: TaskIssueSeverity = taskInfo.isCompleted ? 'low' : 'high';
                             if (status === 'nonActive') nonActiveCount++;
                             else issueCount++;
@@ -1001,7 +1321,7 @@ export class CacheOperation   {
                         if (contentConflict || statusConflict) {
                             const conflictIssues: TaskIssueRecord = {};
                             if (contentConflict) {
-                                conflictIssues.content_mismatch = {
+                            conflictIssues.sync_content_mismatch = {
                                     state: 'open',
                                     severity: 'high',
                                     source: 'runtime',
@@ -1011,7 +1331,7 @@ export class CacheOperation   {
                                 };
                             }
                             if (statusConflict) {
-                                conflictIssues.status_mismatch = {
+                            conflictIssues.sync_completion_mismatch = {
                                     state: 'open',
                                     severity: 'high',
                                     source: 'runtime',
