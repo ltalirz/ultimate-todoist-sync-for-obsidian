@@ -766,25 +766,60 @@ export class TaskManagerModal extends Modal {
 		const line = await this.getTaskLine(taskId, filePath);
 		let obsContent = '', obsStatus = '', obsDue = '', obsTags = '', obsPriority = '';
 		let todContent = '', todStatus = '', todDue = '', todTags = '', todPriority = '';
+		let obsTagList: string[] = [];
+		let todTagList: string[] = [];
+		let obsIsCompleted = false;
+		let todIsCompleted = false;
+		let obsPriorityValue = 1;
+		let todPriorityValue = 1;
 		if (line) {
 			obsContent = taskParser.getTaskContentFromLineText(line) || '';
-			obsStatus = /\[(x|X)\]/.test(line) ? '\u2611' : '\u2610';
+			obsIsCompleted = /\[(x|X)\]/.test(line);
+			obsStatus = obsIsCompleted ? '\u2611' : '\u2610';
 			obsDue = taskParser.getDueDateFromLineText(line) || '';
-			obsTags = taskParser.getAllTagsFromLineText(line).join(', ');
-			obsPriority = `!!${taskParser.getTaskPriority(line)}`;
+			obsTagList = taskParser.getAllTagsFromLineText(line);
+			obsTags = obsTagList.join(', ');
+			obsPriorityValue = taskParser.getTaskPriority(line);
+			obsPriority = `!!${obsPriorityValue}`;
 		}
 		try {
 			const task = todoistSyncAPI.getTaskByIdLocal(taskId);
 			if (task) {
 				todContent = task.content || '';
-				todStatus = task.checked ? '\u2611' : '\u2610';
+				todIsCompleted = !!task.checked;
+				todStatus = todIsCompleted ? '\u2611' : '\u2610';
 				todDue = task.due?.date || '';
-				todTags = (task.labels || []).join(', ');
-				todPriority = `!!${task.priority || 1}`;
+				todTagList = task.labels || [];
+				todTags = todTagList.join(', ');
+				todPriorityValue = task.priority || 1;
+				todPriority = `!!${todPriorityValue}`;
 			}
 		} catch (e) {
 			// task may not exist
 		}
+
+		const obsComparable = {
+			content: obsContent,
+			isCompleted: obsIsCompleted,
+			dueDate: obsDue,
+			labels: obsTagList,
+			priority: obsPriorityValue,
+		};
+		const todComparable = {
+			content: todContent,
+			checked: todIsCompleted,
+			dueDate: todDue,
+			labels: todTagList,
+			priority: todPriorityValue,
+		};
+		const fieldDiffMap: Record<string, boolean> = {
+			'Content': !taskParser.taskContentCompare(obsComparable, todComparable),
+			'Status': !taskParser.taskStatusCompare(obsComparable, todComparable),
+			'Due Date': !taskParser.compareTaskDueDate(obsComparable, todComparable),
+			'Tags': !taskParser.taskTagCompare(obsComparable, todComparable),
+			'Priority': !taskParser.taskPriorityCompare(obsComparable, todComparable),
+		};
+
 		// Diff table
 		const table = container.createEl('table', { cls: 'tm-diff' });
 		const thead = table.createEl('thead');
@@ -802,7 +837,7 @@ export class TaskManagerModal extends Modal {
 			['Priority', obsPriority, todPriority],
 		];
 		for (const [field, obsVal, todVal] of rows) {
-			const isDiff = obsVal !== todVal;
+			const isDiff = fieldDiffMap[field] ?? (obsVal !== todVal);
 			const tr = tbody.createEl('tr');
 			if (isDiff) tr.addClass('tm-diff-changed');
 			tr.createEl('td', { cls: 'tm-diff-field', text: field });
