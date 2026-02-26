@@ -847,11 +847,17 @@ export class TaskManagerModal extends Modal {
 				marker.textContent = '\u25cf';
 			}
 			const tdObs = tr.createEl('td');
-			tdObs.addClass(obsVal ? 'tm-diff-val' : 'tm-diff-val tm-diff-val--empty');
+			tdObs.addClass('tm-diff-val');
+			if (!obsVal) {
+				tdObs.addClass('tm-diff-val--empty');
+			}
 			tdObs.textContent = obsVal || '\u2014';
 			tdObs.title = obsVal;
 			const tdTod = tr.createEl('td');
-			tdTod.addClass(todVal ? 'tm-diff-val' : 'tm-diff-val tm-diff-val--empty');
+			tdTod.addClass('tm-diff-val');
+			if (!todVal) {
+				tdTod.addClass('tm-diff-val--empty');
+			}
 			tdTod.textContent = todVal || '\u2014';
 			tdTod.title = todVal;
 		}
