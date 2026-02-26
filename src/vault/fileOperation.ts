@@ -725,13 +725,13 @@ export class FileOperation   {
         filePath: string, 
         oldId: string, 
         newId: string
-    ): Promise<void> {
+    ): Promise<boolean> {
         try {
             const file = this.app.vault.getAbstractFileByPath(filePath);
             if (!file) {
                 console.error(`[updateTaskIdInVault] File not found: ${filePath}`);
                 this.plugin.debugLog(filePath)
-                return;
+                return false;
             }
             
             const content = await this.app.vault.read(file);
@@ -748,7 +748,7 @@ export class FileOperation   {
             
             if (targetLineIndex === -1) {
                 console.warn(`[updateTaskIdInVault] Old ID ${oldId} not found in ${filePath}`);
-                return;
+                return false;
             }
 
             let line = lines[targetLineIndex];
@@ -782,12 +782,22 @@ export class FileOperation   {
             
             if (!hasChanges) {
                 console.warn(`[updateTaskIdInVault] No ID patterns found for ${oldId} in ${filePath}`);
-                return;
+                return false;
             }
             
             lines[targetLineIndex] = line;
-            
-            await this.plugin.backupOperation?.backupFile(filePath);
+
+            if (!this.plugin.backupOperation) {
+                console.error(`[updateTaskIdInVault] Backup module not initialized, skipping ID update ${oldId} -> ${newId}`);
+                return false;
+            }
+
+            const backupPath = await this.plugin.backupOperation.backupFile(filePath);
+            if (!backupPath) {
+                console.error(`[updateTaskIdInVault] Backup failed, skipping ID update ${oldId} -> ${newId}`);
+                return false;
+            }
+
             await this.app.vault.modify(file, lines.join('\n'));
             
             this.plugin.logOperation?.log(
@@ -797,8 +807,10 @@ export class FileOperation   {
                 newId
             );
             this.plugin.debugLog(`[updateTaskIdInVault] Updated task ID ${oldId} -> ${newId} in ${filePath}`);
+            return true;
         } catch (error) {
             console.error(`[updateTaskIdInVault] Failed to update task ID in vault:`, error);
+            return false;
         }
     }
 

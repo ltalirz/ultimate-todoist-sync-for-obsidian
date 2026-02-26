@@ -504,6 +504,7 @@ export class CacheOperation   {
     async applyMatchFirstAutoRepairs(resultIssues: DatabaseCheckIssueLike[], shouldSave = true): Promise<MatchFirstAutoRepairResult> {
         const taskFileMapping = { ...this.plugin.settings.taskFileMapping };
         const touchedTaskIds = new Set<string>();
+        const legacyConversionCandidates = new Map<string, { taskId: string; newTaskId: string; filePath: string }>();
         let changed = false;
         let mappingRepaired = 0;
         let nonActiveMarked = 0;
@@ -543,6 +544,23 @@ export class CacheOperation   {
 
             if (!taskId || !filePath) {
                 skipped++;
+                continue;
+            }
+
+            if (normalizedIssueType === 'mapping_legacy_id') {
+                const mappedTaskId = (issue.details.match(/migrated to (\S+)/)?.[1] || '').trim();
+                if (!mappedTaskId || mappedTaskId === taskId) {
+                    skipped++;
+                    continue;
+                }
+
+                if (!legacyConversionCandidates.has(taskId)) {
+                    legacyConversionCandidates.set(taskId, {
+                        taskId,
+                        newTaskId: mappedTaskId,
+                        filePath,
+                    });
+                }
                 continue;
             }
 
@@ -615,8 +633,64 @@ export class CacheOperation   {
             skipped++;
         }
 
+        if (legacyConversionCandidates.size > 0) {
+            const fileOperation = this.plugin.fileOperation;
+            if (!fileOperation) {
+                skipped += legacyConversionCandidates.size;
+            } else {
+                for (const [oldTaskId, candidate] of legacyConversionCandidates.entries()) {
+                    const newTaskId = candidate.newTaskId;
+
+                    const oldEntry = taskFileMapping[oldTaskId];
+                    if (!oldEntry) {
+                        skipped++;
+                        continue;
+                    }
+
+                    const vaultUpdated = await fileOperation.updateTaskIdInVault(candidate.filePath, oldTaskId, newTaskId);
+                    if (!vaultUpdated) {
+                        skipped++;
+                        continue;
+                    }
+
+                    const mergedEntry = {
+                        ...(taskFileMapping[newTaskId] || {}),
+                        ...oldEntry,
+                        filePath: candidate.filePath,
+                    };
+
+                    const resolvedLegacyIssue = resolveTaskIssuesByType(
+                        mergedEntry.issues as TaskIssueRecord | undefined,
+                        (issueType) => issueType === 'mapping_legacy_id'
+                    );
+
+                    if (resolvedLegacyIssue.issues && Object.keys(resolvedLegacyIssue.issues).length > 0) {
+                        mergedEntry.issues = resolvedLegacyIssue.issues as TaskIssueRecord;
+                    } else if (mergedEntry.issues !== undefined) {
+                        delete mergedEntry.issues;
+                    }
+
+                    const reconciled = reconcileTaskEntryDerivedState(
+                        mergedEntry as { status?: 'active' | 'nonActive' | 'conflicted' | 'issue'; syncEnabled?: boolean; issues?: TaskIssueRecord },
+                        (mergedEntry.status || 'active') as 'active' | 'nonActive' | 'conflicted' | 'issue'
+                    );
+                    if (reconciled.changed || resolvedLegacyIssue.changed) changed = true;
+
+                    taskFileMapping[newTaskId] = mergedEntry;
+                    if (oldTaskId !== newTaskId) {
+                        delete taskFileMapping[oldTaskId];
+                    }
+
+                    touchedTaskIds.add(newTaskId);
+                    mappingRepaired++;
+                    changed = true;
+                }
+            }
+        }
+
         for (const taskId of touchedTaskIds) {
             const entry = taskFileMapping[taskId];
+            if (!entry) continue;
             const reconciled = reconcileTaskEntryDerivedState(
                 entry as { status?: 'active' | 'nonActive' | 'conflicted' | 'issue'; syncEnabled?: boolean; issues?: TaskIssueRecord },
                 (entry.status || 'active') as 'active' | 'nonActive' | 'conflicted' | 'issue'
@@ -640,17 +714,21 @@ export class CacheOperation   {
         if (issueType === 'todoist_link_stale' || issueType === 'sync_content_mismatch' || issueType === 'sync_completion_mismatch') {
             return 'high';
         }
-        if (issueType === 'sync_due_mismatch' || issueType === 'sync_labels_mismatch' || issueType === 'sync_priority_mismatch' || issueType === 'sync_project_mismatch') {
-            return 'medium';
-        }
-        return 'low';
-    }
+		if (issueType === 'sync_due_mismatch' || issueType === 'sync_labels_mismatch' || issueType === 'sync_priority_mismatch' || issueType === 'sync_project_mismatch') {
+			return 'medium';
+		}
+		if (issueType === 'mapping_legacy_id') {
+			return 'medium';
+		}
+		return 'low';
+	}
 
-    private getIssueManualAction(issueType: string): string | undefined {
-        if (issueType === 'todoist_link_stale') return 'Repair in Manage Problem Tasks';
-        if (issueType === 'todoist_task_missing') return 'Resolve in Manage Problem Tasks';
-        return undefined;
-    }
+	private getIssueManualAction(issueType: string): string | undefined {
+		if (issueType === 'todoist_link_stale') return 'Repair in Manage Problem Tasks';
+		if (issueType === 'todoist_task_missing') return 'Resolve in Manage Problem Tasks';
+		if (issueType === 'mapping_legacy_id') return 'Run Safe Repair to migrate legacy ID';
+		return undefined;
+	}
 
     private buildIssueExpectedActual(issue: DatabaseCheckIssueLike): { expected?: string; actual?: string } {
         const normalizedType = normalizeTaskIssueTypeKey(issue.type);
@@ -1209,8 +1287,7 @@ export class CacheOperation   {
                 // 该方法通过任务内容匹配来找到对应的新 ID
                 try {
                     idMapping = await todoistSyncAPI.convertLegacyIds(tasksNeedConversion);
-                    convertedCount = Object.keys(idMapping).length;
-                    this.plugin.debugLog(`[rebuildCache] Converted ${convertedCount} legacy IDs`);
+                    this.plugin.debugLog(`[rebuildCache] Found ${Object.keys(idMapping).length} legacy ID candidates to migrate`);
                 } catch (error) {
                     console.warn(`[rebuildCache] Legacy ID conversion failed: ${(error as Error).message}. These tasks will remain with their old IDs and may trigger conversion again on next rebuild.`);
                     this.plugin.debugLog('[rebuildCache] Will continue without converting legacy IDs');
@@ -1266,8 +1343,9 @@ export class CacheOperation   {
             for (const [filePath, fileTasks] of fileTaskMap.entries()) {
                 for (const taskInfo of fileTasks) {
                     try {
-                        const taskId = idMapping[taskInfo.taskId] || taskInfo.taskId;
-                        const task = syncItemsMap.get(taskId);
+                        const convertedTaskId = idMapping[taskInfo.taskId];
+                        const resolvedTaskId = convertedTaskId || taskInfo.taskId;
+                        const task = syncItemsMap.get(resolvedTaskId);
                         
                         if (!task) {
                             const status = taskInfo.isCompleted ? 'nonActive' : 'issue';
@@ -1300,16 +1378,41 @@ export class CacheOperation   {
                             );
                             continue;
                         }
-                        
-                        if (idMapping[taskInfo.taskId]) {
-                            await this.plugin.fileOperation!.updateTaskIdInVault(
+
+                        let mappingTaskId = taskInfo.taskId;
+                        if (convertedTaskId && convertedTaskId !== taskInfo.taskId) {
+                            const vaultUpdated = await this.plugin.fileOperation!.updateTaskIdInVault(
                                 filePath,
-                                taskInfo.taskId, taskId
+                                taskInfo.taskId,
+                                convertedTaskId
                             );
-                            this.plugin.debugLog(`[rebuildCache] Updated mapping: ${taskInfo.taskId} -> ${taskId}`);
+
+                            if (!vaultUpdated) {
+                                issueCount++;
+                                nextMapping[taskInfo.taskId] = {
+                                    filePath,
+                                    status: 'issue',
+                                    syncEnabled: false,
+                                    issues: {
+                                        mapping_legacy_id: {
+                                            state: 'open',
+                                            severity: 'medium',
+                                            source: 'runtime',
+                                            detectedAt: now,
+                                            lastSeenAt: now,
+                                            details: `Legacy ID conversion failed for ${taskInfo.taskId} -> ${convertedTaskId}. Vault update did not succeed.`,
+                                            manualAction: 'Run Safe Repair to retry legacy ID migration',
+                                        }
+                                    }
+                                };
+                                continue;
+                            }
+
+                            mappingTaskId = convertedTaskId;
+                            convertedCount++;
+                            this.plugin.debugLog(`[rebuildCache] Updated mapping: ${taskInfo.taskId} -> ${convertedTaskId}`);
                         }
-                        
-                        const mappingTaskId = idMapping[taskInfo.taskId] || taskInfo.taskId;
+
                         const todoistContent = task.content || '';
                         const obsidianContent = taskInfo.content;
                         const todoistIsCompleted = !!(task as any).checked;
