@@ -452,6 +452,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         const result = await this.plugin.databaseChecker.checkDatabase((msg) => {
                             verifyNotice.setMessage(msg);
                         });
+                        await this.applyDatabaseIssuesToMapping(result);
                         verifyNotice.hide();
                         const todoistCount = this.plugin.todoistSyncAPI?.getSyncData()?.items?.length ?? 0;
                         const vaultCount = Object.keys(this.plugin.settings.taskFileMapping).length;
