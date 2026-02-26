@@ -349,7 +349,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Todoist → Obsidian')
-            .setDesc('Pull changes from Todoist to Obsidian.')
+            .setDesc('⚠️ Reverse sync (Todoist → Obsidian) currently has known bugs and is disabled by default. Enabling is NOT recommended.')
             .addToggle(component =>
                 component
                     .setValue(this.plugin.settings.todoistToObsidianEnabled)
@@ -359,6 +359,10 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         new Notice(`Todoist → Obsidian ${value ? 'enabled' : 'disabled'}`);
                     })
             );
+
+        const reverseSyncWarningEl = containerEl.createEl('div', { cls: 'setting-item-description' });
+        reverseSyncWarningEl.style.cssText = 'color: var(--text-error); font-weight: 600; margin: 6px 0 12px 0;';
+        reverseSyncWarningEl.textContent = '⚠️ Warning: Reverse sync may incorrectly overwrite vault data. Keep this switch OFF unless you are actively testing.';
 
         // ============================================
         // Device Management Section
@@ -484,12 +488,23 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         new Notice('Cache operation not initialized');
                         return;
                     }
+                    if (!this.plugin.syncLockManager) {
+                        new Notice('Sync lock manager not initialized');
+                        return;
+                    }
 
                     const databaseChecker = this.plugin.databaseChecker;
                     const cacheOperation = this.plugin.cacheOperation;
+                    const syncLockManager = this.plugin.syncLockManager;
+                    let lockAcquired = false;
 
                     const progressNotice = new Notice('Step 1/3: Checking database...', 0);
                     try {
+                        lockAcquired = await syncLockManager.acquireExclusive();
+                        if (!lockAcquired) {
+                            throw new Error('Unable to acquire lock for safe repair. Please retry in a few seconds.');
+                        }
+
                         // Step 1: Initial check
                         const before = await databaseChecker.checkDatabase((msg) => {
                             progressNotice.setMessage(`Step 1/3: ${msg}`);
@@ -545,6 +560,10 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                     } catch (error) {
                         progressNotice.hide();
                         new Notice(`Fix Database error: ${error instanceof Error ? error.message : String(error)}`);
+                    } finally {
+                        if (lockAcquired) {
+                            syncLockManager.release();
+                        }
                     }
                 })
             );
