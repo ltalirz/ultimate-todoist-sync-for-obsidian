@@ -1203,20 +1203,38 @@ export class TaskManagerModal extends Modal {
 		}
 
         try {
+            // Phase 1: Backup file before any modifications
+            const taskMapping = cacheOperation.getTaskFileMapping(taskId);
+            const filePath = taskMapping?.filePath || '';
+            let backupPath: string | null = null;
+            if (filePath) {
+                backupPath = await this.plugin.backupOperation?.backupFile(filePath) ?? null;
+            }
+
+            // Phase 2: Local reversible operations
+            try {
+                await fileOperation.unbindTaskInFile(taskId);
+                await cacheOperation.deleteTaskFileMapping(taskId);
+                await this.plugin.safeSettings?.update({}, true);
+            } catch (localError) {
+                // Restore file from backup on local failure; mapping can be rebuilt via fix database
+                if (backupPath) {
+                    await this.plugin.backupOperation?.restoreFromBackup(backupPath);
+                }
+                throw localError;
+            }
+
+            // Phase 3: Irreversible remote operation — only after local cleanup succeeds
+            if (this._closed) return;
             try {
                 await todoistSyncAPI.deleteTask(taskId);
-            } catch (e: unknown) {
-                // Only ignore 404 (task already deleted in Todoist)
-                const err = e as Record<string, unknown>;
-                const is404 = err.httpStatusCode === 404
-                    || (typeof err.message === 'string' && (err.message.includes('404') || err.message.toLowerCase().includes('not found')));
-                if (!is404) throw e;
+            } catch (apiError) {
+                console.warn(`[TaskManagerModal] Todoist delete failed for ${taskId}, local cleanup done:`, apiError);
+                new Notice(`Task unbound locally, but Todoist deletion failed. You may need to delete it manually in Todoist.`);
+                return;
             }
-            if (this._closed) return;
-			await fileOperation.unbindTaskInFile(taskId);
-			await cacheOperation.deleteTaskFileMapping(taskId);
-			await this.plugin.safeSettings?.update({}, true);
-			new Notice(`Issue task deleted`);
+
+            new Notice('Issue task deleted');
         } catch (e) {
             console.error(`[TaskManagerModal] deleteIssueTask error:`, e);
             new Notice(`Error deleting task: ${e}`);

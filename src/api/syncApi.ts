@@ -1171,8 +1171,19 @@ export class TodoistSyncAPI   {
         }
         
         if (matches.length > 1) {
-          console.warn(`[convertLegacyIds] Multiple matches found for "${taskInfo.content}" in ${taskInfo.filePath}:${taskInfo.lineNumber}, skipping...`);
-          console.log(`[convertLegacyIds] skip-ambiguous oldId=${taskInfo.taskId}`);
+          // Disambiguate by comparing filePath from Todoist description
+          const filePathMatches = matches.filter((t: any) => {
+            const descPath = this.plugin.taskParser?.extractFilePathFromObsidianDescription(t.description || '');
+            return descPath && descPath === taskInfo.filePath;
+          });
+          if (filePathMatches.length === 1) {
+            mapping[taskInfo.taskId] = filePathMatches[0].id;
+            console.log(`[convertLegacyIds] resolved-by-filepath oldId=${taskInfo.taskId} -> newId=${filePathMatches[0].id}`);
+            this.plugin.debugLog(`[convertLegacyIds] Resolved ambiguous match via filePath: ${taskInfo.taskId} -> ${filePathMatches[0].id}`);
+            continue;
+          }
+          console.warn(`[convertLegacyIds] Multiple matches found for "${taskInfo.content}" in ${taskInfo.filePath}:${taskInfo.lineNumber}, skipping (${filePathMatches.length} after filepath filter)...`);
+          console.log(`[convertLegacyIds] skip-ambiguous-after-filepath oldId=${taskInfo.taskId}`);
           continue;
         }
         
