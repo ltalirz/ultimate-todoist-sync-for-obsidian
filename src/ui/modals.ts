@@ -1248,7 +1248,7 @@ export class TaskManagerModal extends Modal {
 	private openFile(filePath: string) {
 		const file = this.app.vault.getAbstractFileByPath(filePath);
 		if (file instanceof TFile) {
-			this.app.workspace.getLeaf(false).openFile(file);
+			this.app.workspace.getLeaf(true).openFile(file);
 		}
 	}
 	private buildTodoistTaskUrl(taskId: string): string {
