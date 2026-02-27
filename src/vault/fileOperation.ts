@@ -727,15 +727,18 @@ export class FileOperation   {
         newId: string
     ): Promise<boolean> {
         try {
+            console.log(`[updateTaskIdInVault] start file=${filePath} oldId=${oldId} newId=${newId}`);
             const file = this.app.vault.getAbstractFileByPath(filePath);
             if (!file) {
                 console.error(`[updateTaskIdInVault] File not found: ${filePath}`);
                 this.plugin.debugLog(filePath)
+                console.log(`[updateTaskIdInVault] fail file-not-found file=${filePath}`);
                 return false;
             }
             
             const content = await this.app.vault.read(file);
             const lines = content.split('\n');
+            console.log(`[updateTaskIdInVault] file-loaded lines=${lines.length} file=${filePath}`);
             
             // Scan for the line containing the old task ID
             let targetLineIndex = -1;
@@ -748,8 +751,11 @@ export class FileOperation   {
             
             if (targetLineIndex === -1) {
                 console.warn(`[updateTaskIdInVault] Old ID ${oldId} not found in ${filePath}`);
+                console.log(`[updateTaskIdInVault] fail old-id-not-found oldId=${oldId} file=${filePath}`);
                 return false;
             }
+
+            console.log(`[updateTaskIdInVault] target-line index=${targetLineIndex} file=${filePath}`);
 
             let line = lines[targetLineIndex];
             let hasChanges = false;
@@ -759,6 +765,7 @@ export class FileOperation   {
             if (oldIdPattern.test(line)) {
                 line = line.replace(oldIdPattern, `%%[todoist_id:: ${newId}]%%`);
                 hasChanges = true;
+                console.log('[updateTaskIdInVault] replaced todoist_id metadata');
             }
             
             // 2. Replace App URI: todoist://task?id=oldId -> todoist://task?id=newId
@@ -766,22 +773,26 @@ export class FileOperation   {
             if (oldAppUriPattern.test(line)) {
                 line = line.replace(oldAppUriPattern, `todoist://task?id=${newId}`);
                 hasChanges = true;
+                console.log('[updateTaskIdInVault] replaced app uri');
             }
             
             const oldWebUrlPatternLegacy = new RegExp(`https://todoist\\.com/app/task/${oldId}`, 'g');
             if (oldWebUrlPatternLegacy.test(line)) {
                 line = line.replace(oldWebUrlPatternLegacy, `https://todoist.com/app/task/${newId}`);
                 hasChanges = true;
+                console.log('[updateTaskIdInVault] replaced legacy web url');
             }
 
             const oldWebUrlPatternNew = new RegExp(`https://app\\.todoist\\.com/app/task/${oldId}`, 'g');
             if (oldWebUrlPatternNew.test(line)) {
                 line = line.replace(oldWebUrlPatternNew, `https://app.todoist.com/app/task/${newId}`);
                 hasChanges = true;
+                console.log('[updateTaskIdInVault] replaced new web url');
             }
             
             if (!hasChanges) {
                 console.warn(`[updateTaskIdInVault] No ID patterns found for ${oldId} in ${filePath}`);
+                console.log(`[updateTaskIdInVault] fail no-patterns-matched oldId=${oldId} file=${filePath}`);
                 return false;
             }
             
@@ -789,16 +800,21 @@ export class FileOperation   {
 
             if (!this.plugin.backupOperation) {
                 console.error(`[updateTaskIdInVault] Backup module not initialized, skipping ID update ${oldId} -> ${newId}`);
+                console.log('[updateTaskIdInVault] fail backup-module-missing');
                 return false;
             }
 
+            console.log(`[updateTaskIdInVault] backup-start file=${filePath}`);
             const backupPath = await this.plugin.backupOperation.backupFile(filePath);
             if (!backupPath) {
                 console.error(`[updateTaskIdInVault] Backup failed, skipping ID update ${oldId} -> ${newId}`);
+                console.log('[updateTaskIdInVault] fail backup-failed');
                 return false;
             }
+            console.log(`[updateTaskIdInVault] backup-success path=${backupPath}`);
 
             await this.app.vault.modify(file, lines.join('\n'));
+            console.log(`[updateTaskIdInVault] vault-modify-success oldId=${oldId} newId=${newId} file=${filePath}`);
             
             this.plugin.logOperation?.log(
                 'FILE_TASK_ID_UPDATED', 
@@ -807,9 +823,11 @@ export class FileOperation   {
                 newId
             );
             this.plugin.debugLog(`[updateTaskIdInVault] Updated task ID ${oldId} -> ${newId} in ${filePath}`);
+            console.log(`[updateTaskIdInVault] done success oldId=${oldId} newId=${newId}`);
             return true;
         } catch (error) {
             console.error(`[updateTaskIdInVault] Failed to update task ID in vault:`, error);
+            console.log('[updateTaskIdInVault] fail exception thrown');
             return false;
         }
     }

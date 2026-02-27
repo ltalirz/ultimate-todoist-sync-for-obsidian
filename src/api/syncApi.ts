@@ -1140,41 +1140,52 @@ export class TodoistSyncAPI   {
     tasksNeedConversion: { taskId: string; content: string; filePath: string; lineNumber: number }[]
   ): Promise<{ [oldId: string]: string }> {
     const mapping: { [oldId: string]: string } = {};
+    console.log(`[convertLegacyIds] start: inputCandidates=${tasksNeedConversion?.length || 0}`);
     
     if (!tasksNeedConversion || tasksNeedConversion.length === 0) {
+      console.log('[convertLegacyIds] early-return: no candidates');
       return mapping;
     }
 
     try {
       if (!this.syncData) {
+        console.log('[convertLegacyIds] syncData missing -> fetching full resources');
         this.syncData = await this.getAllResources(true);
       }
       const allTasks = this.syncData?.items || [];
+      console.log(`[convertLegacyIds] todoistItemsLoaded=${allTasks.length}`);
       
       for (const taskInfo of tasksNeedConversion) {
         const normalizedContent = this.normalizeContent(taskInfo.content);
+        console.log(`[convertLegacyIds] checking candidate oldId=${taskInfo.taskId} file=${taskInfo.filePath}:${taskInfo.lineNumber} normalizedContent="${normalizedContent}"`);
         
         const matches = allTasks.filter((t: any) => 
           this.normalizeContent(t.content) === normalizedContent
         );
+        console.log(`[convertLegacyIds] candidate oldId=${taskInfo.taskId} matches=${matches.length}`);
         
         if (matches.length === 0) {
           this.plugin.debugLog(`[convertLegacyIds] No match found for: ${taskInfo.content}`);
+          console.log(`[convertLegacyIds] skip-no-match oldId=${taskInfo.taskId}`);
           continue;
         }
         
         if (matches.length > 1) {
           console.warn(`[convertLegacyIds] Multiple matches found for "${taskInfo.content}" in ${taskInfo.filePath}:${taskInfo.lineNumber}, skipping...`);
+          console.log(`[convertLegacyIds] skip-ambiguous oldId=${taskInfo.taskId}`);
           continue;
         }
         
         mapping[taskInfo.taskId] = matches[0].id;
+        console.log(`[convertLegacyIds] mapped oldId=${taskInfo.taskId} -> newId=${matches[0].id}`);
         this.plugin.debugLog(`[convertLegacyIds] Mapped ${taskInfo.taskId} -> ${matches[0].id} (${taskInfo.content})`);
       }
       
       this.plugin.debugLog(`[convertLegacyIds] Converted ${Object.keys(mapping).length} IDs`);
+      console.log(`[convertLegacyIds] done: converted=${Object.keys(mapping).length} input=${tasksNeedConversion.length}`);
     } catch (error) {
       console.error('[convertLegacyIds] Error converting legacy IDs:', error);
+      console.log('[convertLegacyIds] failed: throwing error to caller');
       throw error;
     }
     

@@ -598,16 +598,22 @@ export class DatabaseChecker {
 
         const legacyIdMapping = new Map<string, string>();
         if (todoistSyncAPI && potentialLegacyCandidates.length > 0) {
+            console.log(`[DatabaseChecker] legacy-preflight start: candidates=${potentialLegacyCandidates.length}`);
             try {
                 const converted = await todoistSyncAPI.convertLegacyIds(potentialLegacyCandidates);
+                console.log(`[DatabaseChecker] legacy-preflight convertLegacyIds returned=${Object.keys(converted).length}`);
                 for (const [oldTaskId, newTaskId] of Object.entries(converted)) {
                     if (newTaskId && newTaskId !== oldTaskId) {
                         legacyIdMapping.set(oldTaskId, newTaskId);
                     }
                 }
+                console.log(`[DatabaseChecker] legacy-preflight usableMappings=${legacyIdMapping.size}`);
             } catch (error) {
                 console.error('[DatabaseChecker] legacy ID preflight failed:', error);
+                console.log('[DatabaseChecker] legacy-preflight failed: proceeding with empty mapping');
             }
+        } else {
+            console.log(`[DatabaseChecker] legacy-preflight skipped: hasApi=${!!todoistSyncAPI} candidates=${potentialLegacyCandidates.length}`);
         }
 
         for (const taskId of allPrimaryTaskIds) {
