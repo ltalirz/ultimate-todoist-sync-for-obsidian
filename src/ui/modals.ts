@@ -1052,45 +1052,69 @@ export class TaskManagerModal extends Modal {
 			if (choice === 'obsidian') {
 				const line = await this.getTaskLine(taskId, filePath);
 				if (!line) { new Notice('Task line not found in vault'); this.navigateToList(); return; }
-				const content = taskParser.getTaskContentFromLineText(line);
-				const labels = taskParser.getAllTagsFromLineText(line);
-				const dueDate = taskParser.getDueDateFromLineText(line);
-				const priority = taskParser.getTaskPriority(line);
-				const isCompleted = /\[(x|X)\]/.test(line);
-				// Build batched commands for atomic resolve
+
+				// Determine which fields actually conflict
+				const openIssues = new Set(this.getOpenIssueEntries(taskId).map(i => i.issueType));
+
+				// Build update args — only include conflicting fields
 				const commands: any[] = [];
 				const updateArgs: Record<string, unknown> = { id: taskId };
-				if (content) updateArgs.content = content;
-				if (labels && labels.length > 0) updateArgs.labels = labels;
-				if (dueDate) updateArgs.due = { date: dueDate };
-				else updateArgs.due = { string: 'no date' };
-				updateArgs.priority = priority;
-				const updateUuid = crypto.randomUUID();
-				commands.push({ type: 'item_update', uuid: updateUuid, args: updateArgs });
-				const savedTask = todoistSyncAPI.getTaskByIdLocal(taskId);
-				const todoistChecked = savedTask?.checked || false;
+
+				if (openIssues.has('sync_content_mismatch')) {
+					const content = taskParser.getTaskContentFromLineText(line);
+					if (content) updateArgs.content = content;
+				}
+				if (openIssues.has('sync_labels_mismatch')) {
+					const labels = taskParser.getAllTagsFromLineText(line);
+					if (labels && labels.length > 0) updateArgs.labels = labels;
+				}
+				if (openIssues.has('sync_due_mismatch')) {
+					const dueDate = taskParser.getDueDateFromLineText(line);
+					if (dueDate) updateArgs.due = { date: dueDate };
+					else updateArgs.due = { string: 'no date' };
+				}
+				if (openIssues.has('sync_priority_mismatch')) {
+					updateArgs.priority = taskParser.getTaskPriority(line);
+				}
+
+				// Only push item_update if there are fields beyond just { id }
+				let updateUuid: string | null = null;
+				if (Object.keys(updateArgs).length > 1) {
+					updateUuid = crypto.randomUUID();
+					commands.push({ type: 'item_update', uuid: updateUuid, args: updateArgs });
+				}
+
+				// Only sync completion status if that specific conflict exists
 				let statusUuid: string | null = null;
-				if (isCompleted && !todoistChecked) {
-					statusUuid = crypto.randomUUID();
-					commands.push({ type: 'item_close', uuid: statusUuid, args: { id: taskId } });
-				} else if (!isCompleted && todoistChecked) {
-					statusUuid = crypto.randomUUID();
-					commands.push({ type: 'item_uncomplete', uuid: statusUuid, args: { id: taskId } });
+				if (openIssues.has('sync_completion_mismatch')) {
+					const isCompleted = /\[(x|X)\]/.test(line);
+					const savedTask = todoistSyncAPI.getTaskByIdLocal(taskId);
+					const todoistChecked = savedTask?.checked || false;
+					if (isCompleted && !todoistChecked) {
+						statusUuid = crypto.randomUUID();
+						commands.push({ type: 'item_close', uuid: statusUuid, args: { id: taskId } });
+					} else if (!isCompleted && todoistChecked) {
+						statusUuid = crypto.randomUUID();
+						commands.push({ type: 'item_uncomplete', uuid: statusUuid, args: { id: taskId } });
+					}
 				}
 				// Single batched API call
-				const result = await todoistSyncAPI.executeCommands(commands);
-				// Check sync_status for each command
-				if (result?.sync_status) {
-					const updateStatus = result.sync_status[updateUuid];
-					if (updateStatus && updateStatus !== 'ok') {
-						const err = updateStatus as { error?: string };
-						throw new Error(`Update failed: ${err.error || JSON.stringify(updateStatus)}`);
-					}
-					if (statusUuid) {
-						const sStatus = result.sync_status[statusUuid];
-						if (sStatus && sStatus !== 'ok') {
-							const err = sStatus as { error?: string };
-							throw new Error(`Status change failed: ${err.error || JSON.stringify(sStatus)}`);
+				if (commands.length > 0) {
+					const result = await todoistSyncAPI.executeCommands(commands);
+					if (result?.sync_status) {
+						if (updateUuid) {
+							const updateStatus = result.sync_status[updateUuid];
+							if (updateStatus && updateStatus !== 'ok') {
+								const err = updateStatus as { error?: string };
+								throw new Error(`Update failed: ${err.error || JSON.stringify(updateStatus)}`);
+							}
+						}
+						if (statusUuid) {
+							const sStatus = result.sync_status[statusUuid];
+							if (sStatus && sStatus !== 'ok') {
+								const err = sStatus as { error?: string };
+								throw new Error(`Status change failed: ${err.error || JSON.stringify(sStatus)}`);
+							}
 						}
 					}
 				}
