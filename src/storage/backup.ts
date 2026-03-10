@@ -41,7 +41,7 @@ export class BackupOperation {
             
             const fileName = filePath.replace(/[/\\]/g, '_');
             const tempFileName = `${fileName}-${timestamp}.tmp`;
-            const backupFileName = `${fileName}-${timestamp}.md`;
+            const backupFileName = `${fileName}-${timestamp}.md.bak`;
             const tempPath = `${this.getBackupFolder()}/${tempFileName}`;
             const backupPath = `${this.getBackupFolder()}/${backupFileName}`;
 
@@ -140,7 +140,7 @@ export class BackupOperation {
                 return false;
             }
 
-            const fileName = backupFile.name.replace(/-\d{8}-\d{6}\.md$/, '').replace(/_/g, '/');
+            const fileName = backupFile.name.replace(/-\d{8}-\d{6}\.md(\.bak)?$/, '').replace(/_/g, '/');
             const originalPath = fileName.replace('.md', '');
 
             const originalFile = this.app.vault.getAbstractFileByPath(originalPath);

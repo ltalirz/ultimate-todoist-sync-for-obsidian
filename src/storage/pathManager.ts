@@ -69,7 +69,7 @@ export class StoragePathManager {
     getBackupFileName(originalPath: string): string {
         const timestamp = this.generateTimestamp();
         const safePath = originalPath.replace(/[/\\]/g, '_');
-        return `${safePath}_${timestamp}.md`;
+        return `${safePath}_${timestamp}.md.bak`;
     }
 
     getTodoistBackupFileName(): string {
