@@ -1,6 +1,6 @@
-import { App, Notice, PluginSettingTab, Setting, TFolder } from 'obsidian';
+import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../../main";
-import { DatabaseReportModal, LogViewerModal, TaskManagerModal } from '../ui/modals';
+import { DatabaseReportModal, ExcludedFoldersModal, LogViewerModal, TaskManagerModal } from '../ui/modals';
 import type { DatabaseCheckIssue, DatabaseCheckResult } from '../data/databaseChecker';
 
 export interface TaskIssueEntry {
@@ -273,8 +273,8 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                     })
             );
 
-        // Excluded Folders tree UI
-        this.renderExcludedFoldersTree(containerEl);
+        // Excluded Folders — summary + Configure button
+        this.renderExcludedFoldersSummary(containerEl);
 
         new Setting(containerEl)
             .setName('Use App URI Scheme')
@@ -784,69 +784,28 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
             });
     }
 
-    private renderExcludedFoldersTree(containerEl: HTMLElement): void {
+    private renderExcludedFoldersSummary(containerEl: HTMLElement): void {
+        const excluded = this.plugin.settings.excludedFolders;
+
         const setting = new Setting(containerEl)
-            .setName('Excluded Folders')
-            .setDesc('Select folders to exclude from sync. Excluding a parent folder automatically excludes all subfolders.');
+            .setName('Excluded Folders from Sync')
+            .addButton(btn => btn
+                .setButtonText('Configure')
+                .onClick(() => {
+                    new ExcludedFoldersModal(this.app, this.plugin, () => {
+                        this.display();
+                    }).open();
+                })
+            );
 
-        // Build folder tree from vault
-        const allFolders: TFolder[] = [];
-        const storagePath = this.plugin.storagePathManager?.getBasePath() || 'ultimate-todoist-sync';
-        this.plugin.app.vault.getAllLoadedFiles().forEach(f => {
-            if (f instanceof TFolder && f.path !== '/') {
-                if (f.path.startsWith('.')) return;
-                if (f.path === storagePath || f.path.startsWith(storagePath + '/')) return;
-                allFolders.push(f);
+        if (excluded.length === 0) {
+            setting.setDesc('All folders are included in sync. Click Configure to exclude specific folders.');
+        } else {
+            setting.setDesc(`${excluded.length} folder(s) excluded from Todoist sync.`);
+            const listEl = setting.settingEl.createDiv({ cls: 'uts-excluded-folders-summary' });
+            for (const folder of excluded) {
+                listEl.createDiv({ text: folder, cls: 'uts-excluded-folders-summary-item' });
             }
-        });
-
-        // Sort alphabetically
-        allFolders.sort((a, b) => a.path.localeCompare(b.path));
-
-        const treeContainer = containerEl.createDiv({ cls: 'uts-excluded-folders-tree' });
-        const excluded = new Set(this.plugin.settings.excludedFolders);
-
-        const isParentExcluded = (folderPath: string): boolean => {
-            for (const ex of excluded) {
-                if (folderPath.startsWith(ex + '/')) return true;
-            }
-            return false;
-        };
-
-        const renderRows = () => {
-            treeContainer.empty();
-            for (const folder of allFolders) {
-                const depth = folder.path.split('/').length - 1;
-                const parentDisabled = isParentExcluded(folder.path);
-                const isExcluded = excluded.has(folder.path);
-
-                const row = treeContainer.createDiv({ cls: 'uts-excluded-folder-row' });
-                row.style.paddingLeft = `${depth * 20 + 8}px`;
-
-                const checkbox = row.createEl('input', { type: 'checkbox' });
-                checkbox.checked = isExcluded || parentDisabled;
-                checkbox.disabled = parentDisabled;
-                if (parentDisabled) {
-                    row.style.opacity = '0.5';
-                }
-
-                const label = row.createEl('span', { text: folder.name, cls: 'uts-excluded-folder-label' });
-                label.style.marginLeft = '6px';
-
-                checkbox.addEventListener('change', async () => {
-                    if (checkbox.checked) {
-                        excluded.add(folder.path);
-                    } else {
-                        excluded.delete(folder.path);
-                    }
-                    await this.plugin.safeSettings?.update({
-                        excludedFolders: Array.from(excluded)
-                    }, true);
-                    renderRows();
-                });
-            }
-        };
-
-        renderRows();
-}
+        }
+    }
 }

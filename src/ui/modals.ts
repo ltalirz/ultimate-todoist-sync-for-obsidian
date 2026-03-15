@@ -1,4 +1,4 @@
-import { App, MarkdownRenderer, Modal, Notice, Setting, TFile } from "obsidian";
+import { App, MarkdownRenderer, Modal, Notice, Setting, TFile, TFolder } from "obsidian";
 import UltimateTodoistSyncForObsidian from "../../main";
 import {
 	CONFLICT_ISSUE_TYPE_KEYS,
@@ -1311,5 +1311,109 @@ export class TaskManagerModal extends Modal {
         }
         const { contentEl } = this;
         contentEl.empty();
+    }
+}
+
+
+// ==========================================================================================
+// ExcludedFoldersModal - 排除文件夹选择
+// ==========================================================================================
+
+export class ExcludedFoldersModal extends Modal {
+    private plugin: UltimateTodoistSyncForObsidian;
+    private excluded: Set<string>;
+    private onSave: (folders: string[]) => void;
+
+    constructor(app: App, plugin: UltimateTodoistSyncForObsidian, onSave: (folders: string[]) => void) {
+        super(app);
+        this.plugin = plugin;
+        this.excluded = new Set(plugin.settings.excludedFolders);
+        this.onSave = onSave;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.addClass('uts-excluded-folders-modal');
+
+        contentEl.createEl('h3', { text: 'Exclude Folders from Todoist Sync' });
+        contentEl.createEl('p', {
+            text: 'Checked folders will be ignored — tasks inside them will not be synced with Todoist. Excluding a parent folder automatically excludes all its subfolders.',
+            cls: 'uts-excluded-folders-desc'
+        });
+
+        // Build folder list
+        const allFolders: TFolder[] = [];
+        const storagePath = this.plugin.storagePathManager?.getBasePath() || 'ultimate-todoist-sync';
+        this.app.vault.getAllLoadedFiles().forEach(f => {
+            if (f instanceof TFolder && f.path !== '/') {
+                if (f.path.startsWith('.')) return;
+                if (f.path === storagePath || f.path.startsWith(storagePath + '/')) return;
+                allFolders.push(f);
+            }
+        });
+        allFolders.sort((a, b) => a.path.localeCompare(b.path));
+
+        const treeContainer = contentEl.createDiv({ cls: 'uts-excluded-folders-tree' });
+
+        const isParentExcluded = (folderPath: string): boolean => {
+            for (const ex of this.excluded) {
+                if (folderPath.startsWith(ex + '/')) return true;
+            }
+            return false;
+        };
+
+        const renderRows = () => {
+            treeContainer.empty();
+            for (const folder of allFolders) {
+                const depth = folder.path.split('/').length - 1;
+                const parentDisabled = isParentExcluded(folder.path);
+                const isExcluded = this.excluded.has(folder.path);
+
+                const row = treeContainer.createDiv({ cls: 'uts-excluded-folder-row' });
+                row.style.paddingLeft = `${depth * 20 + 12}px`;
+
+                const checkbox = row.createEl('input', { type: 'checkbox' });
+                checkbox.checked = isExcluded || parentDisabled;
+                checkbox.disabled = parentDisabled;
+                if (parentDisabled) {
+                    row.style.opacity = '0.5';
+                }
+
+                const label = row.createEl('span', { text: folder.name, cls: 'uts-excluded-folder-label' });
+
+                label.addEventListener('click', () => {
+                    if (parentDisabled) return;
+                    checkbox.checked = !checkbox.checked;
+                    checkbox.dispatchEvent(new Event('change'));
+                });
+
+                checkbox.addEventListener('change', () => {
+                    if (checkbox.checked) {
+                        this.excluded.add(folder.path);
+                    } else {
+                        this.excluded.delete(folder.path);
+                    }
+                    renderRows();
+                });
+            }
+        };
+        renderRows();
+
+        // Save / Cancel buttons
+        const btnRow = contentEl.createDiv({ cls: 'uts-excluded-folders-actions' });
+        const saveBtn = btnRow.createEl('button', { text: 'Save', cls: 'mod-cta' });
+        saveBtn.addEventListener('click', async () => {
+            await this.plugin.safeSettings?.update({
+                excludedFolders: Array.from(this.excluded)
+            }, true);
+            this.onSave(Array.from(this.excluded));
+            this.close();
+        });
+        const cancelBtn = btnRow.createEl('button', { text: 'Cancel' });
+        cancelBtn.addEventListener('click', () => this.close());
+    }
+
+    onClose() {
+        this.contentEl.empty();
     }
 }

@@ -26,11 +26,78 @@
     border-top: 1px solid var(--background-modifier-border);
 }
 
+/* ============================================
+ * Excluded Folders — Modal
+ * ============================================ */
+.uts-excluded-folders-modal {
+    width: 500px;
+    max-width: 90vw;
+}
+.uts-excluded-folders-modal h3 {
+    margin: 0 0 4px;
+}
+.uts-excluded-folders-desc {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0 0 12px;
+}
+.uts-excluded-folders-tree {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    background: var(--background-secondary);
+    padding: 4px 0;
+    margin-bottom: 16px;
+}
+.uts-excluded-folder-row {
+    display: flex;
+    align-items: center;
+    padding: 4px 12px;
+    cursor: pointer;
+    transition: background 0.1s ease;
+}
+.uts-excluded-folder-row:hover {
+    background: var(--background-modifier-hover);
+}
+.uts-excluded-folder-row input[type="checkbox"] {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    margin: 0 6px 0 0;
+    cursor: pointer;
+    accent-color: var(--interactive-accent);
+}
+.uts-excluded-folder-row input[type="checkbox"]:disabled {
+    cursor: not-allowed;
+}
+.uts-excluded-folder-label {
+    font-size: 13px;
+    color: var(--text-normal);
+    user-select: none;
+    cursor: pointer;
+}
+.uts-excluded-folders-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
 
-
-
-
-
+/* Settings page — summary list */
+.uts-excluded-folders-summary {
+    width: 100%;
+    margin-top: 8px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+}
+.uts-excluded-folders-summary-item {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 1px 0;
+    font-family: var(--font-monospace);
+}
 
 /*
 .cm-line span.cm-comment {
