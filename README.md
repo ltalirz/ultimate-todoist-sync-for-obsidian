@@ -12,27 +12,24 @@ The Ultimate Todoist Sync plugin automatically creates tasks in Todoist and sync
 <img src="/attachment/settings.png" width="500">
 
 
-## Features 
+## Features
 
-### 
-| Feature                 | Sync from Obsidian to Todoist | Sync from Todoist to Obsidian | Description |
-|-------------------------|-------------------------------|-------------------------------|-------------|
-| Add task                | ✅                            | 🔜                           |             |
-| Delete task             | ✅                            | 🔜                           |             |
-| Modify task content     | ✅                            | ✅                           |             |
-| Modify task due date    | ✅                            | ✅                           |             |
-| Modify task description | 🔜                            | 🔜                           |             |
-| Modify task labels/tags | ✅                            | 🔜                           |             |
-| Mark task as completed  | ✅                            | ✅                           |             |
-| Mark task as uncompleted| ✅                            | ✅                           |             |
-| Modify project          | 🔜                            | 🔜                           |             |
-| Modify section          | 🔜                            | 🔜                           |             |
-| Modify priority         | ✅                            | 🔜                           |  Currently, task priority only support one-way synchronization from Todoist to Obsidian.           |
-| Add reminder            | 🔜                            | 🔜                           |             |
-| Move tasks between files| 🔜                            | 🔜                           |             |
-| Added-at date           | 🔜                            | 🔜                           |             |
-| Completed-at date       | 🔜                            | 🔜                           |             |
-| Task notes              | 🔜                            | ✅                           |   Currently, task notes/comments only support one-way synchronization from Todoist to Obsidian.          |
+| Feature                  | Obsidian → Todoist | Todoist → Obsidian |
+|--------------------------|--------------------|--------------------|
+| Add task                 | ✅                | 🔜                |
+| Delete task              | ✅                | 🔜                |
+| Modify task content      | ✅                | ✅                |
+| Modify task due date     | ✅                | ✅                |
+| Modify task labels/tags  | ✅                | ✅                |
+| Mark task as completed   | ✅                | ✅                |
+| Mark task as uncompleted | ✅                | ✅                |
+| Modify priority          | ✅                | ✅                |
+| Task notes/comments      | 🔜                | ✅                |
+| Modify task description  | 🔜                | 🔜                |
+| Modify project           | 🔜                | 🔜                |
+| Modify section           | 🔜                | 🔜                |
+| Add reminder             | 🔜                | 🔜                |
+| Move tasks between files | 🔜                | 🔜                |
 
 
 ## Installation
@@ -70,12 +67,24 @@ If you would rather install the plugin manually, you can do the following:
 
 
 ## Settings
-1. Automatic synchronization interval time
-The time interval for automatic synchronization is set to 300 seconds by default, which means it runs every 5 minutes. You can modify it yourself.
-2. Default project
-New tasks will be added to the default project, and you can change the default project in the settings. 
-3. Full vault sync
-By enabling this option, the plugin will automatically add `#todoist` to all tasks, which will modify all files in the vault.
+
+1. **Automatic synchronization interval time**
+   The time interval for automatic synchronization is set to 300 seconds by default, which means it runs every 5 minutes. You can modify it yourself.
+
+2. **Default project**
+   New tasks will be added to the default project, and you can change the default project in the settings or use a project tag to specify a particular project.
+
+3. **Sync direction controls**
+   - Obsidian → Todoist (default: on)
+   - Todoist → Obsidian (default: off)
+
+   Each direction can be independently enabled or disabled.
+
+4. **Full vault sync**
+   By enabling this option, the plugin will automatically add `#todoist` to all tasks in your vault.
+
+5. **Excluded folders**
+   Select folders to exclude from Full Vault Sync. Template folders, hidden folders, and plugin storage are excluded automatically.
 
 
 ## Usage
@@ -84,21 +93,76 @@ By enabling this option, the plugin will automatically add `#todoist` to all tas
 
 | Syntax | Description | Example |
 | --- | --- | --- |
-|#todoist|Tasks marked with `#todoist` will be added to Todoist, while tasks without the `#todoist` tag will not be processed.If you have enabled Full vault sync in the settings, `#todoist` will be added automatically.| `- [ ] task #todoist`|
-| 📅YYYY-MM-DD | The date format is 📅YYYY-MM-DD, indicating the due date of a task. | `- [ ] task content 📅2025-02-05 #todoist`   <br>Supports the following calendar emojis.📅📆🗓🗓️|
-| #projectTag | New tasks will be added to the default project(For example,  inbox .), and you can change the default project in the settings or use a tag with the same name to specify a particular project. | `- [ ] taskA #todoist` will be added to inbox.<br>`- [ ] taskB #tag #testProject #todoist` will be added to testProject.|
-| #tag | Note that all tags without a project of the same name are treated as normal tags | `- [ ] task #tagA #tagB #tagC #todoist` |
-|   `!!<number>` | The priority of the task (a number between 1 and 4, 4 for very urgent and 1 for natural).<br>**Note**: Keep in mind that very urgent is the priority 1 on clients. So, the priority 1 in the client corresponds to the number 4 here (Because that's how the official API of Todoist is designed.). | `- [ ] task !!4 #todoist` |
+|#todoist|Tasks marked with `#todoist` will be added to Todoist, while tasks without the `#todoist` tag will not be processed. If you have enabled Full vault sync in the settings, `#todoist` will be added automatically.| `- [ ] task #todoist`|
+| 📅YYYY-MM-DD | The date format is 📅YYYY-MM-DD, indicating the due date of a task. | `- [ ] task content 📅2025-02-05 #todoist`   <br>Supports the following calendar emojis: 📅📆🗓🗓️|
+| #projectTag | New tasks will be added to the default project (e.g. inbox). You can change the default project in the settings or use a tag with the same name to specify a particular project. | `- [ ] taskA #todoist` will be added to inbox.<br>`- [ ] taskB #tag #testProject #todoist` will be added to testProject.|
+| #tag | Note that all tags without a project of the same name are treated as normal tags. | `- [ ] task #tagA #tagB #tagC #todoist` |
+| `!!<number>` | The priority of the task (a number between 1 and 4, 4 for very urgent and 1 for natural).<br>**Note**: Keep in mind that very urgent is the priority 1 on clients. So, the priority 1 in the client corresponds to the number 4 here (because that's how the official API of Todoist is designed). | `- [ ] task !!4 #todoist` |
 
-###  Set a default project for each file separately
+### Set a default project for each file separately
 
-The default project in the setting applies to all files. You can set a separate default project for each file using command. 
+The default project in the setting applies to all files. You can set a separate default project for each file using command.
 
 <img src="/attachment/command-set-default-project-for-file.png" width="500">
 <img src="/attachment/default-project-for-file-modal.png" width="500">
 
 You can see the current file's default project in the status bar at the bottom right corner.
 <img src="/attachment/statusBar.png" width="500">
+
+
+## Development
+
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) (v16+)
+- npm
+- An Obsidian vault for testing
+
+### Quick Start
+
+The recommended way is to clone the repo directly into your vault's plugin directory, so that builds are immediately available to Obsidian:
+
+```bash
+cd /path/to/your-vault/.obsidian/plugins/
+git clone https://github.com/HeroBlackInk/ultimate-todoist-sync-for-obsidian.git
+cd ultimate-todoist-sync-for-obsidian
+npm install
+```
+
+### Build
+
+```bash
+# Development (watch mode, auto-rebuilds on file change)
+npm run dev
+
+# Production (type-check + bundle)
+npm run build
+```
+
+After each rebuild, reload Obsidian (`Ctrl/Cmd+P` → "Reload app without saving") or disable and re-enable the plugin in settings.
+
+### Project Structure
+
+```
+main.ts              # Plugin entry point
+src/
+├── api/             # Todoist REST & Sync API clients
+├── data/            # Cache, task parser, database checker
+├── sync/            # Sync engines (toTodoist, toObsidian, scheduler)
+├── vault/           # Obsidian vault file operations
+├── storage/         # Persistent storage, backup, logs
+├── settings/        # Settings UI and migration
+├── plugin/          # Event handlers and lifecycle
+└── ui/              # Modals (task manager, project picker)
+```
+
+### Manual Install
+
+If you built the plugin elsewhere, copy these 3 files into `<vault>/.obsidian/plugins/ultimate-todoist-sync/`:
+
+- `main.js`
+- `manifest.json`
+- `styles.css`
 
 
 ## Disclaimer
@@ -118,4 +182,3 @@ Contributions are welcome! If you'd like to contribute to the plugin, please fee
 ## License
 
 This plugin is released under the [GNU GPLv3 License](/LICENSE.md).
-

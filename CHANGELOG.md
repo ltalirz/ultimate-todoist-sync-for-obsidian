@@ -1,5 +1,25 @@
 ## CHANGELOG
 
+### [2.0.0] - 2026-03-15
+
+#### Added
+- Sync direction controls: independently enable/disable Obsidian→Todoist and Todoist→Obsidian
+- Excluded folders: tree UI to select folders excluded from Full Vault Sync
+- Full vault sync now scans all vault files on each sync cycle
+- Automatic exclusion of template folders, hidden folders, and plugin storage
+
+#### Changed
+- Todoist API migrated from v9 to v1, library upgraded to v6.5.0
+- Data architecture simplified: Todoist API as single source of truth, removed local task cache
+- Backup files now use `.md.bak` extension to prevent Obsidian link pollution
+- Priority and labels/tags sync is now fully bidirectional
+- Database checker rewritten with three-way data consistency checks
+
+#### Fixed
+- Stability improvements for Full Vault Sync
+
+---
+
 ### [1.0.4] - 2026-02-17
 
 #### Added
