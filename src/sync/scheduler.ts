@@ -95,6 +95,15 @@ export class SyncScheduler {
 		for (const entry of Object.values(this.plugin.settings.taskFileMapping)) {
 			seen.add(entry.filePath);
 		}
+
+		// Full Vault Sync: include all vault .md files not yet in taskFileMapping
+		if (this.plugin.settings.enableFullVaultSync && this.plugin.fileOperation) {
+			for (const file of this.plugin.app.vault.getMarkdownFiles()) {
+				if (this.plugin.fileOperation.isFileExcludedFromSync(file.path)) continue;
+				seen.add(file.path);
+			}
+		}
+
 		return Array.from(seen);
 	}
 }

@@ -1,4 +1,4 @@
-import { App} from 'obsidian';
+import { App, TFile } from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../../main";
 
 export interface VaultTask {
@@ -41,6 +41,42 @@ export class FileOperation   {
 		this.app = app;
         this.plugin = plugin;
 
+	}
+
+	/**
+	 * Check if a file path should be excluded from Full Vault Sync.
+	 * Excluded: dot-prefix dirs, plugin storage dir, Obsidian templates folder, *.excalidraw.md
+	 */
+	isFileExcludedFromSync(filepath: string): boolean {
+		// Dot-prefix directories (.obsidian/, .trash/, .git/, .stfolder/, etc.)
+		if (filepath.startsWith('.')) return true;
+
+		// Plugin storage directory
+		const storagePath = this.plugin.storagePathManager?.getBasePath() || 'ultimate-todoist-sync';
+		if (filepath.startsWith(storagePath + '/')) return true;
+
+		// Obsidian core templates folder
+		try {
+			const templatesConfig = (this.app as any).internalPlugins?.getPluginById?.('templates')?.instance?.options?.folder;
+			if (templatesConfig && filepath.startsWith(templatesConfig + '/')) return true;
+		} catch { /* ignore */ }
+
+		// Templater plugin folder
+		try {
+			const templaterFolder = (this.app as any).plugins?.getPlugin?.('templater-obsidian')?.settings?.templates_folder;
+			if (templaterFolder && filepath.startsWith(templaterFolder + '/')) return true;
+		} catch { /* ignore */ }
+
+		// Excalidraw files
+		if (filepath.endsWith('.excalidraw.md')) return true;
+
+
+		// User-configured excluded folders
+		for (const folder of this.plugin.settings.excludedFolders) {
+			if (filepath.startsWith(folder + '/') || filepath === folder) return true;
+		}
+
+		return false;
 	}
     /*
     async getFrontMatter(file:TFile): Promise<FrontMatter | null> {
@@ -196,9 +232,13 @@ export class FileOperation   {
     }
     //add #todoist at the end of task line, if full vault sync enabled
     async addTodoistTagToFile(filepath: string) {    
-        // 获取文件对象并更新内容
+        if (this.isFileExcludedFromSync(filepath)) return;
         const file = this.app.vault.getAbstractFileByPath(filepath)
-        const content = await this.app.vault.read(file)
+        if (!file) {
+            this.plugin.debugLog(`[addTodoistTagToFile] File not found: ${filepath}`);
+            return;
+        }
+        const content = await this.app.vault.read(file as TFile)
     
         const lines = content.split('\n')
         let modified = false

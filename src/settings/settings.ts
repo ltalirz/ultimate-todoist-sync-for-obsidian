@@ -1,4 +1,4 @@
-import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
+import { App, Notice, PluginSettingTab, Setting, TFolder } from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../../main";
 import { DatabaseReportModal, LogViewerModal, TaskManagerModal } from '../ui/modals';
 import type { DatabaseCheckIssue, DatabaseCheckResult } from '../data/databaseChecker';
@@ -55,6 +55,7 @@ export interface UltimateTodoistSyncSettings {
     lastDatabaseCheckAutoTime: number | null;
     primaryDeviceId: string;
     schemaVersion: number;
+    excludedFolders: string[];
 }
 
 export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
@@ -69,7 +70,7 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
     enableFullVaultSync: false,
     debugMode: false,
     useAppURI: true,
-    syncEnabled: false,
+    syncEnabled: true,
     obsidianToTodoistEnabled: true,
     todoistToObsidianEnabled: false,
     lastDatabaseCheckTime: null,
@@ -86,6 +87,7 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
     lastDatabaseCheckAutoTime: null,
     primaryDeviceId: '',
     schemaVersion: 1,
+    excludedFolders: [],
 }
 
 export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
@@ -270,6 +272,9 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         new Notice(`Full vault sync ${value ? 'enabled' : 'disabled'}.`)
                     })
             );
+
+        // Excluded Folders tree UI
+        this.renderExcludedFoldersTree(containerEl);
 
         new Setting(containerEl)
             .setName('Use App URI Scheme')
@@ -778,4 +783,70 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                 });
             });
     }
+
+    private renderExcludedFoldersTree(containerEl: HTMLElement): void {
+        const setting = new Setting(containerEl)
+            .setName('Excluded Folders')
+            .setDesc('Select folders to exclude from sync. Excluding a parent folder automatically excludes all subfolders.');
+
+        // Build folder tree from vault
+        const allFolders: TFolder[] = [];
+        const storagePath = this.plugin.storagePathManager?.getBasePath() || 'ultimate-todoist-sync';
+        this.plugin.app.vault.getAllLoadedFiles().forEach(f => {
+            if (f instanceof TFolder && f.path !== '/') {
+                if (f.path.startsWith('.')) return;
+                if (f.path === storagePath || f.path.startsWith(storagePath + '/')) return;
+                allFolders.push(f);
+            }
+        });
+
+        // Sort alphabetically
+        allFolders.sort((a, b) => a.path.localeCompare(b.path));
+
+        const treeContainer = containerEl.createDiv({ cls: 'uts-excluded-folders-tree' });
+        const excluded = new Set(this.plugin.settings.excludedFolders);
+
+        const isParentExcluded = (folderPath: string): boolean => {
+            for (const ex of excluded) {
+                if (folderPath.startsWith(ex + '/')) return true;
+            }
+            return false;
+        };
+
+        const renderRows = () => {
+            treeContainer.empty();
+            for (const folder of allFolders) {
+                const depth = folder.path.split('/').length - 1;
+                const parentDisabled = isParentExcluded(folder.path);
+                const isExcluded = excluded.has(folder.path);
+
+                const row = treeContainer.createDiv({ cls: 'uts-excluded-folder-row' });
+                row.style.paddingLeft = `${depth * 20 + 8}px`;
+
+                const checkbox = row.createEl('input', { type: 'checkbox' });
+                checkbox.checked = isExcluded || parentDisabled;
+                checkbox.disabled = parentDisabled;
+                if (parentDisabled) {
+                    row.style.opacity = '0.5';
+                }
+
+                const label = row.createEl('span', { text: folder.name, cls: 'uts-excluded-folder-label' });
+                label.style.marginLeft = '6px';
+
+                checkbox.addEventListener('change', async () => {
+                    if (checkbox.checked) {
+                        excluded.add(folder.path);
+                    } else {
+                        excluded.delete(folder.path);
+                    }
+                    await this.plugin.safeSettings?.update({
+                        excludedFolders: Array.from(excluded)
+                    }, true);
+                    renderRows();
+                });
+            }
+        };
+
+        renderRows();
+}
 }

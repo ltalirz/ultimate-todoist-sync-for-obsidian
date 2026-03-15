@@ -188,14 +188,14 @@ export class ObsidianToTodoistSync {
             filepath = file?.path;
             currentFileValue = view?.data;
         }
+        // Prevent per-task vault.modify from triggering modify event storm
+        this.plugin.isProcessingModify = true;
+        try {
         if (this.plugin.settings.enableFullVaultSync) {
             await this.plugin.fileOperation.addTodoistTagToFile(filepath);
             currentFileValue = await this.app.vault.read(file);
         }
 
-        // Prevent per-task vault.modify from triggering modify event storm
-        this.plugin.isProcessingModify = true;
-        try {
             let lines = currentFileValue.split('\n');
         for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
