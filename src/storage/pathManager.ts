@@ -6,12 +6,14 @@ export class StoragePathManager {
     private plugin: UltimateTodoistSyncForObsidian;
     private appendLock = false;
 
-    get settingsFilePath(): string {
-        return `${this.plugin.manifest.dir}/data.json`;
+    static settingsFilePath(manifestDir: string | undefined): string {
+        const dir = manifestDir || `.obsidian/plugins/ultimate-todoist-sync`;
+        return `${dir}/data.json`;
     }
 
-    get settingsTempFilePath(): string {
-        return `${this.plugin.manifest.dir}/data.json.tmp`;
+    static settingsTempFilePath(manifestDir: string | undefined): string {
+        const dir = manifestDir || `.obsidian/plugins/ultimate-todoist-sync`;
+        return `${dir}/data.json.tmp`;
     }
     static readonly DEFAULT_BASE_PATH = 'ultimate-todoist-sync';
     static readonly LEGACY_BASE_PATH = '.ultimate-todoist-sync';

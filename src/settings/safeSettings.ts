@@ -289,8 +289,8 @@ export class SafeSettings {
 		this.cancelDebouncedSave();
 
 		return this.withSettingsIOLock('save', async () => {
-			const settingsPath = this.plugin.storagePathManager!.settingsFilePath;
-			const tempPath = this.plugin.storagePathManager!.settingsTempFilePath;
+			const settingsPath = StoragePathManager.settingsFilePath(this.plugin.manifest.dir);
+			const tempPath = StoragePathManager.settingsTempFilePath(this.plugin.manifest.dir);
 
 			try {
 				if (!this.plugin.settings || Object.keys(this.plugin.settings).length === 0) {
@@ -599,7 +599,7 @@ export class SettingsBackup {
 		return this.withSettingsIOLock('backup', async () => {
 			try {
 				await this.ensureBackupDir();
-				const settingsPath = this.plugin.storagePathManager!.settingsFilePath;
+				const settingsPath = StoragePathManager.settingsFilePath(this.plugin.manifest.dir);
 				const adapter = this.app.vault.adapter;
 				const exists = await adapter.exists(settingsPath);
 				if (!exists) {
@@ -652,8 +652,8 @@ export class SettingsBackup {
 					new Notice('Backup file is corrupted, cannot restore');
 					return false;
 				}
-				const settingsPath = this.plugin.storagePathManager!.settingsFilePath;
-				const tempPath = this.plugin.storagePathManager!.settingsTempFilePath;
+				const settingsPath = StoragePathManager.settingsFilePath(this.plugin.manifest.dir);
+				const tempPath = StoragePathManager.settingsTempFilePath(this.plugin.manifest.dir);
 				await adapter.write(tempPath, data);
 				await adapter.write(settingsPath, data);
 				await adapter.remove(tempPath).catch(() => {});
@@ -703,8 +703,8 @@ export class SettingsBackup {
 					new Notice('Backup file is corrupted');
 					return false;
 				}
-				const settingsPath = this.plugin.storagePathManager!.settingsFilePath;
-				const tempPath = this.plugin.storagePathManager!.settingsTempFilePath;
+				const settingsPath = StoragePathManager.settingsFilePath(this.plugin.manifest.dir);
+				const tempPath = StoragePathManager.settingsTempFilePath(this.plugin.manifest.dir);
 				await adapter.write(tempPath, data);
 				await adapter.write(settingsPath, data);
 				await adapter.remove(tempPath).catch(() => {});
@@ -722,8 +722,8 @@ export class SettingsBackup {
 	async recoverFromTempFile(): Promise<boolean> {
 		return this.withSettingsIOLock('recover-temp', async () => {
 			try {
-				const tempPath = this.plugin.storagePathManager!.settingsTempFilePath;
-				const settingsPath = this.plugin.storagePathManager!.settingsFilePath;
+				const tempPath = StoragePathManager.settingsTempFilePath(this.plugin.manifest.dir);
+				const settingsPath = StoragePathManager.settingsFilePath(this.plugin.manifest.dir);
 				const adapter = this.app.vault.adapter;
 				if (!await adapter.exists(tempPath)) return false;
 				const data = await adapter.read(tempPath);
@@ -752,7 +752,7 @@ export class SettingsBackup {
 	}
 
 	async hasTempFile(): Promise<boolean> {
-		return this.app.vault.adapter.exists(this.plugin.storagePathManager!.settingsTempFilePath);
+		return this.app.vault.adapter.exists(StoragePathManager.settingsTempFilePath(this.plugin.manifest.dir));
 	}
 
 	async clearAllBackups(): Promise<boolean> {
