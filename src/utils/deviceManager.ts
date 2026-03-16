@@ -12,8 +12,7 @@ export class DeviceManager {
     }
 
     private getPluginPath(): string {
-        const configDir = this.app.vault.configDir;
-        return `${configDir}/plugins/ultimate-todoist-sync-for-obsidian`;
+        return this.plugin.manifest.dir || `${this.app.vault.configDir}/plugins/ultimate-todoist-sync`;
     }
 
     private getDeviceIdPath(): string {

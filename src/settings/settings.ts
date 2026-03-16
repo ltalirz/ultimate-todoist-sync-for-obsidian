@@ -421,7 +421,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         return
                     }
                     try {
-                        await this.plugin.scheduler.run()
+                        await this.plugin.scheduler?.run()
                         new Notice('Sync completed.')
                     } catch (error) {
                         new Notice(`Sync error: ${error}`)
