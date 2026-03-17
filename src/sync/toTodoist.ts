@@ -88,11 +88,7 @@ export class ObsidianToTodoistSync {
 
         const hasId = this.plugin.taskParser.hasTodoistId(linetxt);
         const hasTag = this.plugin.taskParser.hasTodoistTag(linetxt);
-        const fullVault = this.plugin.settings.enableFullVaultSync;
-        const isTask = this.plugin.taskParser.isMarkdownTask(linetxt);
-        const contentNotEmpty = isTask && this.plugin.taskParser.getTaskContentFromLineText(linetxt) !== "";
-
-        const isNewTask = !hasId && (hasTag || (fullVault && contentNotEmpty));
+        const isNewTask = !hasId && hasTag;
 
         if (isNewTask) {
             const processedLine = hasTag ? linetxt : this.plugin.taskParser.addTodoistTag(linetxt);
@@ -166,6 +162,91 @@ export class ObsidianToTodoistSync {
                 new Notice(`Failed to create task. Check console for details.`);
                 return;
             }
+        }
+    }
+
+    /**
+     * Detect new tasks when the user leaves a line (Full Vault Sync only).
+     * Unlike lineContentNewTaskCheck (which fires on every keystroke for #todoist),
+     * this fires once when the cursor moves away, so the user can finish typing.
+     */
+    async lastLineNewTaskCheck(filepath: string, lineText: string, lineNumber: number, fileContent: string): Promise<void> {
+        if (!this.plugin.isPrimaryDevice()) return;
+        if (!this.plugin.settings.enableFullVaultSync) return;
+
+        const isTask = this.plugin.taskParser.isMarkdownTask(lineText);
+        if (!isTask) return;
+
+        const contentNotEmpty = this.plugin.taskParser.getTaskContentFromLineText(lineText) !== '';
+        if (!contentNotEmpty) return;
+
+        const hasId = this.plugin.taskParser.hasTodoistId(lineText);
+        if (hasId) return;
+
+        const hasTag = this.plugin.taskParser.hasTodoistTag(lineText);
+        if (hasTag) return; // Already has #todoist — lineContentNewTaskCheck will handle it
+
+        // Add #todoist tag
+        const processedLine = this.plugin.taskParser.addTodoistTag(lineText);
+        this.plugin.debugLog('[lastLineNewTaskCheck] New task detected on line leave:', processedLine);
+
+        const currentTask = await this.plugin.taskParser.convertTextToTodoistTaskObject(processedLine, filepath, lineNumber, fileContent);
+        if (typeof currentTask === 'undefined') return;
+
+        try {
+            const newTask = await this.plugin.todoistSyncAPI.AddTask(currentTask);
+            const { id: todoist_id } = newTask;
+            newTask.path = filepath;
+            new Notice(`new task ${newTask.content} id is ${newTask.id}`);
+
+            this.plugin.logOperation?.log('OBSIDIAN_TASK_CREATED', `Created task in Obsidian: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
+            this.plugin.logOperation?.log('TODOIST_TASK_CREATED', `Created task in Todoist: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
+
+            await this.plugin.cacheOperation.setTaskFileMapping(todoist_id, filepath || '');
+
+            // Immediately sync so syncData contains the new task
+            try {
+                await this.plugin.todoistSyncAPI.incrementalSync();
+                const updatedTask = await this.plugin.todoistSyncAPI.GetTaskById(todoist_id);
+                if (updatedTask?.updated_at) {
+                    await this.plugin.cacheOperation.updateTaskMappingSyncMeta(todoist_id, { updated_at: updatedTask.updated_at });
+                }
+            } catch (syncErr) {
+                console.error('[lastLineNewTaskCheck] Post-create incremental sync failed:', syncErr);
+            }
+
+            if (currentTask.isCompleted === true) {
+                await this.plugin.todoistSyncAPI.CloseTask(newTask.id);
+                this.plugin.logOperation?.log('OBSIDIAN_TASK_COMPLETED', `Completed task in Obsidian: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
+                this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Completed task in Todoist: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
+            }
+
+            // Write tag + id + link back to the file
+            const text_with_out_link = `${processedLine} %%[todoist_id:: ${todoist_id}]%%`;
+            const link = this.plugin.settings.useAppURI ? `[link](todoist://task?id=${newTask.id})` : `[link](https://app.todoist.com/app/task/${newTask.id})`;
+            const text = this.plugin.taskParser.addTodoistLink(text_with_out_link, link);
+
+            // Use vault.read + vault.modify since cursor is no longer on this line
+            const file = this.app.vault.getAbstractFileByPath(filepath);
+            if (!file) {
+                console.error(`[lastLineNewTaskCheck] File not found: ${filepath}`);
+                return;
+            }
+            const currentContent = await this.app.vault.read(file);
+            const lines = currentContent.split('\n');
+            if (lineNumber < lines.length) {
+                lines[lineNumber] = text;
+                await this.app.vault.modify(file, lines.join('\n'));
+            }
+
+            const saved = await this.plugin.saveSettings();
+            if (!saved) {
+                console.warn('[lastLineNewTaskCheck] saveSettings skipped or failed');
+            }
+        } catch (error) {
+            console.error('[lastLineNewTaskCheck] Error adding task:', error);
+            this.plugin.debugLog(`The error occurred in the file: ${filepath}`);
+            new Notice(`Failed to create task. Check console for details.`);
         }
     }
 

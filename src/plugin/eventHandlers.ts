@@ -166,8 +166,9 @@ export class EventHandlers {
 			if (!await this.plugin.syncLockManager.acquire('obsidianToTodoist')) return;
 			try {
 				await this.plugin.obsidianToTodoist!.lineModifiedTaskCheck(filepath as string, lastLineText, lastLine as number, fileContent);
+				await this.plugin.obsidianToTodoist!.lastLineNewTaskCheck(filepath as string, lastLineText, lastLine as number, fileContent);
 			} catch (error) {
-				console.error(`An error occurred while check modified task in line text: ${error}`);
+				console.error(`An error occurred while checking task on line leave: ${error}`);
 			} finally {
 				this.plugin.syncLockManager.release();
 			}
