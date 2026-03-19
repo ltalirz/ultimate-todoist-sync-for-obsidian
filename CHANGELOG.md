@@ -1,5 +1,14 @@
 ## CHANGELOG
 
+### [2.0.3] - 2026-03-20
+
+#### Fixed
+- Add logging to 22 previously silent early returns across the sync pipeline
+- Sync lock timeouts, disabled-task skips, missing sync targets, and parser failures are now logged to the operation log for troubleshooting
+- New log event types: `SYNC_LOCK_TIMEOUT`, `SYNC_DISABLED_SKIP`, `SYNC_TARGET_MISSING`, `TASK_PARSE_FAILED`
+
+---
+
 ### [2.0.2] - 2026-03-17
 
 #### Fixed
