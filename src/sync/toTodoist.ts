@@ -171,7 +171,10 @@ export class ObsidianToTodoistSync {
      * this fires once when the cursor moves away, so the user can finish typing.
      */
     async lastLineNewTaskCheck(filepath: string, lineText: string, lineNumber: number, fileContent: string): Promise<void> {
-        if (!this.plugin.isPrimaryDevice()) return;
+        if (!this.plugin.isPrimaryDevice()) {
+            this.plugin.debugLog('[lastLineNewTaskCheck] Push blocked: not primary device');
+            return;
+        }
         if (!this.plugin.settings.enableFullVaultSync) return;
 
         const isTask = this.plugin.taskParser.isMarkdownTask(lineText);
@@ -191,7 +194,12 @@ export class ObsidianToTodoistSync {
         this.plugin.debugLog('[lastLineNewTaskCheck] New task detected on line leave:', processedLine);
 
         const currentTask = await this.plugin.taskParser.convertTextToTodoistTaskObject(processedLine, filepath, lineNumber, fileContent);
-        if (typeof currentTask === 'undefined') return;
+        if (typeof currentTask === 'undefined') {
+            console.warn(`[lastLineNewTaskCheck] Task parser returned undefined for line: ${processedLine}`);
+            this.plugin.debugLog(`[lastLineNewTaskCheck] Task parser returned undefined for line ${lineNumber} in ${filepath}`);
+            this.plugin.logOperation?.log('TASK_PARSE_FAILED', `Task parser failed for line ${lineNumber}`, filepath);
+            return;
+        }
 
         try {
             const newTask = await this.plugin.todoistSyncAPI.AddTask(currentTask);
@@ -284,6 +292,9 @@ export class ObsidianToTodoistSync {
                     this.plugin.debugLog(filepath);
                     const currentTask = await this.plugin.taskParser.convertTextToTodoistTaskObject(line, filepath, i, lines.join('\n'));
                     if (typeof currentTask === 'undefined') {
+                        console.warn(`[fullTextNewTaskCheck] Task parser returned undefined for line ${i} in ${filepath}`);
+                        this.plugin.debugLog(`[fullTextNewTaskCheck] Task parser returned undefined for line ${i} in ${filepath}`);
+                        this.plugin.logOperation?.log('TASK_PARSE_FAILED', `Task parser failed for line ${i}`, filepath);
                         continue;
                     }
                 this.plugin.debugLog(currentTask);
@@ -367,6 +378,8 @@ export class ObsidianToTodoistSync {
             }
 
             if (!this.plugin.cacheOperation.isTaskSyncEnabled(lineTask_todoist_id)) {
+                this.plugin.debugLog(`[lineModifiedTaskCheck] Sync disabled for task ${lineTask_todoist_id}, skipping modification`);
+                this.plugin.logOperation?.log('SYNC_DISABLED_SKIP', `User edit ignored: sync disabled for task ${lineTask_todoist_id}`, filepath, lineTask_todoist_id);
                 return;
             }
 
@@ -577,7 +590,11 @@ export class ObsidianToTodoistSync {
             this.plugin.debugLog('[toTodoist] Push blocked: not primary device');
             return;
         }
-        if (!this.plugin.cacheOperation?.isTaskSyncEnabled(taskId)) return;
+        if (!this.plugin.cacheOperation?.isTaskSyncEnabled(taskId)) {
+            this.plugin.debugLog(`[closeTask] Sync disabled for task ${taskId}, skipping close`);
+            this.plugin.logOperation?.log('SYNC_DISABLED_SKIP', `Checkbox close ignored: sync disabled for task ${taskId}`, undefined, taskId);
+            return;
+        }
         try {
             const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId);
             const savedTask = await this.plugin.todoistSyncAPI.GetTaskById(taskId);
@@ -638,7 +655,11 @@ export class ObsidianToTodoistSync {
             this.plugin.debugLog('[toTodoist] Push blocked: not primary device');
             return;
         }
-        if (!this.plugin.cacheOperation?.isTaskSyncEnabled(taskId)) return;
+        if (!this.plugin.cacheOperation?.isTaskSyncEnabled(taskId)) {
+            this.plugin.debugLog(`[repoenTask] Sync disabled for task ${taskId}, skipping reopen`);
+            this.plugin.logOperation?.log('SYNC_DISABLED_SKIP', `Checkbox reopen ignored: sync disabled for task ${taskId}`, undefined, taskId);
+            return;
+        }
         try {
             const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId);
             const savedTask = await this.plugin.todoistSyncAPI.GetTaskById(taskId);

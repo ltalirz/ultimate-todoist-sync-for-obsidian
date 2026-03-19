@@ -18,7 +18,10 @@ export class EventHandlers {
 	}
 
 	private async onKeyUp(evt: KeyboardEvent): Promise<void> {
-		if (!this.plugin.settings.apiInitialized) return;
+		if (!this.plugin.settings.apiInitialized) {
+			this.plugin.debugLog('[onKeyUp] API not initialized, skipping');
+			return;
+		}
 		if (!(this.plugin.app.workspace.activeEditor?.editor?.hasFocus())) {
 			this.plugin.debugLog(`editor is not focused`);
 			return;
@@ -46,7 +49,10 @@ export class EventHandlers {
 	}
 
 	private async onClick(evt: MouseEvent): Promise<void> {
-		if (!this.plugin.settings.apiInitialized) return;
+		if (!this.plugin.settings.apiInitialized) {
+			this.plugin.debugLog('[onClick] API not initialized, skipping');
+			return;
+		}
 
 		if (this.plugin.app.workspace.activeEditor?.editor?.hasFocus()) {
 			this.lineNumberCheck();
@@ -60,7 +66,10 @@ export class EventHandlers {
 	}
 
 	private async onEditorChange(editor: Editor, view: MarkdownView): Promise<void> {
-		if (!this.plugin.settings.apiInitialized) return;
+		if (!this.plugin.settings.apiInitialized) {
+			this.plugin.debugLog('[onEditorChange] API not initialized, skipping');
+			return;
+		}
 		if (this.plugin.isSyncingFromTodoist) return;
 		this.lineNumberCheck();
 		if (!await this.plugin.checkModuleClass()) return;
@@ -75,7 +84,10 @@ export class EventHandlers {
 	}
 
 	private async onFileRename(file: TFile, oldpath: string): Promise<void> {
-		if (!this.plugin.settings.apiInitialized) return;
+		if (!this.plugin.settings.apiInitialized) {
+			this.plugin.debugLog('[onFileRename] API not initialized, skipping');
+			return;
+		}
 		this.plugin.debugLog(`${oldpath} is renamed`);
 
 		const taskCount = this.plugin.cacheOperation!.getTaskCountInFile(oldpath);
@@ -99,7 +111,10 @@ export class EventHandlers {
 	}
 
 	private async onFileModify(file: TFile): Promise<void> {
-		if (!this.plugin.settings.apiInitialized) return;
+		if (!this.plugin.settings.apiInitialized) {
+			this.plugin.debugLog('[onFileModify] API not initialized, skipping');
+			return;
+		}
 		if (this.plugin.isSyncingFromTodoist) return;
 		if (this.plugin.isProcessingModify) return;
 		if (!file.path.endsWith('.md')) return;

@@ -53,7 +53,10 @@ export class SyncScheduler {
 				const lockOk = await this.plugin.syncLockManager.run('obsidianToTodoist', async () => {
 					await this.plugin.obsidianToTodoist!.fullTextNewTaskCheck(fileKey);
 				});
-				if (!lockOk) continue;
+				if (!lockOk) {
+					this.plugin.debugLog(`[Scheduler] Skipping file sync for ${fileKey}: lock not acquired`);
+					continue;
+				}
 
 				await this.plugin.syncLockManager.run('obsidianToTodoist', async () => {
 					await this.plugin.obsidianToTodoist!.deletedTaskCheck(fileKey);

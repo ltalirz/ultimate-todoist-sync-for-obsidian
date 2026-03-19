@@ -93,10 +93,20 @@ export class TodoistToObsidianSync {
 
     private async syncSingleTaskToObsidian(taskId: string, task: any): Promise<void> {
         const mapping = this.plugin.cacheOperation.getTaskFileMapping(taskId);
-        if (!mapping) return;
+        if (!mapping) {
+            console.warn(`[syncSingleTaskToObsidian] No mapping found for task ${taskId}`);
+            this.plugin.debugLog(`[syncSingleTaskToObsidian] No mapping found for task ${taskId}`);
+            this.plugin.logOperation?.log('SYNC_TARGET_MISSING', `Todoist→Obsidian sync skipped: no mapping for task ${taskId}`, undefined, taskId);
+            return;
+        }
 
         const file = this.app.vault.getAbstractFileByPath(mapping.filePath);
-        if (!file) return;
+        if (!file) {
+            console.warn(`[syncSingleTaskToObsidian] File not found: ${mapping.filePath} (task ${taskId})`);
+            this.plugin.debugLog(`[syncSingleTaskToObsidian] File not found: ${mapping.filePath} (task ${taskId})`);
+            this.plugin.logOperation?.log('SYNC_TARGET_MISSING', `Todoist→Obsidian sync skipped: file not found ${mapping.filePath}`, mapping.filePath, taskId);
+            return;
+        }
 
         const fileContent = await this.app.vault.read(file);
         const lines = fileContent.split('\n');
@@ -108,7 +118,12 @@ export class TodoistToObsidianSync {
                 break;
             }
         }
-        if (!taskLine) return;
+        if (!taskLine) {
+            console.warn(`[syncSingleTaskToObsidian] Task line not found in file for task ${taskId}`);
+            this.plugin.debugLog(`[syncSingleTaskToObsidian] Task line not found in file for task ${taskId}`);
+            this.plugin.logOperation?.log('SYNC_TARGET_MISSING', `Todoist→Obsidian sync skipped: task line not found in file`, mapping.filePath, taskId);
+            return;
+        }
 
         const obsidianIsChecked = /\[(x|X)\]/.test(taskLine);
         const todoistIsChecked = task.checked || false;

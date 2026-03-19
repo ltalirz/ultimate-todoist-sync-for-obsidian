@@ -25,7 +25,13 @@ export class SyncLockManager {
 			await new Promise(resolve => setTimeout(resolve, 1000));
 			attempts++;
 		}
-		return !this.locked;
+		const released = !this.locked;
+		if (!released) {
+			console.warn('[SyncLock] Sync lock acquire FAILED after 10s timeout');
+			this.plugin.debugLog('[SyncLock] Sync lock acquire FAILED after 10s timeout');
+			this.plugin.logOperation?.log('SYNC_LOCK_TIMEOUT', 'Sync lock acquire failed after 10s timeout');
+		}
+		return released;
 	}
 
 	async waitForSaveRelease(): Promise<boolean> {
@@ -34,7 +40,13 @@ export class SyncLockManager {
 			await new Promise(resolve => setTimeout(resolve, 500));
 			attempts++;
 		}
-		return !this.plugin.saveLock;
+		const released = !this.plugin.saveLock;
+		if (!released) {
+			console.warn('[SyncLock] Save lock acquire FAILED after 5s timeout');
+			this.plugin.debugLog('[SyncLock] Save lock acquire FAILED after 5s timeout');
+			this.plugin.logOperation?.log('SYNC_LOCK_TIMEOUT', 'Save lock acquire failed after 5s timeout');
+		}
+		return released;
 	}
 
 	async acquireExclusive(): Promise<boolean> {
@@ -50,7 +62,11 @@ export class SyncLockManager {
 		if (this.locked) {
 			this.plugin.debugLog('sync locked. waiting for exclusive acquire.');
 			const released = await this.waitForRelease();
-			if (!released) return false;
+			if (!released) {
+				console.warn('[SyncLock] Exclusive sync lock acquire FAILED after timeout');
+				this.plugin.debugLog('[SyncLock] Exclusive sync lock acquire FAILED after timeout');
+				return false;
+			}
 			this.plugin.debugLog('sync unlocked.');
 		}
 
@@ -87,7 +103,11 @@ export class SyncLockManager {
 		if (this.locked) {
 			this.plugin.debugLog('sync locked.');
 			const released = await this.waitForRelease();
-			if (!released) return false;
+			if (!released) {
+				console.warn(`[SyncLock] Sync lock acquire FAILED for direction=${direction || 'none'}`);
+				this.plugin.debugLog(`[SyncLock] Sync lock acquire FAILED for direction=${direction || 'none'}`);
+				return false;
+			}
 			this.plugin.debugLog('sync unlocked.');
 		}
 
