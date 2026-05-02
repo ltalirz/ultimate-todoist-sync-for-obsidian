@@ -1,5 +1,5 @@
 import UltimateTodoistSyncForObsidian from "../../main";
-import { App, Notice } from 'obsidian';
+import { App, Notice, TFile } from 'obsidian';
 import { StoragePathManager } from '../storage/pathManager';
 
 export class TodoistToObsidianSync {
@@ -108,7 +108,7 @@ export class TodoistToObsidianSync {
             return;
         }
 
-        const fileContent = await this.app.vault.read(file);
+        const fileContent = await this.app.vault.read(file as TFile);
         const lines = fileContent.split('\n');
 
         let taskLine = '';
@@ -197,7 +197,12 @@ export class TodoistToObsidianSync {
 
     async backupTodoistAllResources(): Promise<void> {
         try {
-            const resources = await this.plugin.todoistSyncAPI.getAllResources(true);
+            const todoistSyncAPI = this.plugin.todoistSyncAPI;
+            if (!todoistSyncAPI) {
+                throw new Error('Todoist sync API is not initialized');
+            }
+
+            const resources = await todoistSyncAPI.getAllResources(true);
 
             const now: Date = new Date();
             const timeString = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;

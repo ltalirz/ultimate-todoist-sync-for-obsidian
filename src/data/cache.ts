@@ -990,7 +990,7 @@ export class CacheOperation   {
     // ==========================================================================================
 
     // DEPRECATED: Using syncData from Todoist API instead - no longer needed
-    loadTasksFromCache() {
+    loadTasksFromCache(): any[] {
         return [];
     }
 

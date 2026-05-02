@@ -43,6 +43,15 @@ export class FileOperation   {
 
 	}
 
+    private requireFile(filepath: string): TFile {
+        const file = this.app.vault.getAbstractFileByPath(filepath);
+        if (!(file instanceof TFile)) {
+            throw new Error(`File not found: ${filepath}`);
+        }
+
+        return file;
+    }
+
 	/**
 	 * Check if a file path should be excluded from Full Vault Sync.
 	 * Excluded: dot-prefix dirs, plugin storage dir, Obsidian templates folder, *.excalidraw.md
@@ -127,7 +136,7 @@ export class FileOperation   {
         const filepath = taskMapping.filePath
     
         // 获取文件对象并更新内容
-        const file = this.app.vault.getAbstractFileByPath(filepath)
+        const file = this.requireFile(filepath)
         const content = await this.app.vault.read(file)
     
         const lines = content.split('\n')
@@ -161,7 +170,7 @@ export class FileOperation   {
         const filepath = taskMapping.filePath
     
         // 获取文件对象并更新内容
-        const file = this.app.vault.getAbstractFileByPath(filepath)
+        const file = this.requireFile(filepath)
         const content = await this.app.vault.read(file)
     
         const lines = content.split('\n')
@@ -195,11 +204,7 @@ export class FileOperation   {
             return;
         }
         const filepath = taskMapping.filePath;
-        const file = this.app.vault.getAbstractFileByPath(filepath);
-        if (!file) {
-            console.error(`[FileOperation] unbindTaskInFile: File not found: ${filepath}`);
-            return;
-        }
+        const file = this.requireFile(filepath);
         const content = await this.app.vault.read(file);
         const lines = content.split('\n');
         let modified = false;
@@ -227,18 +232,14 @@ export class FileOperation   {
         if (modified) {
             const newContent = lines.join('\n');
             await this.app.vault.modify(file, newContent);
-            this.plugin.logOperation?.log('FILE_TASK_UNBOUND', `Unbound task from file: ${taskId}`, filepath, taskId, 'manual');
+            this.plugin.logOperation?.log('FILE_TASK_UNBOUND', `Unbound task from file: ${taskId}`, filepath, taskId, 'obsidian→todoist');
         }
     }
     //add #todoist at the end of task line, if full vault sync enabled
     async addTodoistTagToFile(filepath: string) {    
         if (this.isFileExcludedFromSync(filepath)) return;
-        const file = this.app.vault.getAbstractFileByPath(filepath)
-        if (!file) {
-            this.plugin.debugLog(`[addTodoistTagToFile] File not found: ${filepath}`);
-            return;
-        }
-        const content = await this.app.vault.read(file as TFile)
+        const file = this.requireFile(filepath)
+        const content = await this.app.vault.read(file)
     
         const lines = content.split('\n')
         let modified = false
@@ -281,7 +282,7 @@ export class FileOperation   {
     //add todoist at the line
     async addTodoistLinkToFile(filepath: string) {    
         // 获取文件对象并更新内容
-        const file = this.app.vault.getAbstractFileByPath(filepath)
+        const file = this.requireFile(filepath)
         const content = await this.app.vault.read(file)
     
         const lines = content.split('\n')
@@ -328,7 +329,7 @@ export class FileOperation   {
 
 
     // sync updated task content  to file
-    async syncUpdatedTaskContentToTheFile(evt:Object) {
+    async syncUpdatedTaskContentToTheFile(evt:any) {
         const taskId = evt.object_id
         // 获取任务文件路径
         const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId)
@@ -339,7 +340,7 @@ export class FileOperation   {
         const filepath = taskMapping.filePath
     
         // 获取文件对象并更新内容
-        const file = this.app.vault.getAbstractFileByPath(filepath)
+        const file = this.requireFile(filepath)
         const content = await this.app.vault.read(file)
     
         const lines = content.split('\n')
@@ -368,7 +369,7 @@ export class FileOperation   {
     }
 
     // sync updated task due date  to the file
-    async syncUpdatedTaskDueDateToTheFile(evt:Object) {
+    async syncUpdatedTaskDueDateToTheFile(evt:any) {
         const taskId = evt.object_id
         // 获取任务文件路径
         const taskMapping = this.plugin.cacheOperation.getTaskFileMapping(taskId)
@@ -379,7 +380,7 @@ export class FileOperation   {
         const filepath = taskMapping.filePath
     
         // 获取文件对象并更新内容
-        const file = this.app.vault.getAbstractFileByPath(filepath)
+        const file = this.requireFile(filepath)
         const content = await this.app.vault.read(file)
     
         const lines = content.split('\n')
@@ -427,7 +428,7 @@ export class FileOperation   {
 
 
     // sync new task note to file
-    async syncAddedTaskNoteToTheFile(evt:Object) {
+    async syncAddedTaskNoteToTheFile(evt:any) {
 
 
         const taskId = evt.parent_item_id
@@ -442,7 +443,7 @@ export class FileOperation   {
         const filepath = taskMapping.filePath
     
         // 获取文件对象并更新内容
-        const file = this.app.vault.getAbstractFileByPath(filepath)
+        const file = this.requireFile(filepath)
         const content = await this.app.vault.read(file)
     
         const lines = content.split('\n')
@@ -475,7 +476,7 @@ export class FileOperation   {
         if (!taskMapping) return false;
         const filepath = taskMapping.filePath;
 
-        const file = this.app.vault.getAbstractFileByPath(filepath);
+        const file = this.requireFile(filepath);
         const fileContent = await this.app.vault.read(file);
         const lines = fileContent.split('\n');
         let modified = false;
@@ -506,7 +507,7 @@ export class FileOperation   {
         if (!taskMapping) return false;
         const filepath = taskMapping.filePath;
 
-        const file = this.app.vault.getAbstractFileByPath(filepath);
+        const file = this.requireFile(filepath);
         const fileContent = await this.app.vault.read(file);
         const lines = fileContent.split('\n');
         let modified = false;
@@ -556,7 +557,7 @@ export class FileOperation   {
         if (!taskMapping) return false;
         const filepath = taskMapping.filePath;
 
-        const file = this.app.vault.getAbstractFileByPath(filepath);
+        const file = this.requireFile(filepath);
         const fileContent = await this.app.vault.read(file);
         const lines = fileContent.split('\n');
         let modified = false;
@@ -601,7 +602,7 @@ export class FileOperation   {
         if (!taskMapping) return false;
         const filepath = taskMapping.filePath;
 
-        const file = this.app.vault.getAbstractFileByPath(filepath);
+        const file = this.requireFile(filepath);
         const fileContent = await this.app.vault.read(file);
         const lines = fileContent.split('\n');
         let modified = false;
@@ -651,7 +652,7 @@ export class FileOperation   {
         if (!taskMapping) return false;
         const filepath = taskMapping.filePath;
 
-        const file = this.app.vault.getAbstractFileByPath(filepath);
+        const file = this.requireFile(filepath);
         const fileContent = await this.app.vault.read(file);
         const lines = fileContent.split('\n');
         let modified = false;
@@ -681,7 +682,7 @@ export class FileOperation   {
     //避免使用该方式，通过view可以获得实时更新的value
     async readContentFromFilePath(filepath:string){
         try {
-            const file = this.app.vault.getAbstractFileByPath(filepath);
+            const file = this.requireFile(filepath);
             const content = await this.app.vault.read(file);
             return content
         } catch (error) {
@@ -693,7 +694,7 @@ export class FileOperation   {
 
     //search todoist_id by content
     async searchTodoistIdFromFilePath(filepath: string, searchTerm: string): Promise<string | null> {
-        const file = this.app.vault.getAbstractFileByPath(filepath)
+        const file = this.requireFile(filepath)
         const fileContent = await this.app.vault.read(file)
         const fileLines = fileContent.split('\n');
         let todoistId: string | null = null;
@@ -768,13 +769,7 @@ export class FileOperation   {
     ): Promise<boolean> {
         try {
             console.log(`[updateTaskIdInVault] start file=${filePath} oldId=${oldId} newId=${newId}`);
-            const file = this.app.vault.getAbstractFileByPath(filePath);
-            if (!file) {
-                console.error(`[updateTaskIdInVault] File not found: ${filePath}`);
-                this.plugin.debugLog(filePath)
-                console.log(`[updateTaskIdInVault] fail file-not-found file=${filePath}`);
-                return false;
-            }
+            const file = this.requireFile(filePath);
             
             const content = await this.app.vault.read(file);
             const lines = content.split('\n');
