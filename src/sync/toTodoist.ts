@@ -47,9 +47,9 @@ export class ObsidianToTodoistSync {
         }
         const { cacheOperation, todoistSyncAPI } = this.requireServices();
         let file;
-        let currentFileValue;
+        let currentFileValue: string;
         let view;
-        let filepath;
+        let filepath: string;
         if (file_path) {
             file = this.app.vault.getAbstractFileByPath(file_path);
             file = this.requireTFile(file, 'deletedTaskCheck');
@@ -59,8 +59,8 @@ export class ObsidianToTodoistSync {
             view = this.app.workspace.getActiveViewOfType(MarkdownView);
             file = this.app.workspace.getActiveFile();
             file = this.requireTFile(file, 'deletedTaskCheck');
-            filepath = file?.path;
-            currentFileValue = view?.data;
+            filepath = file.path;
+            currentFileValue = view?.data ?? '';
         }
         const taskIds = cacheOperation.getTasksInFile(filepath);
         if (taskIds.length === 0) {
@@ -68,7 +68,7 @@ export class ObsidianToTodoistSync {
             return 0;
         }
 
-        const currentFileValueWithOutFrontMatter = currentFileValue.replace(/^---[\s\S]*?---\n/, '');
+        const currentFileValueWithOutFrontMatter = (currentFileValue ?? '').replace(/^---[\s\S]*?---\n/, '');
 
         const tasksToDelete = taskIds.filter(
             (taskId: string) =>
@@ -295,11 +295,11 @@ export class ObsidianToTodoistSync {
             this.plugin.debugLog('[toTodoist] Push blocked: not primary device');
             return;
         }
-        const { taskParser, cacheOperation, todoistSyncAPI, backupOperation } = this.requireServices();
+        const { taskParser, cacheOperation, todoistSyncAPI, backupOperation, fileOperation } = this.requireServices();
         let file;
-        let currentFileValue;
+        let currentFileValue: string;
         let view;
-        let filepath;
+        let filepath: string;
         if (file_path) {
             file = this.app.vault.getAbstractFileByPath(file_path);
             file = this.requireTFile(file, 'fullTextNewTaskCheck');
@@ -309,14 +309,14 @@ export class ObsidianToTodoistSync {
             view = this.app.workspace.getActiveViewOfType(MarkdownView);
             file = this.app.workspace.getActiveFile();
             file = this.requireTFile(file, 'fullTextNewTaskCheck');
-            filepath = file?.path;
-            currentFileValue = view?.data;
+            filepath = file.path;
+            currentFileValue = view?.data ?? '';
         }
         // Prevent per-task vault.modify from triggering modify event storm
         this.plugin.isProcessingModify = true;
         try {
         if (this.plugin.settings.enableFullVaultSync) {
-            await this.plugin.fileOperation.addTodoistTagToFile(filepath);
+            await fileOperation.addTodoistTagToFile(filepath);
             currentFileValue = await this.app.vault.read(file);
         }
 
@@ -343,7 +343,7 @@ export class ObsidianToTodoistSync {
                         this.plugin.logOperation?.log('OBSIDIAN_TASK_CREATED', `Created task in Obsidian: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
                         this.plugin.logOperation?.log('TODOIST_TASK_CREATED', `Created task in Todoist: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
 
-					await cacheOperation.setTaskFileMapping(todoist_id, filepath || '');
+					await cacheOperation.setTaskFileMapping(todoist_id!, filepath || '');
                     if (currentTask.isCompleted === true) {
                             await todoistSyncAPI.CloseTask(newTask.id);
                             this.plugin.logOperation?.log('OBSIDIAN_TASK_COMPLETED', `Completed task in Obsidian: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
@@ -363,9 +363,9 @@ export class ObsidianToTodoistSync {
 					}
                         try {
                             await todoistSyncAPI.incrementalSync();
-                            const updatedTask = await todoistSyncAPI.GetTaskById(todoist_id);
+                            const updatedTask = await todoistSyncAPI.GetTaskById(todoist_id!);
                             if (updatedTask?.updated_at) {
-                                await cacheOperation.updateTaskMappingSyncMeta(todoist_id, { updated_at: updatedTask.updated_at });
+                                await cacheOperation.updateTaskMappingSyncMeta(todoist_id!, { updated_at: updatedTask.updated_at });
                             }
                         } catch (syncErr) {
                             console.error('[fullTextNewTaskCheck] Post-push incremental sync failed:', syncErr);
