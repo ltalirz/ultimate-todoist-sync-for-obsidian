@@ -456,13 +456,13 @@ export class TodoistSyncAPI   {
     		method: 'POST',
     		headers: {
     			'Authorization': `Bearer ${accessToken}`,
- 				'Content-Type': 'application/x-www-form-urlencoded',
+ 				'Content-Type': 'application/json',
  				'X-Todoist-Client': clientId
     		},
-    		body: new URLSearchParams({
+    		body: JSON.stringify({
     			sync_token: syncToken,
-    			resource_types: '["all"]'
-    		}).toString()
+    			resource_types: ['all'],
+    		}),
     	};
   
 	    	try {
@@ -522,12 +522,12 @@ export class TodoistSyncAPI   {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/x-www-form-urlencoded'
+          'Content-Type': 'application/json',
         },
-        body: new URLSearchParams({
-          sync_token: "*",
-          resource_types: '["user_plan_limits"]'
-        }).toString()
+        body: JSON.stringify({
+          sync_token: '*',
+          resource_types: ['user_plan_limits'],
+        }),
       };
     
       try {
@@ -565,15 +565,15 @@ export class TodoistSyncAPI   {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/x-www-form-urlencoded'
+            'Content-Type': 'application/json',
           },
-          body: new URLSearchParams({ commands: JSON.stringify(commands) }).toString()
+          body: JSON.stringify({ commands }),
         };
-      
+
         try {
           const response = await requestUrl(options);
 		  this.assertSuccessfulResponse('updateUserTimezone', response);
-      
+
           const data = response.json;
           this.plugin.debugLog(data)
           return data;
@@ -799,12 +799,10 @@ export class TodoistSyncAPI   {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
- 		'Content-Type': 'application/x-www-form-urlencoded',
+ 		'Content-Type': 'application/json',
  		'X-Todoist-Client': clientId
       },
-      body: new URLSearchParams({
-        commands: JSON.stringify(commands)
-      }).toString()
+      body: JSON.stringify({ commands }),
     };
 
     try {
