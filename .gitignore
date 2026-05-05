@@ -37,3 +37,6 @@ data.json
 AGENTS.md
 device-id
 /.stfolder/
+# pixi environments
+.pixi/*
+!.pixi/config.toml

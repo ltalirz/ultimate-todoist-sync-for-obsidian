@@ -40,14 +40,20 @@ export class TodoistToObsidianSync {
             const taskFileMapping = this.plugin.settings.taskFileMapping || {};
             let syncedCount = 0;
 
+            // Resolve legacy numeric IDs → new string IDs so we can look up
+            // tasks in the Sync API response (which uses new IDs).
+            const cacheTaskIds = Object.keys(taskFileMapping);
+            const idMapping = await this.resolveTaskIds(cacheTaskIds);
+
             // Set flag: file writes below are from Todoist pull, not user edits
             this.plugin.isSyncingFromTodoist = true;
             try {
-                for (const taskId of Object.keys(taskFileMapping)) {
+                for (const taskId of cacheTaskIds) {
                     const mapping = taskFileMapping[taskId];
                     if (mapping.syncEnabled === false) continue;
 
-                    const task = itemMap.get(taskId);
+                    const resolvedId = idMapping[taskId] || taskId;
+                    const task = itemMap.get(resolvedId) || itemMap.get(taskId);
 
                     if (!task || task.is_deleted) {
                         if (this.plugin.settings.debugMode) {
@@ -76,7 +82,7 @@ export class TodoistToObsidianSync {
                     }
                 }
 
-                await this.syncNotesToObsidian(taskFileMapping, noteMap);
+                await this.syncNotesToObsidian(taskFileMapping, noteMap, idMapping);
             } finally {
                 this.plugin.isSyncingFromTodoist = false;
             }
@@ -164,9 +170,22 @@ export class TodoistToObsidianSync {
 
     private async syncNotesToObsidian(
         taskFileMapping: Record<string, { note_count?: number; syncEnabled?: boolean }>,
-        noteMap: Map<string, any[]>
+        noteMap: Map<string, any[]>,
+        idMapping: Record<string, string>
     ): Promise<void> {
-        for (const [taskId, notes] of noteMap.entries()) {
+        // Build reverse map: newId → cacheId so we can look up noteMap entries
+        // (keyed by new IDs from syncData) against taskFileMapping (keyed by
+        // cache IDs which may be legacy numeric IDs).
+        const reverseIdMap = new Map<string, string>();
+        for (const [cacheId, resolvedId] of Object.entries(idMapping)) {
+            if (resolvedId !== cacheId) {
+                reverseIdMap.set(resolvedId, cacheId);
+            }
+        }
+
+        for (const [noteTaskId, notes] of noteMap.entries()) {
+            // noteTaskId is from syncData (new ID). Find corresponding cache ID.
+            const taskId = reverseIdMap.get(noteTaskId) || noteTaskId;
             const mapping = taskFileMapping[taskId];
             if (!mapping) continue;
             if (mapping.syncEnabled === false) continue;
@@ -192,6 +211,22 @@ export class TodoistToObsidianSync {
             await this.plugin.cacheOperation!.updateTaskMappingSyncMeta(taskId, {
                 note_count: notes.length
             });
+        }
+    }
+
+    /**
+     * Resolve legacy numeric task IDs to new string IDs via the REST API
+     * ID mapping endpoint. Returns a map of oldId → newId for any IDs that
+     * were translated; non-legacy IDs are excluded.
+     */
+    private async resolveTaskIds(taskIds: string[]): Promise<Record<string, string>> {
+        const restApi = this.plugin.todoistRestAPI;
+        if (!restApi) return {};
+        try {
+            return await restApi.resolveIds('tasks', taskIds);
+        } catch (err) {
+            console.warn('[Todoist→Obsidian] Failed to resolve legacy task IDs, proceeding with original IDs:', err);
+            return {};
         }
     }
 
