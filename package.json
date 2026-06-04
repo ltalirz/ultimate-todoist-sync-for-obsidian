@@ -23,6 +23,6 @@
 		"typescript": "5.6.3"
 	},
 	"dependencies": {
-		"@doist/todoist-api-typescript": "^6.5.0"
+		"@doist/todoist-sdk": "^10.1.0"
 	}
 }

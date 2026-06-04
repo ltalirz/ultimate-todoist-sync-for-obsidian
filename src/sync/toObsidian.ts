@@ -1,5 +1,5 @@
 import UltimateTodoistSyncForObsidian from "../../main";
-import { App, Notice } from 'obsidian';
+import { App, Notice, TFile } from 'obsidian';
 import { StoragePathManager } from '../storage/pathManager';
 
 export class TodoistToObsidianSync {
@@ -15,9 +15,9 @@ export class TodoistToObsidianSync {
         try {
             this.plugin.logOperation?.log('SYNC_START', 'Starting sync from Todoist to Obsidian', undefined, undefined, 'todoist→obsidian');
 
-            await this.plugin.todoistSyncAPI.incrementalSync();
+            await this.plugin.todoistSyncAPI!.incrementalSync();
 
-            const syncData = this.plugin.todoistSyncAPI.getSyncData();
+            const syncData = this.plugin.todoistSyncAPI!.getSyncData();
             if (!syncData?.items) {
                 this.plugin.debugLog('[Todoist→Obsidian] No sync data available');
                 return;
@@ -40,14 +40,20 @@ export class TodoistToObsidianSync {
             const taskFileMapping = this.plugin.settings.taskFileMapping || {};
             let syncedCount = 0;
 
+            // Resolve legacy numeric IDs → new string IDs so we can look up
+            // tasks in the Sync API response (which uses new IDs).
+            const cacheTaskIds = Object.keys(taskFileMapping);
+            const idMapping = await this.resolveTaskIds(cacheTaskIds);
+
             // Set flag: file writes below are from Todoist pull, not user edits
             this.plugin.isSyncingFromTodoist = true;
             try {
-                for (const taskId of Object.keys(taskFileMapping)) {
+                for (const taskId of cacheTaskIds) {
                     const mapping = taskFileMapping[taskId];
                     if (mapping.syncEnabled === false) continue;
 
-                    const task = itemMap.get(taskId);
+                    const resolvedId = idMapping[taskId] || taskId;
+                    const task = itemMap.get(resolvedId) || itemMap.get(taskId);
 
                     if (!task || task.is_deleted) {
                         if (this.plugin.settings.debugMode) {
@@ -67,7 +73,7 @@ export class TodoistToObsidianSync {
                     try {
                         await this.syncSingleTaskToObsidian(taskId, task);
                         syncedCount++;
-                        await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, {
+                        await this.plugin.cacheOperation!.updateTaskMappingSyncMeta(taskId, {
                             updated_at: task.updated_at,
                             note_count: task.note_count || 0
                         });
@@ -76,7 +82,7 @@ export class TodoistToObsidianSync {
                     }
                 }
 
-                await this.syncNotesToObsidian(taskFileMapping, noteMap);
+                await this.syncNotesToObsidian(taskFileMapping, noteMap, idMapping);
             } finally {
                 this.plugin.isSyncingFromTodoist = false;
             }
@@ -92,7 +98,7 @@ export class TodoistToObsidianSync {
     }
 
     private async syncSingleTaskToObsidian(taskId: string, task: any): Promise<void> {
-        const mapping = this.plugin.cacheOperation.getTaskFileMapping(taskId);
+        const mapping = this.plugin.cacheOperation!.getTaskFileMapping(taskId);
         if (!mapping) {
             console.warn(`[syncSingleTaskToObsidian] No mapping found for task ${taskId}`);
             this.plugin.debugLog(`[syncSingleTaskToObsidian] No mapping found for task ${taskId}`);
@@ -108,12 +114,12 @@ export class TodoistToObsidianSync {
             return;
         }
 
-        const fileContent = await this.app.vault.read(file);
+        const fileContent = await this.app.vault.read(file as TFile);
         const lines = fileContent.split('\n');
 
         let taskLine = '';
         for (const line of lines) {
-            if (line.includes(taskId) && this.plugin.taskParser.hasTodoistTag(line)) {
+            if (line.includes(taskId) && this.plugin.taskParser!.hasTodoistTag(line)) {
                 taskLine = line;
                 break;
             }
@@ -129,34 +135,34 @@ export class TodoistToObsidianSync {
         const todoistIsChecked = task.checked || false;
 
         if (todoistIsChecked && !obsidianIsChecked) {
-            await this.plugin.fileOperation.completeTaskInTheFile(taskId);
+            await this.plugin.fileOperation!.completeTaskInTheFile(taskId);
             new Notice(`Task ${taskId} completed from Todoist`);
             this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Task completed in Todoist: ${taskId}`, mapping.filePath, taskId, 'todoist→obsidian');
         } else if (!todoistIsChecked && obsidianIsChecked) {
-            await this.plugin.fileOperation.uncompleteTaskInTheFile(taskId);
+            await this.plugin.fileOperation!.uncompleteTaskInTheFile(taskId);
             new Notice(`Task ${taskId} reopened from Todoist`);
             this.plugin.logOperation?.log('TODOIST_TASK_REOPENED', `Task reopened in Todoist: ${taskId}`, mapping.filePath, taskId, 'todoist→obsidian');
         }
 
-        const obsidianContent = this.plugin.taskParser.getTaskContentFromLineText(taskLine);
+        const obsidianContent = this.plugin.taskParser!.getTaskContentFromLineText(taskLine);
         if (obsidianContent && task.content && obsidianContent !== task.content) {
-            await this.plugin.fileOperation.syncTaskContentToFile(taskId, task.content);
+            await this.plugin.fileOperation!.syncTaskContentToFile(taskId, task.content);
             this.plugin.logOperation?.log('FILE_TASK_CONTENT_SYNCED', `Synced content: ${taskId}`, mapping.filePath, taskId, 'todoist→obsidian');
         }
 
-        const obsidianDueDate = this.plugin.taskParser.getDueDateFromLineText(taskLine) || "";
-        const todoistDueDate = task.due?.date ? (this.plugin.taskParser.ISOStringToLocalDateString(task.due.date) || "") : "";
+        const obsidianDueDate = this.plugin.taskParser!.getDueDateFromLineText(taskLine) || "";
+        const todoistDueDate = task.due?.date ? (this.plugin.taskParser!.ISOStringToLocalDateString(task.due.date) || "") : "";
         if (obsidianDueDate !== todoistDueDate) {
-            await this.plugin.fileOperation.syncTaskDueDateToFile(taskId, task.due?.date || "");
+            await this.plugin.fileOperation!.syncTaskDueDateToFile(taskId, task.due?.date || "");
             this.plugin.logOperation?.log('FILE_TASK_DUEDATE_SYNCED', `Synced due date: ${taskId}`, mapping.filePath, taskId, 'todoist→obsidian');
         }
 
-        const prioritySynced = await this.plugin.fileOperation.syncTaskPriorityToFile(taskId, task.priority || 1);
+        const prioritySynced = await this.plugin.fileOperation!.syncTaskPriorityToFile(taskId, task.priority || 1);
         if (prioritySynced) {
             this.plugin.logOperation?.log('FILE_TASK_PRIORITY_SYNCED', `Synced priority: ${taskId}`, mapping.filePath, taskId, 'todoist→obsidian');
         }
 
-        const labelsSynced = await this.plugin.fileOperation.syncTaskLabelsToFile(taskId, task.labels || []);
+        const labelsSynced = await this.plugin.fileOperation!.syncTaskLabelsToFile(taskId, task.labels || []);
         if (labelsSynced) {
             this.plugin.logOperation?.log('FILE_TASK_LABELS_SYNCED', `Synced labels: ${taskId}`, mapping.filePath, taskId, 'todoist→obsidian');
         }
@@ -164,9 +170,22 @@ export class TodoistToObsidianSync {
 
     private async syncNotesToObsidian(
         taskFileMapping: Record<string, { note_count?: number; syncEnabled?: boolean }>,
-        noteMap: Map<string, any[]>
+        noteMap: Map<string, any[]>,
+        idMapping: Record<string, string>
     ): Promise<void> {
-        for (const [taskId, notes] of noteMap.entries()) {
+        // Build reverse map: newId → cacheId so we can look up noteMap entries
+        // (keyed by new IDs from syncData) against taskFileMapping (keyed by
+        // cache IDs which may be legacy numeric IDs).
+        const reverseIdMap = new Map<string, string>();
+        for (const [cacheId, resolvedId] of Object.entries(idMapping)) {
+            if (resolvedId !== cacheId) {
+                reverseIdMap.set(resolvedId, cacheId);
+            }
+        }
+
+        for (const [noteTaskId, notes] of noteMap.entries()) {
+            // noteTaskId is from syncData (new ID). Find corresponding cache ID.
+            const taskId = reverseIdMap.get(noteTaskId) || noteTaskId;
             const mapping = taskFileMapping[taskId];
             if (!mapping) continue;
             if (mapping.syncEnabled === false) continue;
@@ -181,23 +200,44 @@ export class TodoistToObsidianSync {
             const newNotes = sortedNotes.slice(storedNoteCount);
             for (const note of newNotes) {
                 try {
-                    const dateStr = this.plugin.taskParser.ISOStringToLocalDatetimeString(note.posted_at || note.added_at || '');
-                    await this.plugin.fileOperation.syncTaskNoteToFile(taskId, note.content || '', dateStr);
+                    const dateStr = this.plugin.taskParser!.ISOStringToLocalDatetimeString(note.posted_at || note.added_at || '');
+                    await this.plugin.fileOperation!.syncTaskNoteToFile(taskId, note.content || '', dateStr ?? '');
                     new Notice(`Note synced to task ${taskId}`);
                 } catch (error) {
                     console.error(`[Todoist→Obsidian] Error syncing note for task ${taskId}:`, error);
                 }
             }
 
-            await this.plugin.cacheOperation.updateTaskMappingSyncMeta(taskId, {
+            await this.plugin.cacheOperation!.updateTaskMappingSyncMeta(taskId, {
                 note_count: notes.length
             });
         }
     }
 
+    /**
+     * Resolve legacy numeric task IDs to new string IDs via the REST API
+     * ID mapping endpoint. Returns a map of oldId → newId for any IDs that
+     * were translated; non-legacy IDs are excluded.
+     */
+    private async resolveTaskIds(taskIds: string[]): Promise<Record<string, string>> {
+        const restApi = this.plugin.todoistRestAPI;
+        if (!restApi) return {};
+        try {
+            return await restApi.resolveIds('tasks', taskIds);
+        } catch (err) {
+            console.warn('[Todoist→Obsidian] Failed to resolve legacy task IDs, proceeding with original IDs:', err);
+            return {};
+        }
+    }
+
     async backupTodoistAllResources(): Promise<void> {
         try {
-            const resources = await this.plugin.todoistSyncAPI.getAllResources(true);
+            const todoistSyncAPI = this.plugin.todoistSyncAPI;
+            if (!todoistSyncAPI) {
+                throw new Error('Todoist sync API is not initialized');
+            }
+
+            const resources = await todoistSyncAPI.getAllResources(true);
 
             const now: Date = new Date();
             const timeString = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
