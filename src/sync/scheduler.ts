@@ -25,7 +25,7 @@ export class SyncScheduler {
 			if (Date.now() - lastFullSync > FULL_SYNC_INTERVAL) {
 				this.plugin.debugLog('Periodic full sync triggered');
 				try {
-					await this.plugin.todoistSyncAPI.initializeSync();
+					await this.plugin.todoistSyncAPI?.initializeSync();
 					await this.plugin.safeSettings?.update({ lastFullSyncTime: Date.now() }, true);
 				} catch (error) {
 					console.error('[Scheduler] Periodic full sync failed:', error);
