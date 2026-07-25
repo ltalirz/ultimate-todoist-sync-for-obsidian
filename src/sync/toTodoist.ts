@@ -154,8 +154,22 @@ export class ObsidianToTodoistSync {
 
                 await cacheOperation.setTaskFileMapping(todoist_id, filepath || '');
 
+                // Close before snapshotting updated_at below — closing bumps the
+                // Todoist revision, and a snapshot taken before it would leave the
+                // mapping permanently one revision behind, which reads as a conflict
+                // on the next edit of this line.
+                if (currentTask.isCompleted === true) {
+                    await todoistSyncAPI.CloseTask(newTask.id);
+                    // taskFileMapping already set above
+                    this.plugin.logOperation?.log('OBSIDIAN_TASK_COMPLETED', `Completed task in Obsidian: ${newTask.content}`, filepath, todoist_id, 'obsidian→todoist');
+                    this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Completed task in Todoist: ${newTask.content}`, filepath, todoist_id, 'obsidian→todoist');
+                }
+
                 // Immediately sync so syncData contains the new task before any
-                // subsequent lineModifiedTaskCheck fires on the same line.
+                // subsequent lineModifiedTaskCheck fires on the same line. The
+                // revision must come from syncData, never from the SDK's return
+                // value: the mapping stores the sync endpoint's updated_at string,
+                // while the SDK hands back a Date, and the two do not compare equal.
                 try {
                     await todoistSyncAPI.incrementalSync();
                     const updatedTask = await todoistSyncAPI.GetTaskById(todoist_id);
@@ -164,13 +178,6 @@ export class ObsidianToTodoistSync {
                     }
                 } catch (syncErr) {
                     console.error('[lineContentNewTaskCheck] Post-create incremental sync failed:', syncErr);
-                }
-
-                if (currentTask.isCompleted === true) {
-                    await todoistSyncAPI.CloseTask(newTask.id);
-                    // taskFileMapping already set above
-                    this.plugin.logOperation?.log('OBSIDIAN_TASK_COMPLETED', `Completed task in Obsidian: ${newTask.content}`, filepath, todoist_id, 'obsidian→todoist');
-                    this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Completed task in Todoist: ${newTask.content}`, filepath, todoist_id, 'obsidian→todoist');
                 }
 
                 const text_with_out_link = `${processedLine} %%[todoist_id:: ${todoist_id}]%%`;
@@ -260,6 +267,13 @@ export class ObsidianToTodoistSync {
 
             await cacheOperation.setTaskFileMapping(todoist_id, filepath || '');
 
+            // Close before snapshotting updated_at below \u2014 see lineContentNewTaskCheck.
+            if (currentTask.isCompleted === true) {
+                await todoistSyncAPI.CloseTask(newTask.id);
+                this.plugin.logOperation?.log('OBSIDIAN_TASK_COMPLETED', `Completed task in Obsidian: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
+                this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Completed task in Todoist: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
+            }
+
             // Immediately sync so syncData contains the new task
             try {
                 await todoistSyncAPI.incrementalSync();
@@ -269,12 +283,6 @@ export class ObsidianToTodoistSync {
                 }
             } catch (syncErr) {
                 console.error('[lastLineNewTaskCheck] Post-create incremental sync failed:', syncErr);
-            }
-
-            if (currentTask.isCompleted === true) {
-                await todoistSyncAPI.CloseTask(newTask.id);
-                this.plugin.logOperation?.log('OBSIDIAN_TASK_COMPLETED', `Completed task in Obsidian: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
-                this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Completed task in Todoist: ${newTask.content}`, filepath, todoist_id, 'obsidian\u2192todoist');
             }
 
             // Write tag + id + link back to the file
