@@ -45,20 +45,18 @@ export class ObsidianToTodoistSync {
             this.plugin.debugLog('[toTodoist] Push blocked: not primary device');
             return 0;
         }
-        const { cacheOperation, todoistSyncAPI } = this.requireServices();
-        let file;
+        const { cacheOperation, todoistSyncAPI, fileOperation } = this.requireServices();
         let currentFileValue: string;
         let view;
         let filepath: string;
         if (file_path) {
-            file = this.app.vault.getAbstractFileByPath(file_path);
-            file = this.requireTFile(file, 'deletedTaskCheck');
             filepath = file_path;
-            currentFileValue = await this.app.vault.read(file);
+            // Live content, not vault.read: the on-disk copy lags the editor by a
+            // couple of seconds and a just-written todoist_id would look deleted.
+            currentFileValue = await fileOperation.readLiveFileContent(file_path);
         } else {
             view = this.app.workspace.getActiveViewOfType(MarkdownView);
-            file = this.app.workspace.getActiveFile();
-            file = this.requireTFile(file, 'deletedTaskCheck');
+            const file = this.requireTFile(this.app.workspace.getActiveFile(), 'deletedTaskCheck');
             filepath = file.path;
             currentFileValue = view?.data ?? '';
         }
@@ -304,7 +302,9 @@ export class ObsidianToTodoistSync {
             file = this.app.vault.getAbstractFileByPath(file_path);
             file = this.requireTFile(file, 'fullTextNewTaskCheck');
             filepath = file_path;
-            currentFileValue = await this.app.vault.read(file);
+            // Live content: acting on the stale on-disk copy would create a second
+            // Todoist task for a line whose id is still only in the editor buffer.
+            currentFileValue = await fileOperation.readLiveFileContent(file_path);
         } else {
             view = this.app.workspace.getActiveViewOfType(MarkdownView);
             file = this.app.workspace.getActiveFile();
@@ -317,7 +317,9 @@ export class ObsidianToTodoistSync {
         try {
         if (this.plugin.settings.enableFullVaultSync) {
             await fileOperation.addTodoistTagToFile(filepath);
-            currentFileValue = await this.app.vault.read(file);
+            // Live content again: if nothing was tagged, vault.read would hand back
+            // the stale on-disk copy and we would re-create ids already in the editor.
+            currentFileValue = await fileOperation.readLiveFileContent(filepath);
         }
 
             let lines = currentFileValue.split('\n');
@@ -588,7 +590,7 @@ export class ObsidianToTodoistSync {
     }
 
     async fullTextModifiedTaskCheck(file_path: string): Promise<void> {
-        const { taskParser } = this.requireServices();
+        const { taskParser, fileOperation } = this.requireServices();
         let file;
         let currentFileValue;
         let view;
@@ -596,10 +598,8 @@ export class ObsidianToTodoistSync {
 
         try {
             if (file_path) {
-                file = this.app.vault.getAbstractFileByPath(file_path);
-                file = this.requireTFile(file, 'fullTextModifiedTaskCheck');
                 filepath = file_path;
-                currentFileValue = await this.app.vault.read(file);
+                currentFileValue = await fileOperation.readLiveFileContent(file_path);
             } else {
                 view = this.app.workspace.getActiveViewOfType(MarkdownView);
                 file = this.app.workspace.getActiveFile();

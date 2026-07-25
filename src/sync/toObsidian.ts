@@ -1,5 +1,5 @@
 import UltimateTodoistSyncForObsidian from "../../main";
-import { App, Notice, TFile } from 'obsidian';
+import { App, Notice } from 'obsidian';
 import { StoragePathManager } from '../storage/pathManager';
 
 export class TodoistToObsidianSync {
@@ -114,7 +114,7 @@ export class TodoistToObsidianSync {
             return;
         }
 
-        const fileContent = await this.app.vault.read(file as TFile);
+        const fileContent = await this.plugin.fileOperation!.readLiveFileContent(mapping.filePath);
         const lines = fileContent.split('\n');
 
         let taskLine = '';
