@@ -21,6 +21,10 @@ export interface TaskFileMappingEntry {
     syncEnabled?: boolean;
     updated_at?: string;
     note_count?: number;
+    /** Local epoch ms when this mapping was first created. Used as a grace window
+     *  before a task may be deleted, since a freshly written todoist_id can be
+     *  absent from the file text we read for a moment. */
+    createdAt?: number;
     issues?: Record<string, TaskIssueEntry>;
 }
 

@@ -313,7 +313,7 @@ export class CacheOperation   {
      * @param taskId - Todoist 任务 ID
      * @returns 文件路径、状态和同步开关，如果不存在则返回 null
      */
-    getTaskFileMapping(taskId: string): { filePath: string; status?: string; syncEnabled?: boolean; updated_at?: string; note_count?: number; issues?: Record<string, unknown> } | null {
+    getTaskFileMapping(taskId: string): { filePath: string; status?: string; syncEnabled?: boolean; updated_at?: string; note_count?: number; createdAt?: number; issues?: Record<string, unknown> } | null {
         return this.plugin.settings.taskFileMapping[taskId] ?? null;
     }
 
@@ -336,7 +336,13 @@ export class CacheOperation   {
         const existing = mapping[taskId];
         const nextStatus = deriveTaskStatusFromIssueEntries(existing?.issues as TaskIssueRecord | undefined, status);
         const nextSyncEnabled = nextStatus === 'active' ? syncEnabled : false;
-        mapping[taskId] = { ...existing, filePath, status: nextStatus, syncEnabled: nextSyncEnabled };
+        mapping[taskId] = {
+            ...existing,
+            filePath,
+            status: nextStatus,
+            syncEnabled: nextSyncEnabled,
+            createdAt: existing?.createdAt ?? Date.now(),
+        };
         await this.plugin.safeSettings?.update({ taskFileMapping: mapping });
     }
 

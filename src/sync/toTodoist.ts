@@ -5,6 +5,14 @@ export class ObsidianToTodoistSync {
     app: App;
     plugin: UltimateTodoistSyncForObsidian;
 
+    /**
+     * A task created moments ago may legitimately be absent from the file text we
+     * read — the write-back is still in flight, or the editor buffer holding it has
+     * not been flushed yet. Deleting a Todoist task is irreversible, so never do it
+     * inside this window; a genuinely deleted line is picked up on the next pass.
+     */
+    private static readonly DELETE_GRACE_MS = 60 * 1000;
+
     constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
         this.app = app;
         this.plugin = plugin;
@@ -68,11 +76,18 @@ export class ObsidianToTodoistSync {
 
         const currentFileValueWithOutFrontMatter = (currentFileValue ?? '').replace(/^---[\s\S]*?---\n/, '');
 
-        const tasksToDelete = taskIds.filter(
-            (taskId: string) =>
-                !currentFileValueWithOutFrontMatter.includes(taskId) &&
-                cacheOperation.isTaskSyncEnabled(taskId)
-        );
+        const now = Date.now();
+        const tasksToDelete = taskIds.filter((taskId: string) => {
+            if (currentFileValueWithOutFrontMatter.includes(taskId)) return false;
+            if (!cacheOperation.isTaskSyncEnabled(taskId)) return false;
+
+            const createdAt = cacheOperation.getTaskFileMapping(taskId)?.createdAt;
+            if (createdAt && now - createdAt < ObsidianToTodoistSync.DELETE_GRACE_MS) {
+                this.plugin.debugLog(`[deletedTaskCheck] Task ${taskId} created ${now - createdAt}ms ago, within delete grace window — skipping`);
+                return false;
+            }
+            return true;
+        });
 
         let deletedCount = 0;
         for (const taskId of tasksToDelete) {
