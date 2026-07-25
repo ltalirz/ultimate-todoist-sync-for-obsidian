@@ -82,7 +82,13 @@ export class TodoistToObsidianSync {
                     }
                 }
 
-                await this.syncNotesToObsidian(taskFileMapping, noteMap, idMapping);
+                // Notes insert new lines into the note, so they are part of the
+                // full scope. note_count is deliberately left untouched in
+                // status-only scope: switching to full later then appends the
+                // backlog rather than silently dropping it.
+                if (this.plugin.settings.todoistToObsidianScope === 'full') {
+                    await this.syncNotesToObsidian(taskFileMapping, noteMap, idMapping);
+                }
             } finally {
                 this.plugin.isSyncingFromTodoist = false;
             }
@@ -134,6 +140,8 @@ export class TodoistToObsidianSync {
         const obsidianIsChecked = /\[(x|X)\]/.test(taskLine);
         const todoistIsChecked = task.checked || false;
 
+        // Completion status is the one field that rewrites nothing but the
+        // checkbox, so it is applied in every scope.
         if (todoistIsChecked && !obsidianIsChecked) {
             await this.plugin.fileOperation!.completeTaskInTheFile(taskId);
             new Notice(`Task ${taskId} completed from Todoist`);
@@ -142,6 +150,15 @@ export class TodoistToObsidianSync {
             await this.plugin.fileOperation!.uncompleteTaskInTheFile(taskId);
             new Notice(`Task ${taskId} reopened from Todoist`);
             this.plugin.logOperation?.log('TODOIST_TASK_REOPENED', `Task reopened in Todoist: ${taskId}`, mapping.filePath, taskId, 'todoist→obsidian');
+        }
+
+        // The remaining writers rebuild parts of the task line — content is a
+        // substring replace, and the label and priority writers normalise tag
+        // order and collapse runs of spaces — so they can reformat or overwrite
+        // text the user edited in Obsidian. Only apply them in the full scope.
+        if (this.plugin.settings.todoistToObsidianScope !== 'full') {
+            this.plugin.debugLog(`[syncSingleTaskToObsidian] Task ${taskId}: status-only scope, leaving line text untouched`);
+            return;
         }
 
         const obsidianContent = this.plugin.taskParser!.getTaskContentFromLineText(taskLine);

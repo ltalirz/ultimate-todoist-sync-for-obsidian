@@ -45,6 +45,8 @@ export interface UltimateTodoistSyncSettings {
     syncEnabled: boolean;
     obsidianToTodoistEnabled: boolean;
     todoistToObsidianEnabled: boolean;
+    /** What a Todoist→Obsidian pull is allowed to change in the vault. */
+    todoistToObsidianScope: 'status' | 'full';
     lastDatabaseCheckTime: number | null;
     syncDataCache: Record<string, any> | null;
     enableLog: boolean;
@@ -77,6 +79,7 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
     syncEnabled: true,
     obsidianToTodoistEnabled: true,
     todoistToObsidianEnabled: false,
+    todoistToObsidianScope: 'status',
     lastDatabaseCheckTime: null,
     syncDataCache: null,
     enableLog: true,
@@ -356,22 +359,55 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                     })
             );
 
+        // Created after the two settings below so it renders underneath them.
+        let reverseSyncWarningEl: HTMLElement;
+        const updateReverseSyncWarning = () => {
+            if (!reverseSyncWarningEl) return;
+            const enabled = this.plugin.settings.todoistToObsidianEnabled;
+            const full = this.plugin.settings.todoistToObsidianScope === 'full';
+            if (enabled && full) {
+                reverseSyncWarningEl.style.cssText = 'color: var(--text-error); font-weight: 600; margin: 6px 0 12px 0;';
+                reverseSyncWarningEl.textContent = '⚠️ Warning: in "Everything" scope, pulls rewrite the task line — tag order and spacing are normalised, and text you edited in Obsidian can be overwritten by the Todoist version. Back up your vault before relying on it.';
+            } else if (enabled) {
+                reverseSyncWarningEl.style.cssText = 'margin: 6px 0 12px 0;';
+                reverseSyncWarningEl.textContent = 'Pulling completion status only: a task ticked in Todoist gets ticked in your vault, and nothing else on the line is touched.';
+            } else {
+                reverseSyncWarningEl.style.cssText = 'margin: 6px 0 12px 0;';
+                reverseSyncWarningEl.textContent = 'Changes made in Todoist are not applied to your vault. Note that with this off, a task edited in Todoist keeps its Obsidian version — the next edit here pushes over it.';
+            }
+        };
+
         new Setting(containerEl)
             .setName('Todoist → Obsidian')
-            .setDesc('⚠️ Reverse sync (Todoist → Obsidian) currently has known bugs and is disabled by default. Enabling is NOT recommended.')
+            .setDesc('Apply changes made in Todoist to your vault. Use the scope below to choose what a pull is allowed to change.')
             .addToggle(component =>
                 component
                     .setValue(this.plugin.settings.todoistToObsidianEnabled)
                     .onChange(async (value) => {
                         await this.plugin.safeSettings?.update({ todoistToObsidianEnabled: value }, true);
                         updateSyncStatus();
+                        updateReverseSyncWarning();
                         new Notice(`Todoist → Obsidian ${value ? 'enabled' : 'disabled'}`);
                     })
             );
 
-        const reverseSyncWarningEl = containerEl.createEl('div', { cls: 'setting-item-description' });
-        reverseSyncWarningEl.style.cssText = 'color: var(--text-error); font-weight: 600; margin: 6px 0 12px 0;';
-        reverseSyncWarningEl.textContent = '⚠️ Warning: Reverse sync may incorrectly overwrite vault data. Keep this switch OFF unless you are actively testing.';
+        new Setting(containerEl)
+            .setName('Reverse sync scope')
+            .setDesc('Completion only: tick/untick the checkbox, leaving the rest of the line alone. Everything: also apply content, due date, priority and labels, and append Todoist comments as sub-items.')
+            .addDropdown(dropdown =>
+                dropdown
+                    .addOption('status', 'Completion only (recommended)')
+                    .addOption('full', 'Everything (content, due date, priority, labels, notes)')
+                    .setValue(this.plugin.settings.todoistToObsidianScope)
+                    .onChange(async (value) => {
+                        await this.plugin.safeSettings?.update({ todoistToObsidianScope: value as 'status' | 'full' }, true);
+                        updateReverseSyncWarning();
+                        new Notice(`Reverse sync scope: ${value === 'full' ? 'everything' : 'completion only'}`);
+                    })
+            );
+
+        reverseSyncWarningEl = containerEl.createEl('div', { cls: 'setting-item-description' });
+        updateReverseSyncWarning();
 
         // ============================================
         // Device Management Section
