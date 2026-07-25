@@ -1,4 +1,4 @@
-import { App, TFile } from 'obsidian';
+import { App, Editor, MarkdownView, TFile } from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../../main";
 
 export interface VaultTask {
@@ -50,6 +50,39 @@ export class FileOperation   {
         }
 
         return file;
+    }
+
+    /**
+     * The markdown view currently showing this file, if any.
+     */
+    getOpenMarkdownView(filepath: string): MarkdownView | null {
+        for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
+            const view = leaf.view;
+            if (view instanceof MarkdownView && view.file?.path === filepath) {
+                return view;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Read the *current* content of a file, preferring an open editor's buffer
+     * over the on-disk copy.
+     *
+     * Obsidian flushes the editor to disk only after a couple of seconds of idle,
+     * so vault.read() returns stale text while the user is typing. Acting on that
+     * stale text is destructive: a todoist_id written back into the editor moments
+     * ago looks missing, which makes deletedTaskCheck delete the brand-new Todoist
+     * task and makes fullTextNewTaskCheck create a duplicate for the same line.
+     */
+    async readLiveFileContent(filepath: string): Promise<string> {
+        const view = this.getOpenMarkdownView(filepath);
+        if (view) {
+            return view.editor?.getValue() ?? view.data;
+        }
+
+        return await this.app.vault.read(this.requireFile(filepath));
     }
 
 	/**
@@ -137,7 +170,7 @@ export class FileOperation   {
     
         // 获取文件对象并更新内容
         const file = this.requireFile(filepath)
-        const content = await this.app.vault.read(file)
+        const content = await this.readLiveFileContent(filepath)
     
         const lines = content.split('\n')
         let modified = false
@@ -171,7 +204,7 @@ export class FileOperation   {
     
         // 获取文件对象并更新内容
         const file = this.requireFile(filepath)
-        const content = await this.app.vault.read(file)
+        const content = await this.readLiveFileContent(filepath)
     
         const lines = content.split('\n')
         let modified = false
@@ -205,7 +238,7 @@ export class FileOperation   {
         }
         const filepath = taskMapping.filePath;
         const file = this.requireFile(filepath);
-        const content = await this.app.vault.read(file);
+        const content = await this.readLiveFileContent(filepath);
         const lines = content.split('\n');
         let modified = false;
         for (let i = 0; i < lines.length; i++) {
@@ -239,7 +272,7 @@ export class FileOperation   {
     async addTodoistTagToFile(filepath: string) {    
         if (this.isFileExcludedFromSync(filepath)) return;
         const file = this.requireFile(filepath)
-        const content = await this.app.vault.read(file)
+        const content = await this.readLiveFileContent(filepath)
     
         const lines = content.split('\n')
         let modified = false
@@ -283,7 +316,7 @@ export class FileOperation   {
     async addTodoistLinkToFile(filepath: string) {    
         // 获取文件对象并更新内容
         const file = this.requireFile(filepath)
-        const content = await this.app.vault.read(file)
+        const content = await this.readLiveFileContent(filepath)
     
         const lines = content.split('\n')
         let modified = false
@@ -341,7 +374,7 @@ export class FileOperation   {
     
         // 获取文件对象并更新内容
         const file = this.requireFile(filepath)
-        const content = await this.app.vault.read(file)
+        const content = await this.readLiveFileContent(filepath)
     
         const lines = content.split('\n')
         let modified = false
@@ -381,7 +414,7 @@ export class FileOperation   {
     
         // 获取文件对象并更新内容
         const file = this.requireFile(filepath)
-        const content = await this.app.vault.read(file)
+        const content = await this.readLiveFileContent(filepath)
     
         const lines = content.split('\n')
         let modified = false
@@ -444,7 +477,7 @@ export class FileOperation   {
     
         // 获取文件对象并更新内容
         const file = this.requireFile(filepath)
-        const content = await this.app.vault.read(file)
+        const content = await this.readLiveFileContent(filepath)
     
         const lines = content.split('\n')
         let modified = false
@@ -477,7 +510,7 @@ export class FileOperation   {
         const filepath = taskMapping.filePath;
 
         const file = this.requireFile(filepath);
-        const fileContent = await this.app.vault.read(file);
+        const fileContent = await this.readLiveFileContent(filepath);
         const lines = fileContent.split('\n');
         let modified = false;
 
@@ -508,7 +541,7 @@ export class FileOperation   {
         const filepath = taskMapping.filePath;
 
         const file = this.requireFile(filepath);
-        const fileContent = await this.app.vault.read(file);
+        const fileContent = await this.readLiveFileContent(filepath);
         const lines = fileContent.split('\n');
         let modified = false;
 
@@ -558,7 +591,7 @@ export class FileOperation   {
         const filepath = taskMapping.filePath;
 
         const file = this.requireFile(filepath);
-        const fileContent = await this.app.vault.read(file);
+        const fileContent = await this.readLiveFileContent(filepath);
         const lines = fileContent.split('\n');
         let modified = false;
 
@@ -603,7 +636,7 @@ export class FileOperation   {
         const filepath = taskMapping.filePath;
 
         const file = this.requireFile(filepath);
-        const fileContent = await this.app.vault.read(file);
+        const fileContent = await this.readLiveFileContent(filepath);
         const lines = fileContent.split('\n');
         let modified = false;
 
@@ -653,7 +686,7 @@ export class FileOperation   {
         const filepath = taskMapping.filePath;
 
         const file = this.requireFile(filepath);
-        const fileContent = await this.app.vault.read(file);
+        const fileContent = await this.readLiveFileContent(filepath);
         const lines = fileContent.split('\n');
         let modified = false;
 
@@ -695,7 +728,7 @@ export class FileOperation   {
     //search todoist_id by content
     async searchTodoistIdFromFilePath(filepath: string, searchTerm: string): Promise<string | null> {
         const file = this.requireFile(filepath)
-        const fileContent = await this.app.vault.read(file)
+        const fileContent = await this.readLiveFileContent(filepath)
         const fileLines = fileContent.split('\n');
         let todoistId: string | null = null;
     
@@ -760,8 +793,8 @@ export class FileOperation   {
         try {
             console.log(`[updateTaskIdInVault] start file=${filePath} oldId=${oldId} newId=${newId}`);
             const file = this.requireFile(filePath);
-            
-            const content = await this.app.vault.read(file);
+
+            const content = await this.readLiveFileContent(filePath);
             const lines = content.split('\n');
             console.log(`[updateTaskIdInVault] file-loaded lines=${lines.length} file=${filePath}`);
             
@@ -884,7 +917,7 @@ export class FileOperation   {
 
         for (const file of files) {
             try {
-                const content = await this.app.vault.read(file);
+                const content = await this.readLiveFileContent(file.path);
                 const lines = content.split('\n');
 
                 for (let i = 0; i < lines.length; i++) {
