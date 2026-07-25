@@ -568,6 +568,7 @@ export class CacheOperation   {
 
         for (const { taskId, filePath } of candidates) {
             const state = states.get(taskId);
+            this.plugin.debugLog(`[reclassifyMissingTaskIssues] ${taskId} (${filePath}): ${state}`);
 
             if (state === 'completed') {
                 // Done in Todoist. Reflect that in the vault, then record it as a
@@ -599,10 +600,29 @@ export class CacheOperation   {
             }
 
             if (state === 'missing') {
+                // Todoist confirms it is gone. Keep the issue, but record that it
+                // was actually checked — otherwise this looks identical in the task
+                // manager to an entry the repair never got to.
+                await this.upsertTaskIssue(taskId, 'todoist_task_missing', {
+                    state: 'open',
+                    severity: 'high',
+                    source: 'runtime',
+                    details: `Confirmed deleted in Todoist (checked ${new Date().toLocaleString()}). The vault still has this task.`,
+                    manualAction: 'Delete to unbind it here; with Full Vault Sync on it is then re-created in Todoist as a new task.',
+                }, false);
                 result.stillMissing++;
                 continue;
             }
 
+            // Could not ask Todoist — network, auth, or rate limit. Say so, rather
+            // than leaving the original "no longer exists" claim standing unchecked.
+            await this.upsertTaskIssue(taskId, 'todoist_task_missing', {
+                state: 'open',
+                severity: 'medium',
+                source: 'runtime',
+                details: `Could not reach Todoist to check this task (last tried ${new Date().toLocaleString()}).`,
+                manualAction: 'Run Safe Repair again — no decision has been made about this task yet.',
+            }, false);
             result.unresolved++;
         }
 

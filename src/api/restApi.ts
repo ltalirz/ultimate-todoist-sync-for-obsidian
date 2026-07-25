@@ -285,17 +285,37 @@ export class TodoistRestAPI  {
     async getTaskCompletionState(taskId: string): Promise<'completed' | 'active' | 'missing' | 'unknown'> {
         if (!taskId) return 'unknown';
 
-        try {
-            const task = await this.initializeAPI().getTask(taskId);
-            if (!task) return 'missing';
-            if ((task as { isDeleted?: boolean }).isDeleted) return 'missing';
-            return task.checked ? 'completed' : 'active';
-        } catch (error) {
-            const statusCode = (error as { httpStatusCode?: number })?.httpStatusCode;
-            if (statusCode === 404) return 'missing';
-            console.warn(`[TodoistRestAPI] Could not determine completion state for ${taskId}:`, error);
-            return 'unknown';
+        // These calls go through the SDK, which does not pass through the plugin's
+        // own rate-limit accounting, so a repair sweep over many tasks can walk
+        // into a 429. Without this retry a throttled batch would silently report
+        // 'unknown' and look identical to "nothing happened".
+        const MAX_ATTEMPTS = 3;
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                const task = await this.initializeAPI().getTask(taskId);
+                if (!task) return 'missing';
+                if ((task as { isDeleted?: boolean }).isDeleted) return 'missing';
+                return task.checked ? 'completed' : 'active';
+            } catch (error) {
+                const statusCode = (error as { httpStatusCode?: number })?.httpStatusCode;
+                if (statusCode === 404) return 'missing';
+
+                if (statusCode === 429 && attempt < MAX_ATTEMPTS) {
+                    const retryAfterSeconds = Number((error as { responseData?: { error_extra?: { retry_after?: unknown } } })?.responseData?.error_extra?.retry_after);
+                    const waitMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+                        ? Math.min(retryAfterSeconds * 1000, 30_000)
+                        : attempt * 1000;
+                    this.plugin.debugLog(`[TodoistRestAPI] Rate limited on ${taskId}, retrying in ${waitMs}ms (attempt ${attempt}/${MAX_ATTEMPTS})`);
+                    await new Promise(resolve => setTimeout(resolve, waitMs));
+                    continue;
+                }
+
+                console.warn(`[TodoistRestAPI] Could not determine completion state for ${taskId} (HTTP ${statusCode ?? 'n/a'}):`, error);
+                return 'unknown';
+            }
         }
+
+        return 'unknown';
     }
 
     // get a task by Id
