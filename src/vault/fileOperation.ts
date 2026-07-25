@@ -1,5 +1,6 @@
 import { App, Editor, MarkdownView, TFile } from 'obsidian';
 import UltimateTodoistSyncForObsidian from "../../main";
+import { computeLineRangeEdit } from './editorContentDiff';
 
 export interface VaultTask {
     taskId: string;
@@ -107,54 +108,18 @@ export class FileOperation   {
      * Apply new content to an open editor as a minimal line-range replacement, so
      * the user's cursor, selection and undo history survive a sync write. Sync
      * writes touch one line at a time, so the replaced range is normally one line.
+     *
+     * The diff itself lives in editorContentDiff.ts and is unit-tested there.
      */
     private applyContentToEditor(editor: Editor, newContent: string): void {
-        const oldContent = editor.getValue();
-        if (oldContent === newContent) return;
+        const edit = computeLineRangeEdit(editor.getValue(), newContent);
+        if (!edit) return;
 
-        const oldLines = oldContent.split('\n');
-        const newLines = newContent.split('\n');
-
-        // Narrow to the lines that actually differ.
-        let start = 0;
-        while (start < oldLines.length && start < newLines.length && oldLines[start] === newLines[start]) {
-            start++;
+        if (edit.to) {
+            editor.replaceRange(edit.text, edit.from, edit.to);
+        } else {
+            editor.replaceRange(edit.text, edit.from);
         }
-        let oldEnd = oldLines.length - 1;
-        let newEnd = newLines.length - 1;
-        while (oldEnd >= start && newEnd >= start && oldLines[oldEnd] === newLines[newEnd]) {
-            oldEnd--;
-            newEnd--;
-        }
-
-        if (oldEnd < start) {
-            // Pure insertion of newLines[start..newEnd] before line `start`.
-            const inserted = newLines.slice(start, newEnd + 1).join('\n');
-            const lastLine = editor.lastLine();
-            if (start > lastLine) {
-                editor.replaceRange(`\n${inserted}`, { line: lastLine, ch: editor.getLine(lastLine).length });
-            } else {
-                editor.replaceRange(`${inserted}\n`, { line: start, ch: 0 });
-            }
-            return;
-        }
-
-        const from = { line: start, ch: 0 };
-        const to = { line: oldEnd, ch: oldLines[oldEnd].length };
-
-        if (newEnd < start) {
-            // Pure deletion — also consume the newline that joined the removed block.
-            if (oldEnd + 1 < oldLines.length) {
-                editor.replaceRange('', from, { line: oldEnd + 1, ch: 0 });
-            } else if (start > 0) {
-                editor.replaceRange('', { line: start - 1, ch: oldLines[start - 1].length }, to);
-            } else {
-                editor.replaceRange('', from, to);
-            }
-            return;
-        }
-
-        editor.replaceRange(newLines.slice(start, newEnd + 1).join('\n'), from, to);
     }
 
 	/**
