@@ -532,19 +532,87 @@ export class CacheOperation   {
      */
     async reclassifyMissingTaskIssues(
         onProgress?: (done: number, total: number) => void
-    ): Promise<{ completed: number; restored: number; stillMissing: number; unresolved: number }> {
+    ): Promise<{ migrated: number; completed: number; restored: number; stillMissing: number; unresolved: number }> {
         const todoistSyncAPI = this.plugin.todoistSyncAPI;
-        const result = { completed: 0, restored: 0, stillMissing: 0, unresolved: 0 };
+        const result = { migrated: 0, completed: 0, restored: 0, stillMissing: 0, unresolved: 0 };
         if (!todoistSyncAPI) return result;
 
-        const candidates = Object.entries(this.plugin.settings.taskFileMapping)
+        const allCandidates = Object.entries(this.plugin.settings.taskFileMapping)
             .filter(([, entry]) => {
                 const issue = (entry.issues as Record<string, { state?: string }> | undefined)?.todoist_task_missing;
                 return issue?.state === 'open';
             })
             .map(([taskId, entry]) => ({ taskId, filePath: entry.filePath }));
 
-        if (candidates.length === 0) return result;
+        if (allCandidates.length === 0) return result;
+
+        // A task carrying a pre-migration numeric Todoist ID is absent from the
+        // sync data simply because that data is keyed by the new IDs — the task is
+        // alive and well under a new one. Migrate those before concluding anything:
+        // looking one up by its old ID answers "missing", which would invite the
+        // user to delete a task that still exists.
+        const handled = new Set<string>();
+        const legacyCandidates = allCandidates.filter(({ taskId }) => /^\d+$/.test(taskId));
+        const restApi = this.plugin.todoistRestAPI;
+        const fileOperation = this.plugin.fileOperation;
+
+        if (legacyCandidates.length > 0 && restApi && fileOperation) {
+            let resolvedIds: Record<string, string> = {};
+            try {
+                resolvedIds = await restApi.resolveIds('tasks', legacyCandidates.map(({ taskId }) => taskId));
+            } catch (error) {
+                console.error('[reclassifyMissingTaskIssues] Legacy ID resolution failed:', error);
+            }
+
+            for (const { taskId, filePath } of legacyCandidates) {
+                const newId = resolvedIds[taskId];
+                if (!newId || newId === taskId) {
+                    // Todoist has no new ID for it. It may be genuinely gone, but an
+                    // unaddressable ID is not evidence of that, so say exactly that.
+                    await this.upsertTaskIssue(taskId, 'todoist_task_missing', {
+                        state: 'open',
+                        severity: 'medium',
+                        source: 'runtime',
+                        details: `Task uses a pre-migration Todoist ID (${taskId}) that Todoist could not map to a current one.`,
+                        manualAction: 'Open the task link: if Todoist still shows the task, run Safe Repair again once online.',
+                    }, false);
+                    handled.add(taskId);
+                    result.unresolved++;
+                    continue;
+                }
+
+                const vaultUpdated = await fileOperation.updateTaskIdInVault(filePath, taskId, newId);
+                if (!vaultUpdated) {
+                    this.plugin.debugLog(`[reclassifyMissingTaskIssues] Could not rewrite ${taskId} -> ${newId} in ${filePath}`);
+                    continue;
+                }
+
+                // Move the mapping onto the new ID, keeping the entry's history and
+                // dropping the issue that was only ever about the old ID.
+                const mapping = { ...this.plugin.settings.taskFileMapping };
+                const previous = mapping[taskId];
+                delete mapping[taskId];
+                mapping[newId] = {
+                    ...previous,
+                    filePath,
+                    status: 'active',
+                    syncEnabled: true,
+                    issues: undefined,
+                    createdAt: previous?.createdAt ?? Date.now(),
+                };
+                await this.plugin.safeSettings?.update({ taskFileMapping: mapping }, false);
+
+                this.plugin.logOperation?.log('FILE_TASK_ID_UPDATED', `Migrated legacy task ID ${taskId} -> ${newId}`, filePath, newId);
+                handled.add(taskId);
+                result.migrated++;
+            }
+        }
+
+        const candidates = allCandidates.filter(({ taskId }) => !handled.has(taskId));
+        if (candidates.length === 0) {
+            await this.plugin.safeSettings?.update({ taskFileMapping: this.plugin.settings.taskFileMapping }, true);
+            return result;
+        }
 
         // Look the states up concurrently — they are read-only — but apply the
         // mapping changes one at a time, since each is a read-modify-write of the
@@ -629,7 +697,7 @@ export class CacheOperation   {
         await this.plugin.safeSettings?.update({ taskFileMapping: this.plugin.settings.taskFileMapping }, true);
         this.plugin.logOperation?.log(
             'DATABASE_CHECKED',
-            `Re-checked ${candidates.length} missing-task issues: ${result.completed} completed, ${result.restored} restored, ${result.stillMissing} confirmed deleted, ${result.unresolved} unresolved`
+            `Re-checked ${allCandidates.length} missing-task issues: ${result.migrated} legacy IDs migrated, ${result.completed} completed, ${result.restored} restored, ${result.stillMissing} confirmed deleted, ${result.unresolved} unresolved`
         );
         return result;
     }

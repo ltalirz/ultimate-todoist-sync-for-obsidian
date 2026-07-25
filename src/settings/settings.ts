@@ -582,8 +582,9 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         const missingResult = await cacheOperation.reclassifyMissingTaskIssues((doneCount, total) => {
                             progressNotice.setMessage(`Step 3/4: Checking task ${doneCount}/${total} against Todoist...`);
                         });
-                        if (missingResult.completed + missingResult.restored + missingResult.stillMissing + missingResult.unresolved > 0) {
+                        if (missingResult.migrated + missingResult.completed + missingResult.restored + missingResult.stillMissing + missingResult.unresolved > 0) {
                             const missingParts: string[] = [];
+                            if (missingResult.migrated > 0) missingParts.push(`🆔 Legacy IDs migrated: ${missingResult.migrated}`);
                             if (missingResult.completed > 0) missingParts.push(`✅ Completed in Todoist: ${missingResult.completed}`);
                             if (missingResult.restored > 0) missingParts.push(`🔄 Restored to sync: ${missingResult.restored}`);
                             if (missingResult.stillMissing > 0) missingParts.push(`🗑️ Confirmed deleted: ${missingResult.stillMissing}`);

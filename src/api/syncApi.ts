@@ -1096,6 +1096,15 @@ export class TodoistSyncAPI   {
     if (!restApi) return 'unknown';
 
     const resolvedId = (await this.resolveLegacyId('tasks', taskId)) || taskId;
+
+    // A pre-migration numeric ID that Todoist could not map to a current one is
+    // unaddressable, so a lookup by it would 404 and read as "deleted" for a task
+    // that may be perfectly alive under its new ID. Refuse to guess.
+    if (/^\d+$/.test(taskId) && resolvedId === taskId) {
+      this.plugin.debugLog(`[TodoistSyncAPI] ${taskId} is an unresolved legacy ID; completion state unknown`);
+      return 'unknown';
+    }
+
     const state = await restApi.getTaskCompletionState(resolvedId);
     // Only terminal verdicts are cached. 'active' means the absence was transient,
     // so caching it would hide a completion that happens later in the session, and
