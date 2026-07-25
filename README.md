@@ -80,10 +80,17 @@ If you would rather install the plugin manually, you can do the following:
 
    Each direction can be independently enabled or disabled.
 
-4. **Full vault sync**
+4. **Reverse sync scope** (Todoist → Obsidian)
+   - *Completion only* (default): a task ticked off in Todoist gets ticked off in
+     your vault. Nothing else on the line is touched.
+   - *Everything*: also applies content, due date, priority and labels, and appends
+     Todoist comments as sub-items. These rewrite the task line — tag order and
+     spacing are normalised — and can overwrite text you edited in Obsidian.
+
+5. **Full vault sync**
    By enabling this option, the plugin will automatically add `#todoist` to all tasks in your vault.
 
-5. **Excluded folders**
+6. **Excluded folders**
    Select folders to exclude from Full Vault Sync. Template folders, hidden folders, and plugin storage are excluded automatically.
 
 
@@ -114,7 +121,7 @@ You can see the current file's default project in the status bar at the bottom r
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) (v16+)
+- [Node.js](https://nodejs.org/) (v18+ — `npm test` uses the built-in test runner)
 - npm
 - An Obsidian vault for testing
 
@@ -141,6 +148,34 @@ npm run build
 
 After each rebuild, reload Obsidian (`Ctrl/Cmd+P` → "Reload app without saving") or disable and re-enable the plugin in settings.
 
+### Tests
+
+```bash
+# Run the unit tests
+npm test
+
+# Run a single test file
+node --test tests/unit/editorContentDiff.test.mjs
+```
+
+`npm test` runs Node's built-in test runner over `tests/unit/`. A `pretest` step
+bundles the modules under test to `tests/.build/` first (they are TypeScript, and
+the tests import the compiled output), so run `npm test` rather than `node --test`
+on its own after changing source — or the tests will run against a stale bundle.
+
+Tests cover the pure decision logic that is expensive to get wrong and awkward to
+verify by hand in Obsidian:
+
+| Module | What is covered |
+| --- | --- |
+| `src/vault/editorContentDiff.ts` | The line-range edit used to write into an open editor. A wrong range corrupts the user's note, so this is checked against a fake editor that rejects out-of-range positions, over hand-written cases plus 20k randomised document pairs. |
+| `src/sync/vanishedTaskAction.ts` | What to do about a task missing from the Sync API response — completed in Todoist, deleted, or not yet synced. Getting it wrong either disables a live task or keeps pushing to a deleted one. |
+
+Logic that needs the Obsidian or Todoist API is not unit-tested; verify those by
+running the plugin against a real vault (see Manual Install below). When adding a
+test, prefer extracting the decision into a module with no `obsidian` import — that
+is what makes it importable from a test at all.
+
 ### Project Structure
 
 ```
@@ -154,6 +189,7 @@ src/
 ├── settings/        # Settings UI and migration
 ├── plugin/          # Event handlers and lifecycle
 └── ui/              # Modals (task manager, project picker)
+tests/unit/          # Unit tests (see Tests above)
 ```
 
 ### Manual Install
