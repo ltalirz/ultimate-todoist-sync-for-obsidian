@@ -13,6 +13,13 @@ export class ObsidianToTodoistSync {
      */
     private static readonly DELETE_GRACE_MS = 60 * 1000;
 
+    /**
+     * A task's own creation triggers follow-up writes of our own (close,
+     * description). A revision that moved this recently is far more likely to be
+     * one of those than a competing edit by a person.
+     */
+    private static readonly CONFLICT_GRACE_MS = 60 * 1000;
+
     constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
         this.app = app;
         this.plugin = plugin;
@@ -46,6 +53,61 @@ export class ObsidianToTodoistSync {
         }
 
         return file;
+    }
+
+    /**
+     * Decide whether a Todoist revision that moved since we last recorded it should
+     * stop an Obsidian-side push.
+     *
+     * A moved revision on its own says very little: only that the task changed at
+     * some point since we last looked. It does not say a person changed it, nor
+     * that the change collides with what Obsidian wants to write. Treating every
+     * mismatch as a conflict flagged tasks on a bare cursor move — lineNumberCheck
+     * fires on every arrow key, and fullTextModifiedTaskCheck walks every task line
+     * in the file — and left them disabled forever once any single revision refresh
+     * had been missed.
+     *
+     * `announce` marks outcomes the user chose via conflictResolutionStrategy, so
+     * the quiet automatic cases do not spam notices.
+     */
+    private decideConflict(
+        taskId: string,
+        taskMapping: { updated_at?: string; createdAt?: number },
+        savedTask: { updated_at?: string },
+        hasLocalChanges: boolean
+    ): { action: 'no-conflict' | 'push' | 'pull' | 'block'; announce: boolean } {
+        const quiet = (action: 'no-conflict' | 'push' | 'pull' | 'block') => ({ action, announce: false });
+
+        // No recorded revision means no basis for comparison.
+        if (!taskMapping.updated_at || !savedTask.updated_at) return quiet('no-conflict');
+        if (savedTask.updated_at === taskMapping.updated_at) return quiet('no-conflict');
+
+        // An unchanged line has nothing to overwrite, so there is nothing to
+        // conflict with. Leave the recorded revision stale on purpose: that is
+        // exactly what makes the pull direction pick the change up.
+        if (!hasLocalChanges) {
+            this.plugin.debugLog(`[decideConflict] Task ${taskId}: Todoist moved but Obsidian has no changes to push`);
+            return quiet('no-conflict');
+        }
+
+        const createdAt = taskMapping.createdAt;
+        if (createdAt && Date.now() - createdAt < ObsidianToTodoistSync.CONFLICT_GRACE_MS) {
+            this.plugin.debugLog(`[decideConflict] Task ${taskId}: revision moved inside its creation window, treating as our own write`);
+            return quiet('push');
+        }
+
+        // With the pull direction off the user has declared Obsidian the source of
+        // truth. Blocking on a Todoist change that will never be applied would
+        // disable the task permanently.
+        if (!this.plugin.settings.todoistToObsidianEnabled) {
+            this.plugin.debugLog(`[decideConflict] Task ${taskId}: Todoist→Obsidian disabled, pushing Obsidian's version`);
+            return quiet('push');
+        }
+
+        const strategy = this.plugin.settings.conflictResolutionStrategy;
+        if (strategy === 'todoist-wins') return { action: 'pull', announce: true };
+        if (strategy === 'obsidian-wins') return { action: 'push', announce: true };
+        return { action: 'block', announce: true };
     }
 
     async deletedTaskCheck(file_path: string): Promise<number> {
@@ -476,37 +538,41 @@ export class ObsidianToTodoistSync {
                 return;
             }
 
-            // Conflict detection: if Todoist was updated since our last sync
-            if (taskMapping.updated_at && savedTask.updated_at && savedTask.updated_at !== taskMapping.updated_at) {
-                const strategy = this.plugin.settings.conflictResolutionStrategy;
-                console.warn(`[lineModifiedTaskCheck] Conflict on task ${lineTask_todoist_id}: strategy=${strategy}`);
-                this.plugin.logOperation?.log('CONFLICT_DETECTED', `Conflict on task ${lineTask_todoist_id} (strategy: ${strategy})`, filepath, lineTask_todoist_id);
-
-                if (strategy === 'todoist-wins') {
-                    // Let toObsidian pull overwrite Obsidian on next sync — just update cached updated_at
-                    await cacheOperation.updateTaskMappingSyncMeta(lineTask_todoist_id, { updated_at: undefined });
-                    new Notice(`Conflict on task ${lineTask_todoist_id}: Todoist wins — Obsidian will be updated on next sync.`);
-                    return;
-                } else if (strategy === 'obsidian-wins') {
-                    // Force-update Todoist with Obsidian content — fall through to normal update logic below
-                    new Notice(`Conflict on task ${lineTask_todoist_id}: Obsidian wins — pushing to Todoist.`);
-                    // Reset cached updated_at so toObsidian won't overwrite back
-                    await cacheOperation.updateTaskMappingSyncMeta(lineTask_todoist_id, { updated_at: savedTask.updated_at });
-                    // fall through
-                } else {
-                    // manual: disable sync until user resolves
-                    await cacheOperation.setTaskFileMapping(lineTask_todoist_id, taskMapping.filePath, 'conflicted', false);
-                    new Notice(`Task ${lineTask_todoist_id} has a conflict: modified in both Obsidian and Todoist. Sync disabled until resolved.`);
-                    return;
-                }
-            }
-
             const lineTaskContent = lineTask.content;
             const contentModified = !taskParser.taskContentCompare(lineTask, savedTask);
             const tagsModified = !taskParser.taskTagCompare(lineTask, savedTask);
             const statusModified = !taskParser.taskStatusCompare(lineTask, savedTask);
             const dueDateModified = !taskParser.compareTaskDueDate(lineTask, savedTask);
             const priorityModified = !taskParser.taskPriorityCompare(lineTask, savedTask);
+            const hasLocalChanges = contentModified || tagsModified || statusModified || dueDateModified || priorityModified;
+
+            // Conflict detection: Todoist moved on since we last recorded it *and*
+            // Obsidian has something it wants to overwrite.
+            const conflict = this.decideConflict(lineTask_todoist_id, taskMapping, savedTask, hasLocalChanges);
+            if (conflict.action !== 'no-conflict' && conflict.announce) {
+                const strategy = this.plugin.settings.conflictResolutionStrategy;
+                console.warn(`[lineModifiedTaskCheck] Conflict on task ${lineTask_todoist_id}: strategy=${strategy}`);
+                this.plugin.logOperation?.log('CONFLICT_DETECTED', `Conflict on task ${lineTask_todoist_id} (strategy: ${strategy})`, filepath, lineTask_todoist_id);
+            }
+
+            if (conflict.action === 'pull') {
+                // Leaving the recorded revision stale is what makes the pull re-apply
+                // Todoist's version, so there is nothing to write here.
+                new Notice(`Conflict on task ${lineTask_todoist_id}: Todoist wins — Obsidian will be updated on next sync.`);
+                return;
+            }
+            if (conflict.action === 'block') {
+                await cacheOperation.setTaskFileMapping(lineTask_todoist_id, taskMapping.filePath, 'conflicted', false);
+                new Notice(`Task ${lineTask_todoist_id} has a conflict: modified in both Obsidian and Todoist. Sync disabled until resolved.`);
+                return;
+            }
+            if (conflict.action === 'push') {
+                // Record what we observed so the pull direction will not undo the push.
+                await cacheOperation.updateTaskMappingSyncMeta(lineTask_todoist_id, { updated_at: savedTask.updated_at });
+                if (conflict.announce) {
+                    new Notice(`Conflict on task ${lineTask_todoist_id}: Obsidian wins — pushing to Todoist.`);
+                }
+            }
 
             try {
                 let contentChanged = false;
@@ -679,19 +745,24 @@ export class ObsidianToTodoistSync {
                 return;
             }
 
-            if (taskMapping?.updated_at && savedTask.updated_at && savedTask.updated_at !== taskMapping.updated_at) {
-                const strategy = this.plugin.settings.conflictResolutionStrategy;
-                this.plugin.logOperation?.log('CONFLICT_DETECTED', `Conflict on closeTask ${taskId} (strategy: ${strategy})`, undefined, taskId);
-                if (strategy === 'todoist-wins') {
-                    await cacheOperation.updateTaskMappingSyncMeta(taskId, { updated_at: undefined });
+            if (taskMapping) {
+                // Todoist already being in the requested state means the checkbox
+                // click has nothing to push, so nothing can collide with it.
+                const conflict = this.decideConflict(taskId, taskMapping, savedTask, !savedTask.checked);
+                if (conflict.announce) {
+                    const strategy = this.plugin.settings.conflictResolutionStrategy;
+                    this.plugin.logOperation?.log('CONFLICT_DETECTED', `Conflict on closeTask ${taskId} (strategy: ${strategy})`, undefined, taskId);
+                }
+                if (conflict.action === 'pull') {
                     new Notice(`Conflict on task ${taskId}: Todoist wins — Obsidian will be updated on next sync.`);
                     return;
-                } else if (strategy === 'manual') {
+                }
+                if (conflict.action === 'block') {
                     await cacheOperation.setTaskFileMapping(taskId, taskMapping.filePath, 'conflicted', false);
                     new Notice(`Task ${taskId} has a conflict. Sync disabled until resolved.`);
                     return;
                 }
-                // obsidian-wins: fall through and close
+                // no-conflict / push: close it
             }
 
             await todoistSyncAPI.CloseTask(taskId);
@@ -745,19 +816,24 @@ export class ObsidianToTodoistSync {
                 return;
             }
 
-            if (taskMapping?.updated_at && savedTask.updated_at && savedTask.updated_at !== taskMapping.updated_at) {
-                const strategy = this.plugin.settings.conflictResolutionStrategy;
-                this.plugin.logOperation?.log('CONFLICT_DETECTED', `Conflict on repoenTask ${taskId} (strategy: ${strategy})`, undefined, taskId);
-                if (strategy === 'todoist-wins') {
-                    await cacheOperation.updateTaskMappingSyncMeta(taskId, { updated_at: undefined });
+            if (taskMapping) {
+                // Todoist already being in the requested state means the checkbox
+                // click has nothing to push, so nothing can collide with it.
+                const conflict = this.decideConflict(taskId, taskMapping, savedTask, !!savedTask.checked);
+                if (conflict.announce) {
+                    const strategy = this.plugin.settings.conflictResolutionStrategy;
+                    this.plugin.logOperation?.log('CONFLICT_DETECTED', `Conflict on repoenTask ${taskId} (strategy: ${strategy})`, undefined, taskId);
+                }
+                if (conflict.action === 'pull') {
                     new Notice(`Conflict on task ${taskId}: Todoist wins — Obsidian will be updated on next sync.`);
                     return;
-                } else if (strategy === 'manual') {
+                }
+                if (conflict.action === 'block') {
                     await cacheOperation.setTaskFileMapping(taskId, taskMapping.filePath, 'conflicted', false);
                     new Notice(`Task ${taskId} has a conflict. Sync disabled until resolved.`);
                     return;
                 }
-                // obsidian-wins: fall through and reopen
+                // no-conflict / push: reopen it
             }
 
             await todoistSyncAPI.OpenTask(taskId);
