@@ -18,7 +18,8 @@ export class TodoistToObsidianSync {
         this.plugin = plugin;
     }
 
-    async syncTodoistToObsidian(): Promise<void> {
+    /** @returns how many tasks were written to the vault. */
+    async syncTodoistToObsidian(): Promise<number> {
         try {
             this.plugin.logOperation?.log('SYNC_START', 'Starting sync from Todoist to Obsidian', undefined, undefined, 'todoist→obsidian');
 
@@ -27,7 +28,7 @@ export class TodoistToObsidianSync {
             const syncData = this.plugin.todoistSyncAPI!.getSyncData();
             if (!syncData?.items) {
                 this.plugin.debugLog('[Todoist→Obsidian] No sync data available');
-                return;
+                return 0;
             }
 
             const itemMap = new Map<string, any>();
@@ -111,10 +112,12 @@ export class TodoistToObsidianSync {
             if (syncedCount > 0) {
                 this.plugin.logOperation?.log('SYNC_COMPLETED', `Synced ${syncedCount} tasks from Todoist to Obsidian`);
             }
+            return syncedCount;
         } catch (err) {
             console.error('An error occurred while synchronizing:', err);
             this.plugin.logOperation?.log('SYNC_ERROR', `Sync failed: ${(err as Error).message}`, undefined, undefined, 'todoist→obsidian');
             new Notice(`Todoist sync failed: ${(err as Error).message}`);
+            return 0;
         }
     }
 

@@ -46,6 +46,7 @@ export class TodoistSyncAPI   {
 	private syncData: Record<string, any> | null = null;
 	// taskId → what a direct lookup said about a task missing from syncData.
 	private completionStateCache = new Map<string, 'completed' | 'missing'>();
+
 	// API-level sync lock — prevents concurrent incrementalSync/initializeSync
 	private _syncRunning = false;
 	private _syncDirty = false;
@@ -1050,6 +1051,15 @@ export class TodoistSyncAPI   {
       if (found) return found;
 
       if (!allowNetworkRefresh) {
+        return undefined;
+      }
+
+      // A task we already know is completed or deleted will never come back in a
+      // sync, so refreshing for it is a guaranteed-useless round trip. Without
+      // this, every settled task costs one full sync per pass that touches it.
+      const knownTerminal = this.completionStateCache.get(taskId);
+      if (knownTerminal) {
+        this.plugin.debugLog(`[TodoistSyncAPI] Skipping refresh for ${taskId}: known ${knownTerminal}`);
         return undefined;
       }
 

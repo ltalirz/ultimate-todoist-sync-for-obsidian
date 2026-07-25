@@ -4,6 +4,12 @@ export class SyncScheduler {
 	private plugin: UltimateTodoistSyncForObsidian;
 	private inProgress = false;
 
+	/**
+	 * Pause between the pull and push phases, so vault writes from the pull are
+	 * visible to the push. Only applied when the pull actually wrote something.
+	 */
+	private static readonly PULL_SETTLE_MS = 500;
+
 	constructor(plugin: UltimateTodoistSyncForObsidian) {
 		this.plugin = plugin;
 	}
@@ -32,12 +38,20 @@ export class SyncScheduler {
 				}
 			}
 
+			let pulledCount = 0;
 			await this.plugin.syncLockManager.run('todoistToObsidian', async () => {
-				await this.plugin.todoistToObsidian!.syncTodoistToObsidian();
+				pulledCount = await this.plugin.todoistToObsidian!.syncTodoistToObsidian();
 			});
 
 			await this.plugin.saveSettings();
-			await new Promise(resolve => setTimeout(resolve, 5000));
+
+			// Let vault writes from the pull settle before the push phase reads
+			// those files back. This used to be an unconditional 5s wait, which was
+			// the single largest cost of a sync pass even when the pull wrote
+			// nothing — and it is only needed when it did write.
+			if (pulledCount > 0) {
+				await new Promise(resolve => setTimeout(resolve, SyncScheduler.PULL_SETTLE_MS));
+			}
 
 			const filesToSync = this.getUniqueFiles();
 
