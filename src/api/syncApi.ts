@@ -44,6 +44,8 @@ export class TodoistSyncAPI   {
 	// Store complete raw API response
 	// Store complete raw API response
 	private syncData: Record<string, any> | null = null;
+	// taskId → what a direct lookup said about a task missing from syncData.
+	private completionStateCache = new Map<string, 'completed' | 'missing'>();
 	// API-level sync lock — prevents concurrent incrementalSync/initializeSync
 	private _syncRunning = false;
 	private _syncDirty = false;
@@ -1066,6 +1068,33 @@ export class TodoistSyncAPI   {
       console.error('Error getting task by id:', error);
       throw error;
     }
+  }
+
+  /**
+   * What became of a task that is not in the sync data: 'completed', 'active',
+   * 'missing', or 'unknown' when Todoist could not be reached.
+   *
+   * Results are cached for the session so a task that stays gone — which is the
+   * normal state for a completed one — costs one request rather than one per
+   * sync pass. 'unknown' is never cached, so a failed lookup is retried.
+   */
+  async GetTaskCompletionState(taskId: string): Promise<'completed' | 'active' | 'missing' | 'unknown'> {
+    const cached = this.completionStateCache.get(taskId);
+    if (cached) return cached;
+
+    const restApi = this.plugin.todoistRestAPI;
+    if (!restApi) return 'unknown';
+
+    const resolvedId = (await this.resolveLegacyId('tasks', taskId)) || taskId;
+    const state = await restApi.getTaskCompletionState(resolvedId);
+    // Only terminal verdicts are cached. 'active' means the absence was transient,
+    // so caching it would hide a completion that happens later in the session, and
+    // 'unknown' means the question was never answered.
+    if (state === 'completed' || state === 'missing') {
+      this.completionStateCache.set(taskId, state);
+    }
+    this.plugin.debugLog(`[TodoistSyncAPI] Completion state for ${taskId}: ${state}`);
+    return state;
   }
 
   // Local-only lookup: no network requests, returns undefined if not found

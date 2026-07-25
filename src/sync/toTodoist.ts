@@ -1,5 +1,6 @@
 import UltimateTodoistSyncForObsidian from "../../main";
 import { App, Editor, MarkdownView, Notice, TFile } from 'obsidian';
+import { resolveVanishedTask } from './vanishedTaskAction';
 
 export class ObsidianToTodoistSync {
     app: App;
@@ -506,25 +507,46 @@ export class ObsidianToTodoistSync {
 
             if (!cacheOperation.isTaskSyncEnabled(lineTask_todoist_id)) {
                 this.plugin.debugLog(`[lineModifiedTaskCheck] Sync disabled for task ${lineTask_todoist_id}, skipping modification`);
-                this.plugin.logOperation?.log('SYNC_DISABLED_SKIP', `User edit ignored: sync disabled for task ${lineTask_todoist_id}`, filepath, lineTask_todoist_id);
+                // Only worth an operation-log entry while the task still needs the
+                // user's attention. A settled ('nonActive') task is skipped on every
+                // scheduler pass forever, and logging that buries the whole log —
+                // 4696 of 4698 entries in one real vault were exactly this.
+                if (cacheOperation.getTaskFileMapping(lineTask_todoist_id)?.status !== 'nonActive') {
+                    this.plugin.logOperation?.log('SYNC_DISABLED_SKIP', `User edit ignored: sync disabled for task ${lineTask_todoist_id}`, filepath, lineTask_todoist_id);
+                }
                 return;
             }
 
             const savedTask = await todoistSyncAPI.GetTaskById(lineTask_todoist_id);
 
-            // Handle deleted task: task exists in cache but not in Todoist
+            // Not in the sync data. That does not mean deleted: a task completed in
+            // Todoist drops out of /api/v1/sync entirely rather than coming back
+            // with checked=true, so ask Todoist which it was before concluding.
             if (!savedTask) {
-                // If the task was just created (mapping exists but syncData not yet updated),
-                // skip silently rather than marking as issue. The incremental sync running
-                // in the background will populate syncData shortly.
-                const mappingAge = taskMapping.updated_at
-                    ? Date.now() - new Date(taskMapping.updated_at).getTime()
-                    : 0;
-                if (mappingAge < 30000) {
-                    this.plugin.debugLog(`[lineModifiedTaskCheck] Task ${lineTask_todoist_id} not in syncData yet (just created), skipping`);
+                const action = resolveVanishedTask({
+                    completionState: await todoistSyncAPI.GetTaskCompletionState(lineTask_todoist_id),
+                    vaultCompleted: lineTask.isCompleted === true,
+                    mappingAgeMs: taskMapping.createdAt === undefined
+                        ? undefined
+                        : Date.now() - taskMapping.createdAt,
+                    creationGraceMs: ObsidianToTodoistSync.CONFLICT_GRACE_MS,
+                });
+
+                if (action === 'complete-in-vault' || action === 'settle') {
+                    // Done in Todoist. Settle it rather than reporting a problem —
+                    // the pull direction ticks the checkbox when it is enabled.
+                    await cacheOperation.setTaskFileMapping(lineTask_todoist_id, taskMapping.filePath, 'nonActive', false);
+                    this.plugin.debugLog(`[lineModifiedTaskCheck] Task ${lineTask_todoist_id} is completed in Todoist, marking nonActive`);
+                    this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Task completed in Todoist: ${lineTask_todoist_id}`, filepath, lineTask_todoist_id, 'todoist→obsidian');
                     return;
                 }
-                console.warn(`[lineModifiedTaskCheck] Task ${lineTask_todoist_id} not found in Todoist (deleted?), marking as issue`);
+
+                if (action !== 'flag-missing') {
+                    this.plugin.debugLog(`[lineModifiedTaskCheck] Task ${lineTask_todoist_id} not in syncData and nothing concluded (${action}), skipping`);
+                    return;
+                }
+
+                console.warn(`[lineModifiedTaskCheck] Task ${lineTask_todoist_id} confirmed deleted in Todoist, marking as issue`);
                 await cacheOperation.setTaskFileMapping(lineTask_todoist_id, taskMapping.filePath, 'issue', false);
 				await cacheOperation.upsertTaskIssue(lineTask_todoist_id, 'todoist_task_missing', {
                     state: 'open',
@@ -733,6 +755,27 @@ export class ObsidianToTodoistSync {
             const savedTask = await todoistSyncAPI.GetTaskById(taskId);
 
             if (!savedTask) {
+                // Absent from the sync data may mean completed rather than deleted.
+                const action = resolveVanishedTask({
+                    completionState: await todoistSyncAPI.GetTaskCompletionState(taskId),
+                    vaultCompleted: true,
+                    mappingAgeMs: taskMapping?.createdAt === undefined
+                        ? undefined
+                        : Date.now() - taskMapping.createdAt,
+                    creationGraceMs: ObsidianToTodoistSync.CONFLICT_GRACE_MS,
+                });
+
+                if (action === 'complete-in-vault' || action === 'settle') {
+                    await cacheOperation.setTaskFileMapping(taskId, taskMapping?.filePath || '', 'nonActive', false);
+                    this.plugin.debugLog(`[closeTask] Task ${taskId} is already completed in Todoist, marking nonActive`);
+                    return;
+                }
+
+                if (action !== 'flag-missing') {
+                    this.plugin.debugLog(`[closeTask] Task ${taskId} not in syncData and nothing concluded (${action}), skipping`);
+                    return;
+                }
+
                 await cacheOperation.setTaskFileMapping(taskId, taskMapping?.filePath || '', 'issue', false);
 				await cacheOperation.upsertTaskIssue(taskId, 'todoist_task_missing', {
                     state: 'open',
@@ -804,6 +847,27 @@ export class ObsidianToTodoistSync {
             const savedTask = await todoistSyncAPI.GetTaskById(taskId);
 
             if (!savedTask) {
+                // Absent from the sync data may mean completed rather than deleted.
+                const action = resolveVanishedTask({
+                    completionState: await todoistSyncAPI.GetTaskCompletionState(taskId),
+                    vaultCompleted: false,
+                    mappingAgeMs: taskMapping?.createdAt === undefined
+                        ? undefined
+                        : Date.now() - taskMapping.createdAt,
+                    creationGraceMs: ObsidianToTodoistSync.CONFLICT_GRACE_MS,
+                });
+
+                if (action === 'complete-in-vault' || action === 'settle') {
+                    await cacheOperation.setTaskFileMapping(taskId, taskMapping?.filePath || '', 'nonActive', false);
+                    this.plugin.debugLog(`[repoenTask] Task ${taskId} is already completed in Todoist, marking nonActive`);
+                    return;
+                }
+
+                if (action !== 'flag-missing') {
+                    this.plugin.debugLog(`[repoenTask] Task ${taskId} not in syncData and nothing concluded (${action}), skipping`);
+                    return;
+                }
+
                 await cacheOperation.setTaskFileMapping(taskId, taskMapping?.filePath || '', 'issue', false);
 				await cacheOperation.upsertTaskIssue(taskId, 'todoist_task_missing', {
                     state: 'open',

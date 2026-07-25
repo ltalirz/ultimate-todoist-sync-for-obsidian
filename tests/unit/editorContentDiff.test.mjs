@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { computeLineRangeEdit } from '../.build/editorContentDiff.mjs';
+import { computeLineRangeEdit } from '../.build/vault/editorContentDiff.mjs';
 
 /** Minimal stand-in for Obsidian's Editor, strict about out-of-range positions. */
 class FakeEditor {

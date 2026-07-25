@@ -1,10 +1,17 @@
 import UltimateTodoistSyncForObsidian from "../../main";
 import { App, Notice } from 'obsidian';
 import { StoragePathManager } from '../storage/pathManager';
+import { resolveVanishedTask } from './vanishedTaskAction';
 
 export class TodoistToObsidianSync {
     app: App;
     plugin: UltimateTodoistSyncForObsidian;
+
+    /**
+     * A task created moments ago may not be in the sync data yet, so nothing is
+     * concluded about its absence inside this window.
+     */
+    private static readonly VANISHED_GRACE_MS = 60 * 1000;
 
     constructor(app: App, plugin: UltimateTodoistSyncForObsidian) {
         this.app = app;
@@ -56,8 +63,16 @@ export class TodoistToObsidianSync {
                     const task = itemMap.get(resolvedId) || itemMap.get(taskId);
 
                     if (!task || task.is_deleted) {
-                        if (this.plugin.settings.debugMode) {
-                            this.plugin.debugLog(`[Todoist→Obsidian] Task ${taskId} deleted or not found in sync data`);
+                        // Absent from the sync data does not mean deleted: completed
+                        // tasks drop out of /api/v1/sync entirely. Ask Todoist which
+                        // it was, so a task ticked off there gets ticked off here.
+                        try {
+                            const settled = await this.applyVanishedTask(taskId, mapping);
+                            if (!settled && this.plugin.settings.debugMode) {
+                                this.plugin.debugLog(`[Todoist→Obsidian] Task ${taskId} not in sync data, nothing concluded yet`);
+                            }
+                        } catch (error) {
+                            console.error(`[Todoist→Obsidian] Error resolving vanished task ${taskId}:`, error);
                         }
                         continue;
                     }
@@ -100,6 +115,71 @@ export class TodoistToObsidianSync {
             console.error('An error occurred while synchronizing:', err);
             this.plugin.logOperation?.log('SYNC_ERROR', `Sync failed: ${(err as Error).message}`, undefined, undefined, 'todoist→obsidian');
             new Notice(`Todoist sync failed: ${(err as Error).message}`);
+        }
+    }
+
+    /**
+     * Handle a mapped task that is no longer in the sync data.
+     *
+     * Returns true when the task reached a settled state (completed here too, or
+     * confirmed gone), false when nothing could be concluded and it should be
+     * looked at again on the next pass.
+     */
+    private async applyVanishedTask(
+        taskId: string,
+        mapping: { filePath: string; createdAt?: number }
+    ): Promise<boolean> {
+        const completionState = await this.plugin.todoistSyncAPI!.GetTaskCompletionState(taskId);
+        const vaultCompleted = await this.isTaskCompletedInVault(taskId, mapping.filePath);
+
+        const action = resolveVanishedTask({
+            completionState,
+            vaultCompleted,
+            mappingAgeMs: mapping.createdAt === undefined ? undefined : Date.now() - mapping.createdAt,
+            creationGraceMs: TodoistToObsidianSync.VANISHED_GRACE_MS,
+        });
+
+        switch (action) {
+            case 'complete-in-vault':
+                await this.plugin.fileOperation!.completeTaskInTheFile(taskId);
+                new Notice(`Task ${taskId} completed from Todoist`);
+                this.plugin.logOperation?.log('TODOIST_TASK_COMPLETED', `Task completed in Todoist: ${taskId}`, mapping.filePath, taskId, 'todoist→obsidian');
+                await this.settleCompletedTask(taskId, mapping.filePath);
+                return true;
+            case 'settle':
+                await this.settleCompletedTask(taskId, mapping.filePath);
+                return true;
+            case 'flag-missing':
+                // Genuinely deleted in Todoist while still open here. Leave the
+                // flagging to the push side and the database checker, which own the
+                // issue records and the user-facing resolution flow.
+                this.plugin.debugLog(`[Todoist→Obsidian] Task ${taskId} confirmed deleted in Todoist`);
+                return false;
+            case 'wait':
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * Mark a task done on both sides as settled: nothing left to sync, and not a
+     * problem needing the user's attention.
+     */
+    private async settleCompletedTask(taskId: string, filePath: string): Promise<void> {
+        await this.plugin.cacheOperation!.setTaskFileMapping(taskId, filePath, 'nonActive', false);
+        this.plugin.debugLog(`[Todoist→Obsidian] Task ${taskId} settled as completed on both sides`);
+    }
+
+    private async isTaskCompletedInVault(taskId: string, filePath: string): Promise<boolean> {
+        try {
+            const content = await this.plugin.fileOperation!.readLiveFileContent(filePath);
+            const line = content.split('\n').find(
+                (candidate) => candidate.includes(taskId) && this.plugin.taskParser!.hasTodoistTag(candidate)
+            );
+            return line ? /\[(x|X)\]/.test(line) : false;
+        } catch (error) {
+            this.plugin.debugLog(`[Todoist→Obsidian] Could not read vault state for ${taskId}: ${(error as Error).message}`);
+            return false;
         }
     }
 

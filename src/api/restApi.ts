@@ -268,6 +268,36 @@ export class TodoistRestAPI  {
     
 
  
+    /**
+     * Ask Todoist directly what became of a task, for tasks that are absent from
+     * the sync response.
+     *
+     * `/api/v1/sync` only returns active items, so a task completed in Todoist
+     * disappears from it entirely instead of coming back with checked=true — which
+     * is indistinguishable from deletion without asking. This lookup is definitive
+     * regardless of how long ago the task was completed, unlike a completed-tasks
+     * query over a date window.
+     *
+     * Never throws: transport, auth and rate-limit failures all report 'unknown',
+     * because the callers use this to decide whether to disable a task's sync and
+     * must not do that on the strength of a failed request.
+     */
+    async getTaskCompletionState(taskId: string): Promise<'completed' | 'active' | 'missing' | 'unknown'> {
+        if (!taskId) return 'unknown';
+
+        try {
+            const task = await this.initializeAPI().getTask(taskId);
+            if (!task) return 'missing';
+            if ((task as { isDeleted?: boolean }).isDeleted) return 'missing';
+            return task.checked ? 'completed' : 'active';
+        } catch (error) {
+            const statusCode = (error as { httpStatusCode?: number })?.httpStatusCode;
+            if (statusCode === 404) return 'missing';
+            console.warn(`[TodoistRestAPI] Could not determine completion state for ${taskId}:`, error);
+            return 'unknown';
+        }
+    }
+
     // get a task by Id
     async getTaskById(taskId: string) {
       const api = this.initializeAPI()
