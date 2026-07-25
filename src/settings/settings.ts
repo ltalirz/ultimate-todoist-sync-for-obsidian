@@ -518,7 +518,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Fix Database')
-            .setDesc('Run safe auto-repair for eligible issues only: (A) repair missing/stale mapping when Vault and Todoist already match, (B) mark completed-in-Vault and confirmed-missing-in-Todoist tasks as nonActive. Then re-check and report what still needs manual handling.')
+            .setDesc('Run safe auto-repair for eligible issues only: (A) repair missing/stale mapping when Vault and Todoist already match, (B) mark completed-in-Vault and confirmed-missing-in-Todoist tasks as nonActive, (C) re-check every task reported missing in Todoist by asking Todoist directly — tasks merely completed there are settled, and ones Todoist still has are put back into sync. Then re-check and report what still needs manual handling.')
             .addButton(button => button
                 .setButtonText('Run Safe Repair')
                 .onClick(async () => {
@@ -566,7 +566,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                             return;
                         }
 
-                        progressNotice.setMessage(`Step 2/3: Found ${before.totalIssues} issues. Applying safe auto-repair...`);
+                        progressNotice.setMessage(`Step 2/4: Found ${before.totalIssues} issues. Applying safe auto-repair...`);
                         const autoRepairResult = await cacheOperation.applyMatchFirstAutoRepairs(before.issues as DatabaseCheckIssue[], true);
                         const autoRepairParts: string[] = [];
                         autoRepairParts.push(`🔧 Mapping repaired: ${autoRepairResult.mappingRepaired}`);
@@ -576,9 +576,24 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         }
                         new Notice(autoRepairParts.join(' · '), 7000);
 
-                        progressNotice.setMessage('Step 3/3: Re-checking database...');
+                        // Ask Todoist directly about every task flagged as missing:
+                        // most of them were merely completed there.
+                        progressNotice.setMessage('Step 3/4: Re-checking tasks reported missing in Todoist...');
+                        const missingResult = await cacheOperation.reclassifyMissingTaskIssues((doneCount, total) => {
+                            progressNotice.setMessage(`Step 3/4: Checking task ${doneCount}/${total} against Todoist...`);
+                        });
+                        if (missingResult.completed + missingResult.restored + missingResult.stillMissing + missingResult.unresolved > 0) {
+                            const missingParts: string[] = [];
+                            if (missingResult.completed > 0) missingParts.push(`✅ Completed in Todoist: ${missingResult.completed}`);
+                            if (missingResult.restored > 0) missingParts.push(`🔄 Restored to sync: ${missingResult.restored}`);
+                            if (missingResult.stillMissing > 0) missingParts.push(`🗑️ Confirmed deleted: ${missingResult.stillMissing}`);
+                            if (missingResult.unresolved > 0) missingParts.push(`❓ Could not check: ${missingResult.unresolved}`);
+                            new Notice(missingParts.join(' · '), 8000);
+                        }
+
+                        progressNotice.setMessage('Step 4/4: Re-checking database...');
                         const after = await databaseChecker.checkDatabase((msg) => {
-                            progressNotice.setMessage(`Step 3/3: ${msg}`);
+                            progressNotice.setMessage(`Step 4/4: ${msg}`);
                         });
                         await this.applyDatabaseIssuesToMapping(after);
                         progressNotice.hide();

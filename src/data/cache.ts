@@ -517,6 +517,103 @@ export class CacheOperation   {
         return changed;
     }
 
+    /**
+     * Re-judge every task currently flagged "missing in Todoist" by asking Todoist
+     * about it directly.
+     *
+     * These issues were raised on the assumption that absence from the sync data
+     * means deletion. It does not: a completed task drops out of /api/v1/sync
+     * entirely, so a routine tick-off in Todoist produced an issue demanding
+     * manual attention. Vaults carry hundreds of these.
+     *
+     * Deleting them is the wrong answer, and with Full Vault Sync on it is worse
+     * than a no-op: the delete unbinds the line, the next pass re-tags it, and the
+     * task comes back as a brand new open task in Todoist.
+     */
+    async reclassifyMissingTaskIssues(
+        onProgress?: (done: number, total: number) => void
+    ): Promise<{ completed: number; restored: number; stillMissing: number; unresolved: number }> {
+        const todoistSyncAPI = this.plugin.todoistSyncAPI;
+        const result = { completed: 0, restored: 0, stillMissing: 0, unresolved: 0 };
+        if (!todoistSyncAPI) return result;
+
+        const candidates = Object.entries(this.plugin.settings.taskFileMapping)
+            .filter(([, entry]) => {
+                const issue = (entry.issues as Record<string, { state?: string }> | undefined)?.todoist_task_missing;
+                return issue?.state === 'open';
+            })
+            .map(([taskId, entry]) => ({ taskId, filePath: entry.filePath }));
+
+        if (candidates.length === 0) return result;
+
+        // Look the states up concurrently — they are read-only — but apply the
+        // mapping changes one at a time, since each is a read-modify-write of the
+        // whole settings object.
+        const CONCURRENCY = 4;
+        const states = new Map<string, string>();
+        let done = 0;
+        for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+            const batch = candidates.slice(i, i + CONCURRENCY);
+            await Promise.all(batch.map(async ({ taskId }) => {
+                try {
+                    states.set(taskId, await todoistSyncAPI.GetTaskCompletionState(taskId));
+                } catch (error) {
+                    console.error(`[reclassifyMissingTaskIssues] Lookup failed for ${taskId}:`, error);
+                    states.set(taskId, 'unknown');
+                }
+                done++;
+                onProgress?.(done, candidates.length);
+            }));
+        }
+
+        for (const { taskId, filePath } of candidates) {
+            const state = states.get(taskId);
+
+            if (state === 'completed') {
+                // Done in Todoist. Reflect that in the vault, then record it as a
+                // settled non-active task rather than a problem. The issue must be
+                // resolved first: status is derived from the open issues.
+                try {
+                    await this.plugin.fileOperation?.completeTaskInTheFile(taskId);
+                } catch (error) {
+                    console.warn(`[reclassifyMissingTaskIssues] Could not tick ${taskId} in the vault:`, error);
+                }
+                await this.resolveTaskIssues(taskId, (issueType) => issueType === 'todoist_task_missing', false);
+                await this.upsertTaskIssue(taskId, 'task_marked_nonactive', {
+                    state: 'open',
+                    severity: 'low',
+                    source: 'runtime',
+                    details: 'Task was completed in Todoist.',
+                }, false);
+                result.completed++;
+                continue;
+            }
+
+            if (state === 'active') {
+                // Todoist has it, open. The task was never missing — the sync data
+                // was simply stale when it was flagged. Put it back into sync.
+                await this.resolveTaskIssues(taskId, (issueType) => issueType === 'todoist_task_missing', false);
+                await this.setTaskFileMapping(taskId, filePath, 'active', true);
+                result.restored++;
+                continue;
+            }
+
+            if (state === 'missing') {
+                result.stillMissing++;
+                continue;
+            }
+
+            result.unresolved++;
+        }
+
+        await this.plugin.safeSettings?.update({ taskFileMapping: this.plugin.settings.taskFileMapping }, true);
+        this.plugin.logOperation?.log(
+            'DATABASE_CHECKED',
+            `Re-checked ${candidates.length} missing-task issues: ${result.completed} completed, ${result.restored} restored, ${result.stillMissing} confirmed deleted, ${result.unresolved} unresolved`
+        );
+        return result;
+    }
+
     async applyMatchFirstAutoRepairs(resultIssues: DatabaseCheckIssueLike[], shouldSave = true): Promise<MatchFirstAutoRepairResult> {
         const taskFileMapping = { ...this.plugin.settings.taskFileMapping };
         const touchedTaskIds = new Set<string>();
