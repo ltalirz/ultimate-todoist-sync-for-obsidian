@@ -792,6 +792,8 @@ export class ObsidianToTodoistSync {
             return;
         }
 
+        const updatedTaskIds: string[] = [];
+
         for (const taskId of taskIds) {
             try {
                 const taskMapping = cacheOperation.getTaskFileMapping(taskId);
@@ -804,10 +806,28 @@ export class ObsidianToTodoistSync {
                     }
 
                     await todoistSyncAPI.UpdateTask(taskId, { description });
+                    updatedTaskIds.push(taskId);
                     this.plugin.logOperation?.log('TODOIST_TASK_UPDATED', `Updated task description: ${taskId}`, filepath, taskId, 'obsidian→todoist');
                 }
             } catch (error) {
                 console.error(`Error updating task description for ${taskId}:`, error);
+            }
+        }
+
+        // Each description push bumps the Todoist revision. Without recording the
+        // new value the mapping goes stale and every one of these tasks reports a
+        // phantom conflict on its next edit.
+        if (updatedTaskIds.length > 0) {
+            try {
+                await todoistSyncAPI.incrementalSync();
+                for (const taskId of updatedTaskIds) {
+                    const refreshedTask = todoistSyncAPI.getTaskByIdLocal(taskId);
+                    if (refreshedTask?.updated_at) {
+                        await cacheOperation.updateTaskMappingSyncMeta(taskId, { updated_at: refreshedTask.updated_at });
+                    }
+                }
+            } catch (syncErr) {
+                console.error('[updateTaskDescription] Post-push incremental sync failed:', syncErr);
             }
         }
     }
