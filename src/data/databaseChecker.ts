@@ -199,19 +199,6 @@ export class DatabaseChecker {
         }
     }
 
-	private async confirmTodoistTaskMissing(taskId: string): Promise<boolean> {
-		const todoistSyncAPI = this.plugin.todoistSyncAPI;
-		if (!todoistSyncAPI) return false;
-
-		try {
-			const task = await todoistSyncAPI.GetTaskById(taskId, { allowNetworkRefresh: false });
-			return !task;
-		} catch (error) {
-			console.error(`[DatabaseChecker] confirmTodoistTaskMissing failed for ${taskId}:`, error);
-			return false;
-		}
-	}
-
     /**
      * 主检查方法 - 执行完整的数据库一致性检查
      * 
@@ -777,28 +764,22 @@ export class DatabaseChecker {
                 }
 
                 if (vaultTask.isCompleted) {
-                    const missingConfirmed = await this.confirmTodoistTaskMissing(taskId);
-                    if (missingConfirmed) {
-                        emitIssue({
-                            type: 'task_marked_nonactive',
-                            filePath: vaultTask.filePath,
-                            taskId,
-                            lineNumber: vaultTask.lineNumber,
-                            details: 'Task is completed in Vault and confirmed missing in Todoist',
-                            obsidianContent: vaultTask.content,
-                            obsidianStatus: vaultTask.isCompleted,
-                        });
-                    } else {
-                        emitIssue({
-                            type: 'issue_source_unconfirmed',
-                            filePath: vaultTask.filePath,
-                            taskId,
-                            lineNumber: vaultTask.lineNumber,
-                            details: 'Task appears missing in Todoist cache but could not be confirmed via direct lookup',
-                            obsidianContent: vaultTask.content,
-                            obsidianStatus: vaultTask.isCompleted,
-                        });
-                    }
+                    // Completed here and absent from the sync data is the normal end
+                    // state, not a discrepancy: /api/v1/sync only returns active
+                    // items, so every task ever completed leaves it. This used to be
+                    // put to a direct lookup, and anything that lookup could not
+                    // confirm — including every failure of it — was escalated to
+                    // "source unconfirmed", turning ordinary finished tasks into
+                    // problems demanding attention.
+                    emitIssue({
+                        type: 'task_marked_nonactive',
+                        filePath: vaultTask.filePath,
+                        taskId,
+                        lineNumber: vaultTask.lineNumber,
+                        details: 'Task is completed in Vault and no longer in the Todoist active set',
+                        obsidianContent: vaultTask.content,
+                        obsidianStatus: vaultTask.isCompleted,
+                    });
                 } else {
                     emitIssue({
                         type: 'todoist_task_missing',
