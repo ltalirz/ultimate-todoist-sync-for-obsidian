@@ -323,6 +323,23 @@ export class TodoistSyncAPI   {
     return await this.plugin.todoistRestAPI?.resolveId(objName, id);
   }
 
+	// Waiters must be drained *after* the run completes, not captured before it:
+	// callers that join while a sync is in flight push themselves onto the queue
+	// during the run, and would otherwise stay pending until some later sync
+	// happened to drain them — hanging every `await incrementalSync()` and, with
+	// it, the sync lock its caller is holding.
+	private resolveSyncWaiters(): void {
+		for (const waiter of this._syncWaiters.splice(0)) {
+			waiter.resolve();
+		}
+	}
+
+	private rejectSyncWaiters(error: unknown): void {
+		for (const waiter of this._syncWaiters.splice(0)) {
+			waiter.reject(error);
+		}
+	}
+
 	async initializeSync(): Promise<void> {
 		// Route through incrementalSync lock so concurrent callers wait
 		if (this._syncRunning) {
@@ -333,15 +350,15 @@ export class TodoistSyncAPI   {
 		}
 		this._syncRunning = true;
 		this._syncDirty = false;
-		const waiters = this._syncWaiters.splice(0);
 		try {
 			const data = await this.getAllResources(true);
 			this.syncData = data;
 			await this.plugin.safeSettings?.update({ syncDataCache: data }, true);
 			this.plugin.debugLog('[TodoistSyncAPI] Sync initialized with full data and cached');
-			waiters.forEach(w => w.resolve());
+			// A full sync answers every waiter, including those that joined mid-run.
+			this.resolveSyncWaiters();
 		} catch (error) {
-			waiters.forEach(w => w.reject(error));
+			this.rejectSyncWaiters(error);
 			throw error;
 		} finally {
 			this._syncRunning = false;
@@ -363,7 +380,6 @@ export class TodoistSyncAPI   {
 
 		this._syncRunning = true;
 		this._syncDirty = false;
-		const waiters = this._syncWaiters.splice(0);
 		try {
 			do {
 				this._syncDirty = false;
@@ -381,10 +397,12 @@ export class TodoistSyncAPI   {
 				await this.plugin.safeSettings?.update({ syncDataCache: this.syncData }, true);
 				this.plugin.debugLog('[TodoistSyncAPI] Incremental sync completed and cached');
 			} while (this._syncDirty);
-			waiters.forEach(w => w.resolve());
+			// Loop condition guarantees anyone who joined mid-run got a fetch that
+			// started after their change landed.
+			this.resolveSyncWaiters();
 		} catch (error) {
 			console.error('[TodoistSyncAPI] Incremental sync failed:', error);
-			waiters.forEach(w => w.reject(error));
+			this.rejectSyncWaiters(error);
 			throw error;
 		} finally {
 			this._syncRunning = false;
