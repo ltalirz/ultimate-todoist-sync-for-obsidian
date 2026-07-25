@@ -599,6 +599,13 @@ export class CacheOperation   {
                     syncEnabled: true,
                     issues: undefined,
                     createdAt: previous?.createdAt ?? Date.now(),
+                    // Deliberately not carried over: the recorded revision belongs
+                    // to the old id, so keeping it would read as "Todoist changed
+                    // behind our back" on this task's very next edit. Undefined
+                    // means "no basis for comparison", and the next sync records
+                    // the real one.
+                    updated_at: undefined,
+                    note_count: undefined,
                 };
                 await this.plugin.safeSettings?.update({ taskFileMapping: mapping }, false);
 

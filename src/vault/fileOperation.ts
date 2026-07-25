@@ -869,6 +869,16 @@ export class FileOperation   {
                 hasChanges = true;
                 console.log('[updateTaskIdInVault] replaced new web url');
             }
+
+            // Todoist's pre-migration URL, camel-cased as showTask. The shape itself
+            // is retired — following one now gets "this link will stop working" —
+            // so swap the whole URL rather than just the id inside it.
+            const legacyShowTaskPattern = new RegExp(`https?://todoist\\.com/showTask\\?id=${oldId}\\b`, 'gi');
+            if (legacyShowTaskPattern.test(line)) {
+                line = line.replace(legacyShowTaskPattern, `https://app.todoist.com/app/task/${newId}`);
+                hasChanges = true;
+                console.log('[updateTaskIdInVault] replaced legacy showTask url');
+            }
             
             if (!hasChanges) {
                 console.warn(`[updateTaskIdInVault] No ID patterns found for ${oldId} in ${filePath}`);
