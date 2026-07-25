@@ -229,7 +229,7 @@ export class ObsidianToTodoistSync {
             this.plugin.debugLog('[lastLineNewTaskCheck] Push blocked: not primary device');
             return;
         }
-        const { taskParser, cacheOperation, todoistSyncAPI } = this.requireServices();
+        const { taskParser, cacheOperation, todoistSyncAPI, fileOperation } = this.requireServices();
         if (!this.plugin.settings.enableFullVaultSync) return;
 
         const isTask = taskParser.isMarkdownTask(lineText);
@@ -290,14 +290,14 @@ export class ObsidianToTodoistSync {
             const link = this.plugin.settings.useAppURI ? `[link](todoist://task?id=${newTask.id})` : `[link](https://app.todoist.com/app/task/${newTask.id})`;
             const text = taskParser.addTodoistLink(text_with_out_link, link);
 
-            // Use vault.read + vault.modify since cursor is no longer on this line
-            const file = this.app.vault.getAbstractFileByPath(filepath);
-            const taskFile = this.requireTFile(file, 'lastLineNewTaskCheck');
-            const currentContent = await this.app.vault.read(taskFile);
+            // Read/write through the editor when one is open: the cursor has left
+            // this line, but the buffer is still the authoritative copy and a plain
+            // vault.modify would be undone by the next autosave.
+            const currentContent = await fileOperation.readLiveFileContent(filepath);
             const lines = currentContent.split('\n');
             if (lineNumber < lines.length) {
                 lines[lineNumber] = text;
-                await this.app.vault.modify(taskFile, lines.join('\n'));
+                await fileOperation.writeLiveFileContent(filepath, lines.join('\n'));
             }
 
             const saved = await this.plugin.saveSettings();
@@ -381,7 +381,7 @@ export class ObsidianToTodoistSync {
                         // Atomic: write file immediately after each task
                         const newContent = lines.join('\n');
                         await backupOperation?.backupFile(filepath);
-                        await this.app.vault.modify(file, newContent);
+                        await fileOperation.writeLiveFileContent(filepath, newContent);
 					const saved = await this.plugin.saveSettings();
 					if (!saved) {
 						console.warn('[fullTextNewTaskCheck] saveSettings skipped or failed');
@@ -395,8 +395,9 @@ export class ObsidianToTodoistSync {
                         } catch (syncErr) {
                             console.error('[fullTextNewTaskCheck] Post-push incremental sync failed:', syncErr);
                         }
-                        // Re-read file so subsequent iterations use the latest content
-                        const refreshed = await this.app.vault.read(file);
+                        // Re-read so subsequent iterations use the latest content —
+                        // live, since the write above may have gone to the editor.
+                        const refreshed = await fileOperation.readLiveFileContent(filepath);
                         lines = refreshed.split('\n');
 
                     } catch (error) {
