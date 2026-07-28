@@ -501,7 +501,11 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         verifyNotice.hide();
                         const todoistCount = this.plugin.todoistSyncAPI?.getSyncData()?.items?.length ?? 0;
                         const vaultCount = Object.keys(this.plugin.settings.taskFileMapping).length;
-                        const status = result.success ? '✅ Healthy' : `⚠️ ${result.totalIssues} issues`;
+                        const settledCount = result.summary.taskNonActive;
+                        const settledSuffix = settledCount > 0 ? ` + ${settledCount} settled` : '';
+                        const status = result.success
+                            ? `✅ Healthy${settledSuffix}`
+                            : `⚠️ ${result.actionableIssues} issues${settledSuffix}`;
                         new Notice(
                             `Verify complete — ${status}\nTodoist: ${todoistCount} tasks | Vault: ${vaultCount} mapped tasks`,
                             8000
@@ -598,8 +602,8 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         });
                         await this.applyDatabaseIssuesToMapping(after);
                         progressNotice.hide();
-                        const fixedCount = Math.max(0, before.totalIssues - after.totalIssues);
-                        const remainingCount = after.totalIssues;
+                        const fixedCount = Math.max(0, before.actionableIssues - after.actionableIssues);
+                        const remainingCount = after.actionableIssues;
                         await this.plugin.safeSettings?.update({
                             lastDatabaseCheckTime: Date.now()
                         }, true);

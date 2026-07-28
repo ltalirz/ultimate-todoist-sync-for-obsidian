@@ -122,6 +122,13 @@ export interface TodoistTask {
 export interface DatabaseCheckResult {
     success: boolean;               // 检查是否通过（无问题）
     totalIssues: number;            // 问题总数
+    /**
+     * Issues that actually need a decision. Excludes settled ones — a task
+     * completed in the vault and gone from Todoist's active set is a normal end
+     * state, not something to fix, and counting it made every launch report
+     * "database issues" for a healthy vault.
+     */
+    actionableIssues: number;
     issues: DatabaseCheckIssue[];   // 问题列表
     summary: {                      // 统计摘要
         // taskFileMapping 相关
@@ -335,13 +342,15 @@ export class DatabaseChecker {
 
             // 计算问题总数
             const totalIssues = Object.values(summary).reduce((a, b) => a + b, 0);
+            const actionableIssues = totalIssues - summary.taskNonActive;
             // 记录日志
-            this.plugin.logOperation?.log('DATABASE_CHECKED', `Database check completed: ${totalIssues} issues found`);
+            this.plugin.logOperation?.log('DATABASE_CHECKED', `Database check completed: ${actionableIssues} issues needing action, ${summary.taskNonActive} settled`);
 
             // ====== 生成报告 ======
             const reportPath = await this.generateReport({
-                success: totalIssues === 0,
+                success: actionableIssues === 0,
                 totalIssues,
+                actionableIssues,
                 issues,
                 summary,
                 step1Stats,
@@ -350,8 +359,9 @@ export class DatabaseChecker {
 
             // 返回检查结果
             return {
-                success: totalIssues === 0,
+                success: actionableIssues === 0,
                 totalIssues,
+                actionableIssues,
                 issues,
                 summary,
                 reportPath,
@@ -365,6 +375,7 @@ export class DatabaseChecker {
             return {
                 success: false,
                 totalIssues: 0,
+                actionableIssues: 0,
                 issues: [{
                     type: 'issue_unclassified',
                     details: `Database check failed: ${(error as Error).message}`
