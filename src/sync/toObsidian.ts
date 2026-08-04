@@ -235,12 +235,28 @@ export class TodoistToObsidianSync {
             this.plugin.logOperation?.log('TODOIST_TASK_REOPENED', `Task reopened in Todoist: ${taskId}`, mapping.filePath, taskId, 'todoist→obsidian');
         }
 
+        // The due date is applied in every scope, for the same reason as completion:
+        // its writer only swaps the date token (or inserts one before #todoist) and
+        // leaves the rest of the line alone. It also has to be pulled — a field that
+        // is not pulled but *is* pushed gets actively reverted in Todoist, because
+        // the next push sees the vault's older value as a local change.
+        const obsidianDueDate = this.plugin.taskParser!.getDueDateFromLineText(taskLine) || "";
+        const todoistDueDate = task.due?.date ? (this.plugin.taskParser!.ISOStringToLocalDateString(task.due.date) || "") : "";
+        if (obsidianDueDate !== todoistDueDate) {
+            await this.plugin.fileOperation!.syncTaskDueDateToFile(taskId, task.due?.date || "");
+            this.plugin.logOperation?.log('FILE_TASK_DUEDATE_SYNCED', `Synced due date: ${taskId}`, mapping.filePath, taskId, 'todoist→obsidian');
+        }
+
         // The remaining writers rebuild parts of the task line — content is a
         // substring replace, and the label and priority writers normalise tag
         // order and collapse runs of spaces — so they can reformat or overwrite
         // text the user edited in Obsidian. Only apply them in the full scope.
+        //
+        // Note the consequence of leaving them out: for those fields Obsidian stays
+        // authoritative, so a change made to them in Todoist is overwritten on the
+        // next push. That is the trade the limited scope makes.
         if (this.plugin.settings.todoistToObsidianScope !== 'full') {
-            this.plugin.debugLog(`[syncSingleTaskToObsidian] Task ${taskId}: status-only scope, leaving line text untouched`);
+            this.plugin.debugLog(`[syncSingleTaskToObsidian] Task ${taskId}: limited scope, leaving line text untouched`);
             return;
         }
 
@@ -248,13 +264,6 @@ export class TodoistToObsidianSync {
         if (obsidianContent && task.content && obsidianContent !== task.content) {
             await this.plugin.fileOperation!.syncTaskContentToFile(taskId, task.content);
             this.plugin.logOperation?.log('FILE_TASK_CONTENT_SYNCED', `Synced content: ${taskId}`, mapping.filePath, taskId, 'todoist→obsidian');
-        }
-
-        const obsidianDueDate = this.plugin.taskParser!.getDueDateFromLineText(taskLine) || "";
-        const todoistDueDate = task.due?.date ? (this.plugin.taskParser!.ISOStringToLocalDateString(task.due.date) || "") : "";
-        if (obsidianDueDate !== todoistDueDate) {
-            await this.plugin.fileOperation!.syncTaskDueDateToFile(taskId, task.due?.date || "");
-            this.plugin.logOperation?.log('FILE_TASK_DUEDATE_SYNCED', `Synced due date: ${taskId}`, mapping.filePath, taskId, 'todoist→obsidian');
         }
 
         const prioritySynced = await this.plugin.fileOperation!.syncTaskPriorityToFile(taskId, task.priority || 1);

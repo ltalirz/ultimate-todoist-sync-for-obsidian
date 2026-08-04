@@ -81,11 +81,15 @@ If you would rather install the plugin manually, you can do the following:
    Each direction can be independently enabled or disabled.
 
 4. **Reverse sync scope** (Todoist → Obsidian)
-   - *Completion only* (default): a task ticked off in Todoist gets ticked off in
-     your vault. Nothing else on the line is touched.
-   - *Everything*: also applies content, due date, priority and labels, and appends
-     Todoist comments as sub-items. These rewrite the task line — tag order and
-     spacing are normalised — and can overwrite text you edited in Obsidian.
+   - *Completion and due date* (default): a task ticked off or re-dated in Todoist
+     is updated in your vault. Nothing else on the line is touched.
+   - *Everything*: also applies content, priority and labels, and appends Todoist
+     comments as sub-items. These rewrite the task line — tag order and spacing are
+     normalised — and can overwrite text you edited in Obsidian.
+
+   Fields outside the chosen scope are owned by Obsidian: changing one of them in
+   Todoist is overwritten on the next push, since the vault's value reads as the
+   newer edit. This is why completion and due date are always pulled.
 
 5. **Full vault sync**
    By enabling this option, the plugin will automatically add `#todoist` to all tasks in your vault.

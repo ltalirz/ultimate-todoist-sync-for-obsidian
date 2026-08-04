@@ -370,7 +370,7 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                 reverseSyncWarningEl.textContent = '⚠️ Warning: in "Everything" scope, pulls rewrite the task line — tag order and spacing are normalised, and text you edited in Obsidian can be overwritten by the Todoist version. Back up your vault before relying on it.';
             } else if (enabled) {
                 reverseSyncWarningEl.style.cssText = 'margin: 6px 0 12px 0;';
-                reverseSyncWarningEl.textContent = 'Pulling completion status only: a task ticked in Todoist gets ticked in your vault, and nothing else on the line is touched.';
+                reverseSyncWarningEl.textContent = 'Pulling completion and due date: a task ticked or re-dated in Todoist is updated in your vault, and nothing else on the line is touched. Content, priority and labels stay owned by Obsidian — changing those in Todoist will be overwritten.';
             } else {
                 reverseSyncWarningEl.style.cssText = 'margin: 6px 0 12px 0;';
                 reverseSyncWarningEl.textContent = 'Changes made in Todoist are not applied to your vault. Note that with this off, a task edited in Todoist keeps its Obsidian version — the next edit here pushes over it.';
@@ -393,16 +393,16 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Reverse sync scope')
-            .setDesc('Completion only: tick/untick the checkbox, leaving the rest of the line alone. Everything: also apply content, due date, priority and labels, and append Todoist comments as sub-items.')
+            .setDesc('Completion and due date: tick/untick the checkbox and update the date, leaving the rest of the line alone. Everything: also apply content, priority and labels, and append Todoist comments as sub-items — note that fields left out here are owned by Obsidian, so changing them in Todoist gets overwritten on the next push.')
             .addDropdown(dropdown =>
                 dropdown
-                    .addOption('status', 'Completion only (recommended)')
-                    .addOption('full', 'Everything (content, due date, priority, labels, notes)')
+                    .addOption('status', 'Completion and due date (recommended)')
+                    .addOption('full', 'Everything (also content, priority, labels, notes)')
                     .setValue(this.plugin.settings.todoistToObsidianScope)
                     .onChange(async (value) => {
                         await this.plugin.safeSettings?.update({ todoistToObsidianScope: value as 'status' | 'full' }, true);
                         updateReverseSyncWarning();
-                        new Notice(`Reverse sync scope: ${value === 'full' ? 'everything' : 'completion only'}`);
+                        new Notice(`Reverse sync scope: ${value === 'full' ? 'everything' : 'completion and due date'}`);
                     })
             );
 
