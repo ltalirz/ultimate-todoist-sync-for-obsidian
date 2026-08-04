@@ -152,6 +152,22 @@ export class ObsidianToTodoistSync {
             return true;
         });
 
+        // In the limited scope a task that leaves the vault is forgotten here, not
+        // deleted there: the line may have been tidied away while the task is still
+        // being worked on in Todoist.
+        if (this.plugin.settings.obsidianToTodoistScope !== 'full' && tasksToDelete.length > 0) {
+            for (const taskId of tasksToDelete) {
+                await cacheOperation.deleteTaskFileMapping(taskId);
+                this.plugin.logOperation?.log('OBSIDIAN_TASK_DELETED', `Task line removed from vault; kept in Todoist and unlinked: ${taskId}`, filepath, taskId);
+            }
+            new Notice(`${tasksToDelete.length} task(s) removed from this note. They were kept in Todoist.`);
+            const savedUnlink = await this.plugin.saveSettings();
+            if (!savedUnlink) {
+                console.warn('[deletedTaskCheck] saveSettings skipped or failed');
+            }
+            return 0;
+        }
+
         let deletedCount = 0;
         for (const taskId of tasksToDelete) {
             try {
@@ -560,12 +576,18 @@ export class ObsidianToTodoistSync {
                 return;
             }
 
+            // In the limited scope Obsidian creates tasks and reflects completion;
+            // everything after that belongs to Todoist. Not comparing those fields
+            // at all is what keeps a vault line that has drifted from being pushed
+            // over work done in Todoist.
+            const pushesFieldEdits = this.plugin.settings.obsidianToTodoistScope === 'full';
+
             const lineTaskContent = lineTask.content;
-            const contentModified = !taskParser.taskContentCompare(lineTask, savedTask);
-            const tagsModified = !taskParser.taskTagCompare(lineTask, savedTask);
+            const contentModified = pushesFieldEdits && !taskParser.taskContentCompare(lineTask, savedTask);
+            const tagsModified = pushesFieldEdits && !taskParser.taskTagCompare(lineTask, savedTask);
             const statusModified = !taskParser.taskStatusCompare(lineTask, savedTask);
-            const dueDateModified = !taskParser.compareTaskDueDate(lineTask, savedTask);
-            const priorityModified = !taskParser.taskPriorityCompare(lineTask, savedTask);
+            const dueDateModified = pushesFieldEdits && !taskParser.compareTaskDueDate(lineTask, savedTask);
+            const priorityModified = pushesFieldEdits && !taskParser.taskPriorityCompare(lineTask, savedTask);
             const hasLocalChanges = contentModified || tagsModified || statusModified || dueDateModified || priorityModified;
 
             // Conflict detection: Todoist moved on since we last recorded it *and*

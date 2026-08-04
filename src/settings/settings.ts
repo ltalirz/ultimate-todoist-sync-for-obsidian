@@ -44,6 +44,12 @@ export interface UltimateTodoistSyncSettings {
     useAppURI: boolean;
     syncEnabled: boolean;
     obsidianToTodoistEnabled: boolean;
+    /**
+     * How much of a vault edit is pushed to Todoist after the task exists.
+     * 'create-and-complete' suits the common workflow where tasks are captured in
+     * Obsidian and then worked on in Todoist, which makes Todoist authoritative.
+     */
+    obsidianToTodoistScope: 'create-and-complete' | 'full';
     todoistToObsidianEnabled: boolean;
     /** What a Todoist→Obsidian pull is allowed to change in the vault. */
     todoistToObsidianScope: 'status' | 'full';
@@ -78,6 +84,7 @@ export const DEFAULT_SETTINGS: UltimateTodoistSyncSettings = {
     useAppURI: true,
     syncEnabled: true,
     obsidianToTodoistEnabled: true,
+    obsidianToTodoistScope: 'full',
     todoistToObsidianEnabled: false,
     todoistToObsidianScope: 'status',
     lastDatabaseCheckTime: null,
@@ -356,6 +363,22 @@ export class UltimateTodoistSyncSettingTab extends PluginSettingTab {
                         await this.plugin.safeSettings?.update({ obsidianToTodoistEnabled: value }, true);
                         updateSyncStatus();
                         new Notice(`Obsidian → Todoist ${value ? 'enabled' : 'disabled'}`);
+                    })
+            );
+
+        new Setting(containerEl)
+            .setName('Forward sync scope')
+            .setDesc('Everything: keep Todoist matching the vault line — edits to the text, due date, priority and labels are pushed, and removing the line deletes the task. Create and complete: send new tasks and completion only, leaving everything else to Todoist. Choose the latter if you capture tasks in Obsidian and then work on them in Todoist, since a vault line that has drifted will otherwise overwrite what you did there.')
+            .addDropdown(dropdown =>
+                dropdown
+                    .addOption('full', 'Everything (text, due date, priority, labels, deletions)')
+                    .addOption('create-and-complete', 'Create and complete only (Todoist owns the rest)')
+                    .setValue(this.plugin.settings.obsidianToTodoistScope)
+                    .onChange(async (value) => {
+                        await this.plugin.safeSettings?.update({ obsidianToTodoistScope: value as 'create-and-complete' | 'full' }, true);
+                        new Notice(value === 'full'
+                            ? 'Forward sync: pushing every field'
+                            : 'Forward sync: new tasks and completion only');
                     })
             );
 

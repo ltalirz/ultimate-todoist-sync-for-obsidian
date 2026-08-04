@@ -80,7 +80,19 @@ If you would rather install the plugin manually, you can do the following:
 
    Each direction can be independently enabled or disabled.
 
-4. **Reverse sync scope** (Todoist → Obsidian)
+4. **Forward sync scope** (Obsidian → Todoist)
+   - *Everything* (default): the vault line is kept as the source of truth — edits
+     to text, due date, priority and labels are pushed, and removing the line
+     deletes the task in Todoist.
+   - *Create and complete only*: new tasks and completion are sent, and nothing
+     else. Removing a line unlinks the task rather than deleting it.
+
+   Pick the second if you capture tasks in Obsidian and then work on them in
+   Todoist. Under *Everything*, a vault line that has drifted from the task — a
+   reworded title, a date changed in Todoist — is pushed back over the Todoist
+   version on the next sync.
+
+5. **Reverse sync scope** (Todoist → Obsidian)
    - *Completion and due date* (default): a task ticked off or re-dated in Todoist
      is updated in your vault. Nothing else on the line is touched.
    - *Everything*: also applies content, priority and labels, and appends Todoist
@@ -91,10 +103,10 @@ If you would rather install the plugin manually, you can do the following:
    Todoist is overwritten on the next push, since the vault's value reads as the
    newer edit. This is why completion and due date are always pulled.
 
-5. **Full vault sync**
+6. **Full vault sync**
    By enabling this option, the plugin will automatically add `#todoist` to all tasks in your vault.
 
-6. **Excluded folders**
+7. **Excluded folders**
    Select folders to exclude from Full Vault Sync. Template folders, hidden folders, and plugin storage are excluded automatically.
 
 

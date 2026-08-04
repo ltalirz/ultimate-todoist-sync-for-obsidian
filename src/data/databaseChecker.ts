@@ -452,6 +452,21 @@ export class DatabaseChecker {
             duplicateTask: 0
         };
 
+        // Only fields that some direction actually syncs are worth comparing. With
+        // Obsidian creating tasks and Todoist owning them afterwards, a differing
+        // title or label is the expected steady state, not a fault — reporting it
+        // buries the real problems under one entry per task worked on in Todoist.
+        const pushesFieldEdits = this.plugin.settings.obsidianToTodoistScope === 'full';
+        const pullsFieldEdits = this.plugin.settings.todoistToObsidianEnabled
+            && this.plugin.settings.todoistToObsidianScope === 'full';
+        const pullsDueDate = this.plugin.settings.todoistToObsidianEnabled;
+        const watches = {
+            content: pushesFieldEdits || pullsFieldEdits,
+            dueDate: pushesFieldEdits || pullsDueDate,
+            priority: pushesFieldEdits || pullsFieldEdits,
+            labels: pushesFieldEdits || pullsFieldEdits,
+        };
+
         const vaultFiles = new Set(this.app.vault.getFiles().map(file => file.path));
 
         let vaultWithMapping = 0;
@@ -624,7 +639,7 @@ export class DatabaseChecker {
 
                 let hasSemanticMismatch = false;
 
-                if (!taskParser.taskContentCompare(vaultTask, todoistTask)) {
+                if (watches.content && !taskParser.taskContentCompare(vaultTask, todoistTask)) {
                     emitIssue({
                         type: 'sync_content_mismatch',
                         filePath: vaultTask.filePath,
@@ -653,7 +668,7 @@ export class DatabaseChecker {
 
                 const vaultDueDate = vaultTask.dueDate || '';
                 const todoistDueDate = todoistTask.dueDate || '';
-                if (!taskParser.compareTaskDueDate(vaultTask, todoistTask)) {
+                if (watches.dueDate && !taskParser.compareTaskDueDate(vaultTask, todoistTask)) {
                     emitIssue({
                         type: 'sync_due_mismatch',
                         filePath: vaultTask.filePath,
@@ -668,7 +683,7 @@ export class DatabaseChecker {
 
                 const vaultPriority = vaultTask.priority || 1;
                 const todoistPriority = todoistTask.priority || 1;
-                if (!taskParser.taskPriorityCompare(vaultTask, todoistTask)) {
+                if (watches.priority && !taskParser.taskPriorityCompare(vaultTask, todoistTask)) {
                     emitIssue({
                         type: 'sync_priority_mismatch',
                         filePath: vaultTask.filePath,
@@ -683,7 +698,7 @@ export class DatabaseChecker {
 
                 const obsidianLabels = taskParser.normalizeLabelsForCompare(vaultTask.labels);
                 const todoistLabels = taskParser.normalizeLabelsForCompare(todoistTask.labels);
-                if (!taskParser.taskTagCompare(vaultTask, todoistTask)) {
+                if (watches.labels && !taskParser.taskTagCompare(vaultTask, todoistTask)) {
                     emitIssue({
                         type: 'sync_labels_mismatch',
                         filePath: vaultTask.filePath,
